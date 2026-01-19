@@ -5,15 +5,17 @@ import {
   Settings, 
   BarChart3, 
   Layers, 
-  Bell, 
   LogOut,
   ChevronRight
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-export const Sidebar: React.FC = () => {
-  const [activePath, setActivePath] = React.useState('/dashboard');
+interface SidebarProps {
+  currentPath: string;
+  onNavigate: (path: string) => void;
+}
 
+export const Sidebar: React.FC<SidebarProps> = ({ currentPath, onNavigate }) => {
   const navItems = [
     { icon: LayoutDashboard, label: 'Overview', path: '/dashboard' },
     { icon: Users, label: 'Customers', path: '/customers' },
@@ -44,15 +46,15 @@ export const Sidebar: React.FC = () => {
         {navItems.map((item) => (
           <button
             key={item.path}
-            onClick={() => setActivePath(item.path)}
+            onClick={() => onNavigate(item.path)}
             className={cn(
               "w-full flex items-center px-3 py-2 text-sm font-medium rounded-md group transition-colors",
-              activePath === item.path 
+              currentPath === item.path 
                 ? "bg-gray-100 text-primary" 
                 : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
             )}
           >
-            <item.icon className={cn("mr-3 h-5 w-5 flex-shrink-0", activePath === item.path ? "text-primary" : "text-gray-400 group-hover:text-gray-500")} />
+            <item.icon className={cn("mr-3 h-5 w-5 flex-shrink-0", currentPath === item.path ? "text-primary" : "text-gray-400 group-hover:text-gray-500")} />
             {item.label}
           </button>
         ))}
@@ -66,7 +68,11 @@ export const Sidebar: React.FC = () => {
         {bottomItems.map((item) => (
            <button
            key={item.path}
-           className="w-full flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900 group transition-colors"
+           onClick={() => onNavigate(item.path)}
+           className={cn(
+             "w-full flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900 group transition-colors",
+              currentPath === item.path ? "bg-gray-50 text-gray-900" : ""
+           )}
          >
            <item.icon className="mr-3 h-5 w-5 text-gray-400 group-hover:text-gray-500" />
            {item.label}
@@ -74,11 +80,11 @@ export const Sidebar: React.FC = () => {
         ))}
         
         {/* User Profile Snippet */}
-        <div className="mt-4 flex items-center px-3 py-3 rounded-lg border border-gray-100 bg-gray-50/50">
+        <div className="mt-4 flex items-center px-3 py-3 rounded-lg border border-gray-100 bg-gray-50/50 cursor-pointer hover:bg-gray-100 transition-colors">
           <div className="h-8 w-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-semibold text-xs mr-3">
             JD
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 text-left">
             <p className="text-sm font-medium text-gray-900 truncate">John Doe</p>
             <p className="text-xs text-gray-500 truncate">john@nexus.com</p>
           </div>

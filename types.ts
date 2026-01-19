@@ -26,16 +26,37 @@ export interface ChartDataPoint {
 }
 
 export interface SortConfig {
-  key: keyof User;
+  key: string;
   direction: 'asc' | 'desc';
 }
 
 export interface FilterConfig {
-  status?: UserStatus | 'all';
+  status?: string | 'all';
   search: string;
 }
 
 export interface ApiResponse<T> {
   data: T;
   error?: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  status: 'active' | 'churned' | 'lead';
+  spent: string;
+  lastOrder: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  status: 'in_progress' | 'completed' | 'paused' | 'planning';
+  dueDate: string;
+  budget: string;
+  completion: number;
+  members: number;
 }
