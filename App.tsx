@@ -1,35 +1,27 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
-import { Dashboard } from './components/Dashboard';
-import { Customers } from './components/pages/Customers';
-import { Projects } from './components/pages/Projects';
-import { Analytics } from './components/pages/Analytics';
-import { Settings } from './components/pages/Settings';
+import { Deals } from './pages/Deals';
+import { DealDetail } from './pages/DealDetail';
 
-const App: React.FC = () => {
-  const [currentPath, setCurrentPath] = useState('/dashboard');
+import { Dashboard } from './pages/Dashboard';
 
-  const renderContent = () => {
-    switch(currentPath) {
-        case '/dashboard': return <Dashboard />;
-        case '/customers': return <Customers />;
-        case '/projects': return <Projects />;
-        case '/analytics': return <Analytics />;
-        case '/settings': return <Settings />;
-        case '/logout': 
-            // Simple visual feedback for demo
-            setCurrentPath('/dashboard'); 
-            alert('Logged out (demo)');
-            return <Dashboard />;
-        default: return <Dashboard />;
-    }
-  }
-
+function App() {
   return (
-    <Layout currentPath={currentPath} onNavigate={setCurrentPath}>
-      {renderContent()}
-    </Layout>
+    <Router>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/deals" element={<Deals />} />
+          <Route path="/deals/:id" element={<DealDetail />} />
+          <Route path="/tasks" element={<div className="p-4">Tasks View (Coming Soon)</div>} />
+          <Route path="/analytics" element={<div className="p-4">Analytics View (Coming Soon)</div>} />
+          <Route path="/settings" element={<div className="p-4">Settings View (Coming Soon)</div>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </Router>
   );
-};
+}
 
 export default App;

@@ -1,19 +1,19 @@
-import React from 'react';
+import React, { ReactNode } from 'react';
 import { Sidebar } from './Sidebar';
+import { AskAnything } from './AskAnything';
 
 interface LayoutProps {
-  children: React.ReactNode;
-  currentPath: string;
-  onNavigate: (path: string) => void;
+  children: ReactNode;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, currentPath, onNavigate }) => {
+export const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="flex h-screen bg-gray-50 w-full overflow-hidden font-sans antialiased text-gray-900">
-      <Sidebar currentPath={currentPath} onNavigate={onNavigate} />
-      <div className="flex-1 flex flex-col h-full relative">
+    <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
+      <Sidebar />
+      <main className="flex-1 overflow-auto p-8 relative">
         {children}
-      </div>
+        <AskAnything />
+      </main>
     </div>
   );
 };
