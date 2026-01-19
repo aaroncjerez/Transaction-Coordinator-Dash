@@ -81,3 +81,31 @@ create table if not exists document_vectors (
 -- Indicies for performance
 create index on document_vectors using ivfflat (embedding vector_cosine_ops);
 create index on deal_vault(phone_number);
+
+-- Similarity Search Function
+create or replace function match_documents (
+  query_embedding vector(768),
+  match_threshold float,
+  match_count int,
+  filter_deal_id uuid
+)
+returns table (
+  id uuid,
+  content text,
+  similarity float
+)
+language plpgsql
+as $$
+begin
+  return query
+  select
+    document_vectors.id,
+    document_vectors.content,
+    1 - (document_vectors.embedding <=> query_embedding) as similarity
+  from document_vectors
+  where 1 - (document_vectors.embedding <=> query_embedding) > match_threshold
+  and document_vectors.deal_id = filter_deal_id
+  order by document_vectors.embedding <=> query_embedding
+  limit match_count;
+end;
+$$;

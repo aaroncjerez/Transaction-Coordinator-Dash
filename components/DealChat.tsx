@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Send, Sparkles, User, Bot } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface DealChatProps {
     dealId: string;
@@ -40,17 +41,39 @@ export const DealChat: React.FC<DealChatProps> = ({ dealId, dealName }) => {
         setInputValue('');
         setIsTyping(true);
 
-        // Simulate RAG Latency
-        setTimeout(() => {
+        setMessages(prev => [...prev, userMsg]);
+        setInputValue('');
+        setIsTyping(true);
+
+        try {
+            const { data, error } = await supabase.functions.invoke('ask-ai', {
+                body: {
+                    query: userMsg.content,
+                    deal_id: dealId
+                }
+            });
+
+            if (error) throw error;
+
             const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 sender: 'ai',
-                content: "I'm a simulated AI response. In the live version, I would query the `document_vectors` table for this deal to answer: \"" + userMsg.content + "\"",
+                content: data?.answer || "I apologize, but I couldn't process your request.",
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, aiMsg]);
+        } catch (error) {
+            console.error('Chat Error:', error);
+            const errorMsg: Message = {
+                id: (Date.now() + 1).toString(),
+                sender: 'ai',
+                content: "I encountered an error connecting to the intelligence server. Please try again.",
+                timestamp: new Date()
+            };
+            setMessages(prev => [...prev, errorMsg]);
+        } finally {
             setIsTyping(false);
-        }, 1500);
+        }
     };
 
     return (
@@ -70,8 +93,8 @@ export const DealChat: React.FC<DealChatProps> = ({ dealId, dealName }) => {
                             {msg.sender === 'user' ? <User size={16} className="text-gray-600" /> : <Bot size={16} className="text-blue-600" />}
                         </div>
                         <div className={`max-w-[80%] rounded-2xl p-4 text-sm leading-relaxed ${msg.sender === 'user'
-                                ? 'bg-gray-100 text-gray-900 rounded-tr-none'
-                                : 'bg-blue-50 text-gray-800 rounded-tl-none border border-blue-100'
+                            ? 'bg-gray-100 text-gray-900 rounded-tr-none'
+                            : 'bg-blue-50 text-gray-800 rounded-tl-none border border-blue-100'
                             }`}>
                             {msg.sender === 'ai' ? (
                                 <div dangerouslySetInnerHTML={{ __html: msg.content.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br/>') }} />

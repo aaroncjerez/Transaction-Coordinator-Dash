@@ -60,3 +60,14 @@ export interface Project {
   completion: number;
   members: number;
 }
+
+export interface Task {
+  id: string;
+  task_name: string;
+  status: 'To Do' | 'In Progress' | 'Done' | 'Canceled';
+  notes?: string;
+  assigned_to?: any;
+  created_at?: string;
+  deal_id?: string;
+  airtable_id?: string;
+}

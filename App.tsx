@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { Deals } from './pages/Deals';
 import { DealDetail } from './pages/DealDetail';
 
+import { Tasks } from './pages/Tasks';
 import { Dashboard } from './pages/Dashboard';
 
 function App() {
@@ -14,7 +15,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/deals" element={<Deals />} />
           <Route path="/deals/:id" element={<DealDetail />} />
-          <Route path="/tasks" element={<div className="p-4">Tasks View (Coming Soon)</div>} />
+          <Route path="/tasks" element={<Tasks />} />
           <Route path="/analytics" element={<div className="p-4">Analytics View (Coming Soon)</div>} />
           <Route path="/settings" element={<div className="p-4">Settings View (Coming Soon)</div>} />
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -68,22 +68,33 @@ def process_pdf(url: str, deal_id: str):
         if supabase_url and supabase_key:
             sb = create_client(supabase_url, supabase_key)
             
+            # Initialize Embedding Model
+            from vertexai.language_models import TextEmbeddingModel
+            embedding_model = TextEmbeddingModel.from_pretrained("text-embedding-004")
+            
             # Simple chunking (Split by paragraph for now)
+            # In production, use a text splitter with overlap
             chunks = response.text.split('\n\n')
             
             for i, chunk in enumerate(chunks):
                 if not chunk.strip(): continue
                 
-                # In a real app, generate embedding here (e.g. using VertexAI embeddings)
-                # embedding = generate_embedding(chunk)
-                
-                sb.table("document_vectors").insert({
-                    "deal_id": deal_id,
-                    "file_name": url.split('/')[-1],
-                    "content": chunk,
-                    "chunk_index": i,
-                    # "embedding": embedding 
-                }).execute()
+                # Generate Embedding
+                try:
+                    embeddings = embedding_model.get_embeddings([chunk])
+                    vector = embeddings[0].values
+                    
+                    sb.table("document_vectors").insert({
+                        "deal_id": deal_id,
+                        "file_name": url.split('/')[-1],
+                        "content": chunk,
+                        "chunk_index": i,
+                        "embedding": vector
+                    }).execute()
+                except Exception as emb_err:
+                    print(f"Embedding failed for chunk {i}: {emb_err}")
+                    continue
+                    
             print("Upserted vectors to Supabase.")
         else:
              print("Skipping Supabase upsert: Credentials missing.")
