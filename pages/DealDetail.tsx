@@ -35,6 +35,11 @@ export const DealDetail: React.FC = () => {
     const [selectedStage, setSelectedStage] = useState('');
     const [updatingStage, setUpdatingStage] = useState(false);
 
+    // Detail Editing State
+    const [isEditingDetails, setIsEditingDetails] = useState(false);
+    const [editedDeal, setEditedDeal] = useState<DealDetailData | null>(null);
+    const [updatingDetails, setUpdatingDetails] = useState(false);
+
     useEffect(() => {
         if (id) {
             fetchDealData(id);
@@ -86,7 +91,8 @@ export const DealDetail: React.FC = () => {
             // 4. Transform to State
             setDeal({
                 id: dealData.id,
-                deal_name: dealData.deal_type || 'Unnamed Deal',
+                deal_name: dealData.deal_name || 'Unnamed Deal',
+                deal_type: dealData.deal_type || 'Unclassified',
                 stage: dealData.stage || 'New',
                 county: dealData.county || '',
                 state: dealData.state || '',
@@ -228,9 +234,12 @@ export const DealDetail: React.FC = () => {
                 </button>
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">{deal.deal_name}</h1>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
+                        <span className="font-medium text-gray-700">{deal.deal_type}</span>
+                        <span>•</span>
                         <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-medium">{deal.stage}</span>
-                        <span className="text-sm text-gray-500">{deal.county}, {deal.state}</span>
+                        <span>•</span>
+                        <span>{deal.county}, {deal.state}</span>
                     </div>
                 </div>
                 <div className="ml-auto flex gap-2">
@@ -318,85 +327,142 @@ export const DealDetail: React.FC = () => {
             {/* Content */}
             <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] ${activeTab === 'assistant' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
                 {activeTab === 'details' && (
-                    <div className="grid grid-cols-2 gap-8">
-                        <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Financials</h3>
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span className="text-gray-500 flex items-center gap-2"><DollarSign size={16} /> Purchase Price</span>
-                                <span className="font-medium">${deal.purchase_price.toLocaleString()}</span>
-                            </div>
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span className="text-gray-500 flex items-center gap-2"><DollarSign size={16} /> Expected Sales</span>
-                                <span className="font-medium">${deal.expected_sales_price.toLocaleString()}</span>
-                            </div>
+                    <div className="relative">
+                        <div className="absolute -top-12 right-0">
+                            {isEditingDetails ? (
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setIsEditingDetails(false)}
+                                        className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+                                        disabled={updatingDetails}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleUpdateDetails}
+                                        disabled={updatingDetails}
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                                    >
+                                        {updatingDetails ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
+                                    </button>
+                                </div>
+                            ) : (
+                                <button
+                                    onClick={() => {
+                                        setEditedDeal(deal);
+                                        setIsEditingDetails(true);
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 shadow-sm"
+                                >
+                                    <Edit2 size={14} /> Edit Details
+                                </button>
+                            )}
                         </div>
 
-                        <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Dates & Contacts</h3>
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span className="text-gray-500 flex items-center gap-2"><Calendar size={16} /> Contract Date</span>
-                                <span className="font-medium">{deal.contract_date}</span>
+                        <div className="grid grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Financials</h3>
+                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Purchase Price</span>
+                                    {isEditingDetails && editedDeal ? (
+                                        <input
+                                            type="number"
+                                            value={editedDeal.purchase_price}
+                                            onChange={e => setEditedDeal({ ...editedDeal, purchase_price: Number(e.target.value) })}
+                                            className="w-2/3 border rounded px-2 py-1 text-right"
+                                        />
+                                    ) : (
+                                        <span className="font-medium">${deal.purchase_price.toLocaleString()}</span>
+                                    )}
+                                </div>
+                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Expected Sales</span>
+                                    {isEditingDetails && editedDeal ? (
+                                        <input
+                                            type="number"
+                                            value={editedDeal.expected_sales_price}
+                                            onChange={e => setEditedDeal({ ...editedDeal, expected_sales_price: Number(e.target.value) })}
+                                            className="w-2/3 border rounded px-2 py-1 text-right"
+                                        />
+                                    ) : (
+                                        <span className="font-medium">${deal.expected_sales_price.toLocaleString()}</span>
+                                    )}
+                                </div>
                             </div>
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span className="text-gray-500 flex items-center gap-2"><Calendar size={16} /> Close Date</span>
-                                <span className="font-medium">{deal.close_date}</span>
-                            </div>
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span className="text-gray-500 flex items-center gap-2">📱 Phone</span>
-                                <span className="font-medium">{deal.phone_number}</span>
-                            </div>
-                        </div>
 
-                        <div className="col-span-2 mt-4">
-                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">Notes</h3>
-                            <p className="text-gray-600 bg-gray-50 p-4 rounded-lg text-sm leading-relaxed">
-                                {deal.notes || 'No notes available.'}
-                            </p>
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Dates & Contacts</h3>
+                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Contract Date</span>
+                                    {isEditingDetails && editedDeal ? (
+                                        <input
+                                            type="date"
+                                            value={editedDeal.contract_date === 'TBD' ? '' : editedDeal.contract_date}
+                                            onChange={e => setEditedDeal({ ...editedDeal, contract_date: e.target.value })}
+                                            className="w-2/3 border rounded px-2 py-1 text-right"
+                                        />
+                                    ) : (
+                                        <span className="font-medium">{deal.contract_date}</span>
+                                    )}
+                                </div>
+                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Close Date</span>
+                                    {isEditingDetails && editedDeal ? (
+                                        <input
+                                            type="date"
+                                            value={editedDeal.close_date === 'TBD' ? '' : editedDeal.close_date}
+                                            onChange={e => setEditedDeal({ ...editedDeal, close_date: e.target.value })}
+                                            className="w-2/3 border rounded px-2 py-1 text-right"
+                                        />
+                                    ) : (
+                                        <span className="font-medium">{deal.close_date}</span>
+                                    )}
+                                </div>
+                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                    <span className="text-gray-500 flex items-center gap-2 w-1/3">📱 Phone</span>
+                                    {isEditingDetails && editedDeal ? (
+                                        <input
+                                            type="text"
+                                            value={editedDeal.phone_number || ''}
+                                            onChange={e => setEditedDeal({ ...editedDeal, phone_number: e.target.value })}
+                                            className="w-2/3 border rounded px-2 py-1 text-right"
+                                        />
+                                    ) : (
+                                        <span className="font-medium">{deal.phone_number}</span>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="col-span-2 mt-4">
+                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">Notes</h3>
+                                {isEditingDetails && editedDeal ? (
+                                    <textarea
+                                        value={editedDeal.notes || ''}
+                                        onChange={e => setEditedDeal({ ...editedDeal, notes: e.target.value })}
+                                        className="w-full border rounded-lg p-3 text-sm min-h-[100px]"
+                                    />
+                                ) : (
+                                    <p className="text-gray-600 bg-gray-50 p-4 rounded-lg text-sm leading-relaxed whitespace-pre-wrap">
+                                        {deal.notes || 'No notes available.'}
+                                    </p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}
 
                 {activeTab === 'files' && (
-                    <div className="space-y-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {FILE_CATEGORIES.map(category => {
-                            // Filter files by this category... 
-                            // Wait, `deal.files` is flattened and loses the key info, it only has 'type' (purchase, deed, etc).
-                            // But one 'type' like 'other' maps to multiple keys.
-                            // I need to change `deal.files` structure OR filter by type?
-                            // 'type' is ambiguous for 'other'.
-                            // I should filter by... name? No.
-
-                            // Better approach: Re-read the logic.
-                            // `fetchDealData` aggregated them. 
-                            // I should instead keep the RAW aggregated data or change how I access it.
-                            // But I can't easily change `fetchDealData` output without refactoring `DealDetailData` heavily.
-                            /* 
-                               Problem: `deal.files` items have `type` which is 'purchase', 'deed', 'plat', 'other'.
-                               FILE_CATEGORIES have `type` too.
-                               If I filter `deal.files` by `type`, checking if `file.type === category.type`:
-                               - purchase checks purchase -> OK
-                               - other checks other -> Sale Contract, Soil Test, HUD all get lumped invalidly?
-                               Yes.
-                               
-                               Solution: I need to know which CATEGORY key a file belongs to.
-                               I will update `fetchDealData` to include `categoryKey` in the file object.
-                            */
-
-                            /*
-                             For now, I will modify `fetchDealData` in a separate step or assume I can't filter correctly yet?
-                             I will update `fetchDealData` first!
-                             
-                             Actually, I can do it right here if I update the transform logic.
-                             I will update `fetchDealData` transform logic in a separate edit (lines 103-117).
-                             Then I can filter by `categoryKey`.
-                            */
-
                             const categoryFiles = deal.files.filter(f => (f as any).categoryKey === category.key);
 
                             return (
-                                <div key={category.key} className="space-y-3">
-                                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                                        <h3 className="text-sm font-semibold text-gray-900">{category.label}</h3>
+                                <div key={category.key} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col h-full hover:shadow-md transition-shadow">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                                            {category.label}
+                                            <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{categoryFiles.length}</span>
+                                        </h3>
                                         <div className="relative">
                                             <input
                                                 type="file"
@@ -406,27 +472,37 @@ export const DealDetail: React.FC = () => {
                                             />
                                             <label
                                                 htmlFor={`upload-${category.key}`}
-                                                className="cursor-pointer text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                                                className="cursor-pointer p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                                title="Upload File"
                                             >
-                                                <Plus size={14} /> Upload
+                                                <Plus size={18} />
                                             </label>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 gap-2">
+                                    <div className="flex-1 space-y-2 overflow-y-auto max-h-[300px] pr-1 scrollbar-thin">
                                         {categoryFiles.map((file, idx) => (
-                                            <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
-                                                <div className="flex items-center gap-3">
-                                                    <FileText size={16} className="text-gray-400" />
-                                                    <span className="text-sm text-gray-700 truncate max-w-[200px]">{file.name}</span>
+                                            <div key={idx} className="group flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-100 transition-colors">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    <div className="p-1.5 bg-white rounded border border-gray-200 text-blue-500">
+                                                        <FileText size={16} />
+                                                    </div>
+                                                    <span className="text-sm text-gray-700 truncate" title={file.name}>{file.name}</span>
                                                 </div>
-                                                <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs">
-                                                    View
+                                                <a
+                                                    href={file.url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-blue-600 transition-all"
+                                                >
+                                                    <ExternalLink size={14} />
                                                 </a>
                                             </div>
                                         ))}
                                         {categoryFiles.length === 0 && (
-                                            <p className="text-xs text-gray-400 italic pl-2">No files uploaded.</p>
+                                            <div className="h-24 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-100 rounded-lg bg-gray-50/50">
+                                                <span className="text-xs">No files</span>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

@@ -100,7 +100,7 @@ export const Dashboard: React.FC = () => {
       <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Deal Command Center</h1>
-          <p className="text-sm text-gray-500">Manage {filteredDeals.length} transactions</p>
+          <p className="text-sm text-gray-500">Manage {activeDealsCount} Active Deals</p>
         </div>
         <div className="flex items-center gap-3">
           <Button variant="outline" size="icon" onClick={handleRefresh}>

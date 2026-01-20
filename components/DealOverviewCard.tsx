@@ -21,7 +21,6 @@ const ATTACHMENT_FIELDS = [
 export const DealOverviewCard: React.FC<DealOverviewCardProps> = ({ deal, onStageUpdate }) => {
     const [tasks, setTasks] = useState<any[]>([]);
     const [loadingTasks, setLoadingTasks] = useState(true);
-    const [isUpdatingStage, setIsUpdatingStage] = useState(false);
 
     // Fetch Linked Tasks
     useEffect(() => {
@@ -39,15 +38,6 @@ export const DealOverviewCard: React.FC<DealOverviewCardProps> = ({ deal, onStag
         fetchTasks();
     }, [deal.airtable_id]);
 
-    const handleStageChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newStage = e.target.value;
-        setIsUpdatingStage(true);
-        try {
-            await onStageUpdate(deal.id, newStage);
-        } finally {
-            setIsUpdatingStage(false);
-        }
-    };
 
     const handleCompleteTask = async (taskId: string) => {
         // Optimistic update
@@ -78,18 +68,11 @@ export const DealOverviewCard: React.FC<DealOverviewCardProps> = ({ deal, onStag
                 </Link>
             </div>
 
-            {/* Stage Selector */}
+            {/* Stage Badge */}
             <div className="relative">
-                <select
-                    value={deal.stage || 'Lead'}
-                    onChange={handleStageChange}
-                    disabled={isUpdatingStage}
-                    className="w-full appearance-none bg-blue-50/50 border border-blue-100 text-blue-700 text-sm font-medium py-2 px-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:opacity-50"
-                >
-                    {DEAL_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <ChevronDown className="absolute right-3 top-2.5 text-blue-400 pointer-events-none" size={16} />
-                {isUpdatingStage && <Loader2 className="absolute right-8 top-2.5 animate-spin text-blue-600" size={16} />}
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {deal.stage || 'Unknown'}
+                </span>
             </div>
 
             {/* Quick Tasks */}
