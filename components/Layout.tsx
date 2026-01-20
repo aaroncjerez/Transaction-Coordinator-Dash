@@ -1,5 +1,4 @@
 import React, { ReactNode } from 'react';
-import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
 
 interface LayoutProps {

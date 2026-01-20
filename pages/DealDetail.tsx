@@ -455,6 +455,68 @@ export const DealDetail: React.FC = () => {
                     <DealChat dealId={deal.id} dealName={deal.deal_name} />
                 )}
             </div>
+
+            {/* Linked Tasks Section */}
+            <div className="bg-white rounded-xl shadow-soft border border-gray-100 p-6 mt-8">
+                <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <Check size={20} className="text-blue-500" />
+                    Tasks
+                </h3>
+                <DealTasksList dealAirtableId={deal.airtable_id} />
+            </div>
+        </div>
+    );
+};
+
+// Sub-component for Tasks List to keep main component clean
+const DealTasksList = ({ dealAirtableId }: { dealAirtableId: string }) => {
+    const [tasks, setTasks] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!dealAirtableId) return;
+        const fetchTasks = async () => {
+            const { data } = await supabase
+                .from('tasks_vault')
+                .select('*')
+                .eq('deal_airtable_id', dealAirtableId)
+                .order('status', { ascending: false }) // To Do first typically? Or Done last.
+                .order('created_at', { ascending: false });
+
+            // Sort manually if needed: To Do at top
+            const sorted = (data || []).sort((a, b) => (a.status === 'Done' ? 1 : -1));
+            setTasks(sorted);
+            setLoading(false);
+        };
+        fetchTasks();
+    }, [dealAirtableId]);
+
+    const toggleStatus = async (task: any) => {
+        // Optimistic
+        const newStatus = task.status === 'Done' ? 'To Do' : 'Done';
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+
+        await supabase.from('tasks_vault').update({ status: newStatus }).eq('id', task.id);
+    };
+
+    if (loading) return <div className="p-4 text-center text-gray-400 text-sm">Loading tasks...</div>;
+    if (tasks.length === 0) return <div className="p-4 text-center text-gray-400 text-sm italic">No tasks linked to this deal.</div>;
+
+    return (
+        <div className="space-y-2">
+            {tasks.map(task => (
+                <div key={task.id} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 group">
+                    <button
+                        onClick={() => toggleStatus(task)}
+                        className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-all ${task.status === 'Done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 hover:border-blue-500'}`}
+                    >
+                        {task.status === 'Done' && <Check size={12} />}
+                    </button>
+                    <span className={`text-sm font-medium ${task.status === 'Done' ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                        {task.task_name}
+                    </span>
+                </div>
+            ))}
         </div>
     );
 };
