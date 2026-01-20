@@ -3,7 +3,9 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from './ui/Button';
 import { supabase } from '../lib/supabase';
-import { DEAL_TYPES } from '../constants';
+
+import { createAirtableRecord, syncAirtableToSupabase } from '../lib/sync';
+import { DEAL_TYPES, DEAL_STAGES } from '../constants';
 
 interface CreateDealModalProps {
     isOpen: boolean;
@@ -15,7 +17,8 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClos
     const [formData, setFormData] = useState({
         county: '',
         state: '',
-        deal_type: 'Standard Flip',
+        deal_type: DEAL_TYPES[0],
+        stage: DEAL_STAGES[0],
         notes: ''
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,38 +36,34 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClos
                 throw new Error("County and State are required");
             }
 
-            // 1. Insert into Supabase (Optimistic)
-            // We rely on background sync or manual sync eventually, but for now we look 'live'.
-            // Note: We don't have an Airtable ID yet. Sync logic handles 'upsert' by airtable_id.
-            // If we create here, we have no local airtable_id.
-            // We might need to call 'createAirtableRecord' here if we want immediate sync?
-            // For now, we just insert to Supabase to unblock the UI.
+            // 1. Create in Airtable (Source of Truth)
+            // Note: "Deal Name" is a computed field in Airtable (Formula), so we cannot write to it.
+            // Airtable will automatically generate it from County and State.
+            const airtablePayload = {
+                "County": formData.county,
+                "State": formData.state,
+                "Deal type": formData.deal_type,
+                "Stage": formData.stage,
+                "Notes": formData.notes
+            };
 
-            const tempId = `temp-${Date.now()}`;
-            const dealName = `${formData.county}, ${formData.state}`;
+            await createAirtableRecord(airtablePayload);
 
-            const { error: sbError } = await supabase
-                .from('deal_vault')
-                .insert([{
-                    deal_name: dealName,
-                    county: formData.county,
-                    state: formData.state,
-                    deal_type: formData.deal_type,
-                    notes: formData.notes,
-                    stage: 'New',
-                    airtable_id: tempId // Temporary
-                }]);
-
-            if (sbError) throw sbError;
-
-            // TODO: Trigger backend sync or call client-side createAirtableRecord (not implemented fully in sync.ts for creation)
+            // 2. Trigger Sync to update UI and Supabase
+            await syncAirtableToSupabase();
 
             onSuccess();
             onClose();
-            setFormData({ county: '', state: '', deal_type: 'Standard Flip', notes: '' });
-
+            setFormData({
+                county: '',
+                state: '',
+                deal_type: DEAL_TYPES[0],
+                stage: DEAL_STAGES[0],
+                notes: ''
+            });
 
         } catch (err) {
+            console.error("Creation failed:", err);
             setError(err instanceof Error ? err.message : 'An error occurred');
         } finally {
             setIsSubmitting(false);
@@ -108,21 +107,38 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClos
                         />
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">State</label>
-                        <select
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
-                            value={formData.state}
-                            onChange={e => setFormData({ ...formData, state: e.target.value })}
-                        >
-                            <option value="">Select State</option>
-                            <option value="TX">TX</option>
-                            <option value="FL">FL</option>
-                            <option value="CA">CA</option>
-                            <option value="NY">NY</option>
-                            <option value="OH">OH</option>
-                            {/* Add more as needed */}
-                        </select>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700">State</label>
+                            <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                                value={formData.state}
+                                onChange={e => setFormData({ ...formData, state: e.target.value })}
+                            >
+                                <option value="">Select State</option>
+                                <option value="TX">TX</option>
+                                <option value="FL">FL</option>
+                                <option value="CA">CA</option>
+                                <option value="NY">NY</option>
+                                <option value="OH">OH</option>
+                                <option value="TN">TN</option>
+                                <option value="AL">AL</option>
+                                <option value="GA">GA</option>
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700">Stage</label>
+                            <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white"
+                                value={formData.stage}
+                                onChange={e => setFormData({ ...formData, stage: e.target.value })}
+                            >
+                                {DEAL_STAGES.map((stage) => (
+                                    <option key={stage} value={stage}>{stage}</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     <div className="space-y-2">
@@ -153,7 +169,7 @@ export const CreateDealModal: React.FC<CreateDealModalProps> = ({ isOpen, onClos
                             Cancel
                         </Button>
                         <Button type="submit" isLoading={isSubmitting}>
-                            Create Deal
+                            Create Deal in Airtable
                         </Button>
                     </div>
                 </form>

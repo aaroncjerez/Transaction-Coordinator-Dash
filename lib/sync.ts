@@ -201,4 +201,59 @@ export async function updateAirtableRecord(recordId: string, fields: Record<stri
 }
 
 // Deprecated alias compatibility if needed, but we will update usages.
+// Update existing tool
 export const syncDealsFromAirtable = syncAirtableToSupabase;
+
+/*
+ * Creates a new record in Airtable.
+ */
+export async function createAirtableRecord(fields: Record<string, any>) {
+    // 1. Try Serverless Function (Preferred)
+    try {
+        const response = await fetch('/api/create-deal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields })
+        });
+
+        // Fallback for local dev if API 404
+        if (response.status === 404 && import.meta.env.DEV) {
+            console.warn("API route not found (local), using direct create.");
+            return createAirtableRecordDirect(fields);
+        }
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.details || response.statusText);
+        }
+
+        return await response.json();
+
+    } catch (e) {
+        console.error("Create API failed:", e);
+        if (import.meta.env.DEV) return createAirtableRecordDirect(fields);
+        throw e;
+    }
+}
+
+// Fallback for Local Dev
+async function createAirtableRecordDirect(fields: Record<string, any>) {
+    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
+
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${AIRTABLE_PAT}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fields })
+    });
+
+    if (!response.ok) {
+        const txt = await response.text();
+        throw new Error(`Direct Create Failed: ${txt}`);
+    }
+
+    return await response.json();
+}

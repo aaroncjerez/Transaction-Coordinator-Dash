@@ -1,0 +1,84 @@
+/* IOS SAFETY FIXES - "Mobile First" */
+
+/* 1. Safe Area Insets & Overflow Fixes */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+
+body {
+  /* Prevent horizontal scroll-wiggle */
+  overflow-x: hidden;
+  width: 100%;
+  /* Use system fonts for best iOS integration */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 2. Liquid Glass Fixes (100dvh) */
+/* Replaces 100vh for main containers to avoid address bar overlap */
+.min-h-screen-ios {
+  min-height: 100dvh;
+  /* Fallback for older browsers */
+  min-height: -webkit-fill-available;
+}
+
+/* 3. Input Zoom Fix */
+/* Prevents auto-zoom on focus by enforcing 16px font size */
+input, 
+select, 
+textarea, 
+button {
+  font-size: 16px !important; /* Force 16px on mobile */
+  max-width: 100%;
+}
+
+@media (min-width: 768px) {
+  /* Allow smaller fonts on desktop if needed, or keep consistent */
+  input, 
+  select, 
+  textarea {
+    font-size: 0.875rem !important; /* Reset to 14px on desktop if preferred, or keep 16px */
+  }
+}
+
+/* 4. Touch Target Audit */
+/* Ensure clickable elements have minimum dimensions */
+button, 
+a, 
+input[type="checkbox"], 
+input[type="radio"], 
+select {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Remove gray tap highlight box */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 5. Flexbox/Grid Cleanup */
+/* Ensure flex containers don't overflow */
+.flex, .grid {
+  max-width: 100%;
+}
+
+/* Apply Safe Area Padding Utility Classes */
+.pt-safe {
+  padding-top: var(--sat);
+}
+
+.pb-safe {
+  padding-bottom: var(--sab);
+}
+
+.pl-safe {
+  padding-left: var(--sal);
+}
+
+.pr-safe {
+  padding-right: var(--sar);
+}

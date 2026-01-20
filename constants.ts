@@ -48,13 +48,13 @@ export const MOCK_PROJECTS: Project[] = [
 ];
 
 export const DEAL_STAGES = [
-  'Offer Accepted',
+  'Offer accepted',
   'Due Diligence',
-  'Sent to Escrow',
-  'Purchase Escrow',
+  'Send to escrow',
+  'Purchase escrow',
   'Purchased',
   'Listed',
-  'Sale Escrow',
+  'Sale escrow',
   'Sold',
   'Cancelled'
 ];
