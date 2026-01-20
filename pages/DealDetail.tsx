@@ -245,42 +245,56 @@ export const DealDetail: React.FC = () => {
     return (
         <div className="max-w-5xl mx-auto space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-4 mb-6">
-                <button onClick={() => navigate(-1)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                    <ArrowLeft size={20} className="text-gray-600" />
-                </button>
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">{deal.deal_name}</h1>
-                    <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                        <select
-                            value={deal.deal_type}
-                            onChange={(e) => handleFieldUpdate('deal_type', e.target.value)}
-                            className="bg-transparent font-medium text-gray-700 hover:bg-gray-100 rounded px-1 -ml-1 py-0.5 border border-transparent hover:border-gray-200 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none cursor-pointer"
-                        >
-                            {DEAL_TYPES.map(type => (
-                                <option key={type} value={type}>{type}</option>
-                            ))}
-                        </select>
-                        <span>•</span>
-                        <select
-                            value={deal.stage}
-                            onChange={(e) => handleFieldUpdate('stage', e.target.value)}
-                            className="bg-blue-100 text-blue-800 text-xs font-medium rounded-full px-2 py-0.5 border border-transparent hover:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none cursor-pointer appearance-none"
-                            style={{ textAlignLast: 'center' }}
-                        >
-                            {DEAL_STAGES.map(stage => (
-                                <option key={stage} value={stage}>{stage}</option>
-                            ))}
-                        </select>
-                        <span>•</span>
-                        <span>{deal.county}, {deal.state}</span>
+            <div className="flex flex-col gap-4 mb-6">
+                <div className="flex items-center gap-2 text-xs text-gray-400 font-medium mb-1">
+                    <button onClick={() => navigate('/')} className="hover:text-gray-600">Deals</button>
+                    <span>/</span>
+                    <span className="text-gray-600 truncate max-w-[200px]">{deal.deal_name}</span>
+                </div>
+
+                <div className="flex items-start gap-4">
+                    <button onClick={() => navigate(-1)} className="mt-1 p-2 hover:bg-gray-100 rounded-full transition-colors md:hidden">
+                        <ArrowLeft size={20} className="text-gray-600" />
+                    </button>
+                    <div className="flex-1">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">{deal.deal_name}</h1>
+                            {/* Actions or Status - Could go here */}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500">
+                            <select
+                                value={deal.deal_type}
+                                onChange={(e) => handleFieldUpdate('deal_type', e.target.value)}
+                                className="bg-transparent font-medium text-gray-700 hover:bg-gray-100 rounded px-2 py-1 border border-transparent hover:border-gray-200 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none cursor-pointer"
+                            >
+                                {DEAL_TYPES.map(type => (
+                                    <option key={type} value={type}>{type}</option>
+                                ))}
+                            </select>
+                            <span className="hidden md:inline">•</span>
+                            <select
+                                value={deal.stage}
+                                onChange={(e) => handleFieldUpdate('stage', e.target.value)}
+                                className="bg-blue-50 text-blue-700 text-xs font-semibold rounded-full px-3 py-1 border border-transparent hover:bg-blue-100 focus:ring-2 focus:ring-blue-500 transition-all outline-none cursor-pointer appearance-none"
+                                style={{ textAlignLast: 'center' }}
+                            >
+                                {DEAL_STAGES.map(stage => (
+                                    <option key={stage} value={stage}>{stage}</option>
+                                ))}
+                            </select>
+                            <span className="hidden md:inline">•</span>
+                            <span className="flex items-center gap-1">
+                                📍 {deal.county}, {deal.state}
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Tabs */}
-            <div className="border-b border-gray-200">
-                <div className="flex gap-6">
+            <div className="border-b border-gray-200 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
+                <div className="flex gap-8 min-w-max">
                     <button
                         onClick={() => setActiveTab('details')}
                         className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'details' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
@@ -303,9 +317,9 @@ export const DealDetail: React.FC = () => {
             </div>
 
             {/* Content */}
-            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] ${activeTab === 'chat' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-4 md:p-6 min-h-[400px] ${activeTab === 'chat' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
                 {activeTab === 'details' && (
-                    <div className="grid grid-cols-2 gap-8">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div className="space-y-4">
                             <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Financials</h3>
                             <div className="flex justify-between py-2 border-b border-gray-100 items-center">

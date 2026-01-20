@@ -129,16 +129,27 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Deal Command Center</h1>
-          <p className="text-sm text-gray-500">Manage {activeDealsCount} Active Deals</p>
+      <header className="sticky top-0 z-20 bg-background/80 backdrop-blur-md px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+            <span>Workspaces</span>
+            <span>/</span>
+            <span className="text-gray-600">Jerez Land</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Deal Command Center</h1>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          {/* Search Bar (Fake for now) */}
+          <div className="hidden md:flex items-center bg-white border border-gray-200 rounded-lg px-3 py-1.5 shadow-sm text-sm text-gray-400 w-64">
+            <span className="flex-1">Search deals...</span>
+            <kbd className="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] text-gray-500 font-sans">⌘K</kbd>
+          </div>
+
+          <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing} className="bg-white border-gray-200">
+            <RefreshCw className={`h-4 w-4 text-gray-600 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
-          <Button onClick={() => setIsModalOpen(true)}>
+          <Button onClick={() => setIsModalOpen(true)} className="bg-blue-600 hover:bg-blue-700 text-white shadow-soft">
             <Plus className="h-4 w-4 mr-2" />
             New Deal
           </Button>

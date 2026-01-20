@@ -53,7 +53,7 @@ export const DealOverviewCard: React.FC<DealOverviewCardProps> = ({ deal, onStag
     const dealName = deal.deal_name || 'Untitled Deal';
 
     return (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-5 flex flex-col gap-4">
+        <div className="bg-white rounded-2xl shadow-soft hover:shadow-card transition-all duration-300 p-6 flex flex-col gap-5 border border-transparent hover:border-gray-100">
 
             {/* Header: Name & Type */}
             <div className="flex justify-between items-start">

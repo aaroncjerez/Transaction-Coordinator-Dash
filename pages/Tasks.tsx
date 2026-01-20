@@ -124,10 +124,15 @@ export const Tasks: React.FC = () => {
         <div className="flex-1 overflow-y-auto bg-gray-50 h-full p-8">
             <div className="max-w-5xl mx-auto space-y-8">
 
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Task Dashboard</h1>
-                        <p className="text-gray-500">Track tasks by transaction</p>
+                <div className="flex flex-col gap-1 mb-6">
+                    <div className="flex items-center gap-2 text-xs text-gray-400 font-medium mb-1">
+                        <span>Workspaces</span>
+                        <span>/</span>
+                        <span className="text-gray-600">Jerez Land</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Task Dashboard</h1>
+                        {/* Actions if any */}
                     </div>
                 </div>
 

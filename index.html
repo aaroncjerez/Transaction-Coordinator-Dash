@@ -1,65 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Nexus Analytics</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ['Inter', 'sans-serif'],
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Nexus Analytics</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            border: "#e2e8f0", // slate-200
+            input: "#f1f5f9",  // slate-100
+            ring: "#3b82f6",   // blue-500
+            background: "#f8fafc", // slate-50
+            foreground: "#0f172a", // slate-900
+            primary: {
+              DEFAULT: "#3b82f6", // blue-500
+              foreground: "#ffffff",
             },
-            colors: {
-              border: "hsl(var(--border))",
-              input: "hsl(var(--input))",
-              ring: "hsl(var(--ring))",
-              background: "hsl(var(--background))",
-              foreground: "hsl(var(--foreground))",
-              primary: {
-                DEFAULT: "#4f46e5", // Indigo 600
-                foreground: "#ffffff",
-              },
-              secondary: {
-                DEFAULT: "#f1f5f9", // Slate 100
-                foreground: "#0f172a", // Slate 900
-              },
-              destructive: {
-                DEFAULT: "#ef4444", // Red 500
-                foreground: "#ffffff",
-              },
-              muted: {
-                DEFAULT: "#f8fafc", // Slate 50
-                foreground: "#64748b", // Slate 500
-              },
-              accent: {
-                DEFAULT: "#eef2ff", // Indigo 50
-                foreground: "#4f46e5", // Indigo 600
-              },
-            }
+            secondary: {
+              DEFAULT: "#ffffff", // white
+              foreground: "#0f172a", // slate-900
+            },
+            muted: {
+              DEFAULT: "#f1f5f9", // slate-100
+              foreground: "#64748b", // slate-500
+            },
+            accent: {
+              DEFAULT: "#eff6ff", // blue-50
+              foreground: "#2563eb", // blue-600
+            },
+          },
+          boxShadow: {
+            'soft': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -2px rgba(0, 0, 0, 0.02)',
+            'card': '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
           }
         }
       }
-    </script>
-    <style>
-      body {
-        background-color: #f8fafc; /* Slate 50 */
-        color: #0f172a; /* Slate 900 */
-      }
-      /* Custom scrollbar for table containers */
-      .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-      }
-      .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-      }
-    </style>
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f8fafc;
+      /* Slate 50 */
+      color: #0f172a;
+      /* Slate 900 */
+    }
+
+    /* Custom scrollbar for table containers */
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
   <script type="importmap">
 {
   "imports": {
@@ -74,8 +79,10 @@
 }
 </script>
 </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
-  </body>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
 </html>
