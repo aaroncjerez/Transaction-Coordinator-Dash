@@ -23,12 +23,14 @@ interface DealDetailData {
 
 // STAGES removed in favor of constants.ts
 
+import { DealChat } from '../components/DealChat';
+
 export const DealDetail: React.FC = () => {
     const { id } = useParams();
     const navigate = useNavigate();
     const [deal, setDeal] = useState<DealDetailData | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'details' | 'files'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'files' | 'chat'>('details');
 
     // Stage Editing State
     const [isEditingStage, setIsEditingStage] = useState(false);
@@ -354,11 +356,17 @@ export const DealDetail: React.FC = () => {
                     >
                         File Vault
                     </button>
+                    <button
+                        onClick={() => setActiveTab('chat')}
+                        className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'chat' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                        Chat Assistant
+                    </button>
                 </div>
             </div>
 
             {/* Content */}
-            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] ${activeTab === 'assistant' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
+            <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] ${activeTab === 'chat' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
                 {activeTab === 'details' && (
                     <div className="grid grid-cols-2 gap-8">
                         <div className="space-y-4">
@@ -490,6 +498,10 @@ export const DealDetail: React.FC = () => {
                             );
                         })}
                     </div>
+                )}
+
+                {activeTab === 'chat' && (
+                    <DealChat dealId={deal.id} dealName={deal.deal_name} />
                 )}
             </div>
         </div>
