@@ -10,7 +10,7 @@ import { uploadFileAirtableFirst } from '../lib/uploadHandler';
 // Data Types
 interface DealDetailData {
     id: string;
-    airtable_id: string; // Add this
+    airtable_id: string;
     deal_name: string;
     deal_type?: string;
     stage: string;
@@ -25,8 +25,6 @@ interface DealDetailData {
     // File Vault
     files: Array<{ name: string; url: string; type: 'purchase' | 'deed' | 'plat' | 'other'; categoryKey?: string }>;
 }
-
-// STAGES removed in favor of constants.ts
 
 import { DealChat } from '../components/DealChat';
 
@@ -481,44 +479,99 @@ const DealTasksList = ({ dealAirtableId }: { dealAirtableId: string }) => {
                 .from('tasks_vault')
                 .select('*')
                 .eq('deal_airtable_id', dealAirtableId)
-                .order('status', { ascending: false }) // To Do first typically? Or Done last.
+                .neq('status', 'Cancelled') // Filter out Cancelled
                 .order('created_at', { ascending: false });
 
-            // Sort manually if needed: To Do at top
-            const sorted = (data || []).sort((a, b) => (a.status === 'Done' ? 1 : -1));
+            // Sort: In Progress -> To Do -> Done
+            const statusOrder: Record<string, number> = { 'In Progress': 0, 'To Do': 1, 'Done': 2 };
+            const sorted = (data || []).sort((a, b) => {
+                const sA = statusOrder[a.status] ?? 99;
+                const sB = statusOrder[b.status] ?? 99;
+                return sA - sB;
+            });
+
             setTasks(sorted);
             setLoading(false);
         };
         fetchTasks();
     }, [dealAirtableId]);
 
-    const toggleStatus = async (task: any) => {
-        // Optimistic
-        const newStatus = task.status === 'Done' ? 'To Do' : 'Done';
+    const handleStatusChange = async (task: any, newStatus: string) => {
+        // Optimistic Update
+        const oldStatus = task.status;
         setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
 
-        await supabase.from('tasks_vault').update({ status: newStatus }).eq('id', task.id);
+        // Gamification: Confetti if Done
+        if (newStatus === 'Done' && oldStatus !== 'Done') {
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
+        }
+
+        try {
+            // 1. Update Supabase
+            await supabase.from('tasks_vault').update({ status: newStatus }).eq('id', task.id);
+
+            // 2. Update Airtable (if airtable_id exists on task)
+            if (task.airtable_id && !task.airtable_id.startsWith('temp')) {
+                await updateAirtableTask(task.airtable_id, { "Status": newStatus });
+            }
+        } catch (err) {
+            console.error("Task update failed", err);
+            // Revert on error?
+        }
     };
 
+    // Progress Calculation
+    const totalTasks = tasks.length;
+    const completedTasks = tasks.filter(t => t.status === 'Done').length;
+    const progress = totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
+
     if (loading) return <div className="p-4 text-center text-gray-400 text-sm">Loading tasks...</div>;
-    if (tasks.length === 0) return <div className="p-4 text-center text-gray-400 text-sm italic">No tasks linked to this deal.</div>;
+    if (tasks.length === 0) return <div className="p-4 text-center text-gray-400 text-sm italic">No tasks active.</div>;
 
     return (
-        <div className="space-y-2">
-            {tasks.map(task => (
-                <div key={task.id} className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100 group">
-                    <button
-                        onClick={() => toggleStatus(task)}
-                        className={`flex-shrink-0 w-5 h-5 rounded-full border flex items-center justify-center transition-all ${task.status === 'Done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 hover:border-blue-500'}`}
-                    >
-                        {task.status === 'Done' && <Check size={12} />}
-                    </button>
-                    <span className={`text-sm font-medium ${task.status === 'Done' ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
-                        {task.task_name}
-                    </span>
+        <div className="space-y-4">
+            {/* Progress Bar */}
+            <div className="mb-4">
+                <div className="flex justify-between text-xs font-semibold text-gray-500 mb-1">
+                    <span>Progress</span>
+                    <span>{progress}%</span>
                 </div>
-            ))}
+                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                        className="h-full bg-blue-500 transition-all duration-500 ease-out"
+                        style={{ width: `${progress}%` }}
+                    />
+                </div>
+            </div>
+
+            {/* Task List */}
+            <div className="space-y-2">
+                {tasks.map(task => (
+                    <div key={task.id} className="flex items-center justify-between p-3 bg-white hover:bg-gray-50 rounded-xl border border-gray-100 shadow-sm transition-all group">
+                        <span className={`text-sm font-medium transition-colors ${task.status === 'Done' ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                            {task.task_name}
+                        </span>
+
+                        <select
+                            value={task.status}
+                            onChange={(e) => handleStatusChange(task, e.target.value)}
+                            className={`text-xs font-bold px-2 py-1 rounded-md border-0 cursor-pointer outline-none ring-1 ring-inset transition-all
+                                ${task.status === 'Done' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
+                                    task.status === 'In Progress' ? 'bg-blue-50 text-blue-700 ring-blue-200' :
+                                        'bg-gray-100 text-gray-600 ring-gray-200 hover:bg-gray-200'}`}
+                        >
+                            <option value="To Do">To Do</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Done">Done</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 };
-
