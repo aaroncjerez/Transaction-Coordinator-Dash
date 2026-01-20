@@ -200,6 +200,32 @@ export async function updateAirtableRecord(recordId: string, fields: Record<stri
     return result;
 }
 
+/*
+ * Updates a TASK record in Airtable.
+ * Assumes table name is 'Tasks'.
+ */
+export async function updateAirtableTask(recordId: string, fields: Record<string, any>) {
+    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
+
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks/${recordId}`;
+    const response = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+            'Authorization': `Bearer ${AIRTABLE_PAT}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fields })
+    });
+
+    if (!response.ok) {
+        // Warning only, don't crash UI
+        console.warn(`Failed to update Airtable Task: ${response.statusText}`);
+        return null; // Silent fail
+    }
+
+    return await response.json();
+}
+
 // Deprecated alias compatibility if needed, but we will update usages.
 // Update existing tool
 export const syncDealsFromAirtable = syncAirtableToSupabase;

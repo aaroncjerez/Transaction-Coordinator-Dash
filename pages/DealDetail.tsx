@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Edit2, Calendar, DollarSign, ExternalLink, X, Check, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { DEAL_STAGES, DEAL_TYPES } from '../constants';
-import { updateAirtableRecord } from '../lib/sync';
+import { updateAirtableRecord, updateAirtableTask } from '../lib/sync';
+import confetti from 'canvas-confetti';
 import { uploadFileAirtableFirst } from '../lib/uploadHandler';
 
 // Data Types
