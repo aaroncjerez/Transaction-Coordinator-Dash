@@ -112,8 +112,7 @@ export function mapAirtableRecordToDeal(record: any): Partial<Deal> {
     };
 }
 
-return result;
-}
+
 
 /*
  * Deletes a record from Airtable.

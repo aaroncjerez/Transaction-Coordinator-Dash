@@ -96,11 +96,12 @@ export const Dashboard: React.FC = () => {
       const { error } = await supabase
         .from('deal_vault')
         .upsert({ ...deal, stage: newStage }) // Upsert entire object or just fields? upsert needs PK.
-        .eq('id', dealId); // Upsert doesn't need .eq, it needs payload with PK.
+
 
       if (error) throw error;
       setToast({ message: "Stage updated & synced", type: 'success' });
 
+    } catch (error) {
       console.error("Error updating stage:", error);
       setToast({ message: "Failed to update stage", type: 'error' });
       // Revert optimistic update?
