@@ -46,3 +46,16 @@ export const MOCK_PROJECTS: Project[] = [
   { id: 'p4', name: 'AI Integration', description: 'Implementing LLM features for customer support bot.', status: 'paused', dueDate: '2024-01-20', budget: '$25,000', completion: 30, members: 3 },
   { id: 'p5', name: 'Q4 Marketing Campaign', description: 'Holiday season ad spend and creative assets.', status: 'in_progress', dueDate: '2023-11-20', budget: '$60,000', completion: 45, members: 5 },
 ];
+
+export const DEAL_STAGES = [
+  'Offer Accepted',
+  'Due Diligence',
+  'Sent to Escrow',
+  'Purchase Escrow',
+  'Purchased Escrow',
+  'Purchased',
+  'Listed',
+  'Sale Escrow',
+  'Sold',
+  'Cancelled'
+];

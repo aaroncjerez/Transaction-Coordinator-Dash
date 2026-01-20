@@ -33,16 +33,9 @@ export const Sidebar: React.FC = () => {
       <nav className="flex-1 p-4">
         <NavItem to="/" icon={LayoutDashboard} label="Deals" />
         <NavItem to="/tasks" icon={CheckSquare} label="Tasks" />
-        <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
       </nav>
 
       <div className="p-4 border-t border-gray-100">
-        <div className="mb-4 px-4">
-          <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-2 rounded-full w-fit">
-            <Activity size={14} />
-            <span className="font-semibold">System Healthy</span>
-          </div>
-        </div>
         <NavItem to="/settings" icon={Settings} label="Settings" />
       </div>
     </aside>

@@ -1,16 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Edit2, Calendar, DollarSign, ExternalLink, X, Check, Sparkles } from 'lucide-react';
+import { ArrowLeft, FileText, Edit2, Calendar, DollarSign, ExternalLink, X, Check, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { DealChat } from '../components/DealChat';
+import { DEAL_STAGES } from '../constants';
 
 // Data Types
-interface FUBEvent {
-    type: 'text' | 'note' | 'call';
-    content: string;
-    created_at: string;
-}
-
 interface DealDetailData {
     id: string;
     deal_name: string;
@@ -24,28 +18,17 @@ interface DealDetailData {
     phone_number: string;
     notes: string;
     // File Vault
-    files: Array<{ name: string; url: string; type: 'purchase' | 'deed' | 'plat' | 'other' }>;
-    // FUB Timeline
-    fub_history: FUBEvent[];
+    files: Array<{ name: string; url: string; type: 'purchase' | 'deed' | 'plat' | 'other'; categoryKey?: string }>;
 }
 
-const STAGES = [
-    'New',
-    'Follow Up',
-    'Under Contract',
-    'Inspection Period',
-    'Awaiting Closing',
-    'Closed',
-    'Dead',
-    'Cancelled'
-];
+// STAGES removed in favor of constants.ts
 
 export const DealDetail: React.FC = () => {
     const { id } = useParams();
     const navigate = useNavigate();
     const [deal, setDeal] = useState<DealDetailData | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'details' | 'files' | 'fub' | 'assistant'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'files'>('details');
 
     // Stage Editing State
     const [isEditingStage, setIsEditingStage] = useState(false);
@@ -72,24 +55,7 @@ export const DealDetail: React.FC = () => {
             if (dealError) throw dealError;
             if (!dealData) throw new Error('Deal not found');
 
-            // 2. Fetch FUB History (if phone number exists)
-            let fubHistory: FUBEvent[] = [];
-            if (dealData.phone_number) {
-                const { data: fubData, error: fubError } = await supabase
-                    .from('fub_cache')
-                    .select('history_json')
-                    .eq('phone_number', dealData.phone_number)
-                    .maybeSingle();
-
-                if (!fubError && fubData && fubData.history_json) {
-                    // Assuming history_json is an array of events matches our interface or needs mapping
-                    // The schema comment said "Stores list of last 10 events/texts"
-                    // We'll cast it for now, but in a real app might need validation
-                    fubHistory = fubData.history_json as FUBEvent[];
-                }
-            }
-
-            // 3. Aggregate Files
+            // 2. Aggregate Files
             const files: DealDetailData['files'] = [];
             const fileCategories = [
                 { key: 'purchase_agreement_files', type: 'purchase' },
@@ -109,7 +75,8 @@ export const DealDetail: React.FC = () => {
                             files.push({
                                 name: f.filename || f.name || 'Unnamed File',
                                 url: f.url,
-                                type: cat.type
+                                type: cat.type,
+                                categoryKey: cat.key
                             });
                         }
                     });
@@ -129,12 +96,98 @@ export const DealDetail: React.FC = () => {
                 close_date: dealData.close_date || 'TBD',
                 phone_number: dealData.phone_number || '',
                 notes: dealData.notes || '',
-                files: files,
-                fub_history: fubHistory
+                files: files
             });
 
         } catch (error) {
             console.error('Error fetching deal details:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const FILE_CATEGORIES = [
+        { key: 'purchase_agreement_files', label: 'Purchase Agreement', type: 'purchase' },
+        { key: 'deed_files', label: 'Deed', type: 'deed' },
+        { key: 'plat_files', label: 'Plat', type: 'plat' },
+        { key: 'sale_contract_files', label: 'Sale Contract', type: 'other' },
+        { key: 'soil_test_files', label: 'Soil Test', type: 'other' },
+        { key: 'hud_files', label: 'HUD', type: 'other' },
+        { key: 'funding_agreement_files', label: 'Funding Agreement', type: 'other' },
+    ] as const;
+
+    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, categoryKey: string) => {
+        if (!event.target.files || event.target.files.length === 0 || !deal) return;
+
+        const file = event.target.files[0];
+        const filePath = `${deal.id}/${categoryKey}/${Date.now()}_${file.name}`;
+
+        try {
+            setLoading(true); // Re-use loading or create new state? Better create 'uploading' state if specific UI needed, but global loading is safe for now to prevent interactions.
+
+            // 1. Upload to Storage
+            const { error: uploadError } = await supabase.storage
+                .from('deal_attachments') // Ensure this bucket exists!
+                .upload(filePath, file);
+
+            if (uploadError) throw uploadError;
+
+            // 2. Get Public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('deal_attachments')
+                .getPublicUrl(filePath);
+
+            // 3. Update Database (deal_vault)
+            // Need to fetch current array first? or append using Postgres function?
+            // Easiest is to READ deals current data for this column, append, UPDATE.
+            // But we have `deal.files` which is aggregated. We don't have the raw column data in state easily.
+            // I'll fetch the specific column.
+
+            const { data: currentData, error: fetchError } = await supabase
+                .from('deal_vault')
+                .select(categoryKey)
+                .eq('id', deal.id)
+                .single();
+
+            if (fetchError) throw fetchError;
+
+            const currentFiles = currentData[categoryKey] || [];
+            const newFileObj = { name: file.name, url: publicUrl, uploaded_at: new Date().toISOString() };
+            const updatedFiles = [...currentFiles, newFileObj];
+
+            const { error: updateError } = await supabase
+                .from('deal_vault')
+                .update({ [categoryKey]: updatedFiles })
+                .eq('id', deal.id);
+
+            if (updateError) throw updateError;
+
+            // 4. Update Local State
+            // We need to add to `deal.files` logic.
+            // Currently `deal.files` is a flattened list.
+            // I should construct the new flattened item.
+            const category = FILE_CATEGORIES.find(c => c.key === categoryKey);
+            const newFlatFile = {
+                name: file.name,
+                url: publicUrl,
+                type: category?.type || 'other'
+            };
+
+            // Re-fetch deal data to be safe? Or update state.
+            // Updating state is faster.
+            setDeal(prev => {
+                if (!prev) return null;
+                return {
+                    ...prev,
+                    files: [...prev.files, newFlatFile as any]
+                };
+            });
+
+            alert('File uploaded successfully!');
+
+        } catch (error) {
+            console.error('Error uploading file:', error);
+            alert('Failed to upload file.');
         } finally {
             setLoading(false);
         }
@@ -207,7 +260,7 @@ export const DealDetail: React.FC = () => {
                         <div className="space-y-3">
                             <label className="block text-sm font-medium text-gray-700">Select New Stage</label>
                             <div className="grid grid-cols-1 gap-2">
-                                {STAGES.map((stage) => (
+                                {DEAL_STAGES.map((stage) => (
                                     <button
                                         key={stage}
                                         onClick={() => setSelectedStage(stage)}
@@ -259,21 +312,6 @@ export const DealDetail: React.FC = () => {
                     >
                         File Vault
                     </button>
-                    <button
-                        onClick={() => setActiveTab('fub')}
-                        className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'fub' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                    >
-                        FUB Timeline
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('assistant')}
-                        className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'assistant' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                    >
-                        <div className="flex items-center gap-2">
-                            <Sparkles size={16} />
-                            Assistant
-                        </div>
-                    </button>
                 </div>
             </div>
 
@@ -319,50 +357,84 @@ export const DealDetail: React.FC = () => {
                 )}
 
                 {activeTab === 'files' && (
-                    <div className="space-y-4">
-                        {deal.files.map((file, idx) => (
-                            <div key={idx} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 group">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-red-50 text-red-600 rounded-lg">
-                                        <FileText size={20} />
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-900">{file.name}</p>
-                                        <p className="text-xs text-gray-500 capitalize">{file.type}</p>
-                                    </div>
-                                </div>
-                                <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    View <ExternalLink size={14} />
-                                </a>
-                            </div>
-                        ))}
-                        {deal.files.length === 0 && <p className="text-gray-500 italic">No files attached.</p>}
-                    </div>
-                )}
+                    <div className="space-y-8">
+                        {FILE_CATEGORIES.map(category => {
+                            // Filter files by this category... 
+                            // Wait, `deal.files` is flattened and loses the key info, it only has 'type' (purchase, deed, etc).
+                            // But one 'type' like 'other' maps to multiple keys.
+                            // I need to change `deal.files` structure OR filter by type?
+                            // 'type' is ambiguous for 'other'.
+                            // I should filter by... name? No.
 
-                {activeTab === 'fub' && (
-                    <div className="relative border-l-2 border-gray-200 ml-3 space-y-8 pl-8 py-2">
-                        {deal.fub_history.map((event, idx) => (
-                            <div key={idx} className="relative">
-                                <div className="absolute -left-[41px] top-1 h-6 w-6 rounded-full bg-white border-2 border-blue-500 flex items-center justify-center">
-                                    <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                                </div>
-                                <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-semibold uppercase text-gray-500">{event.type}</span>
-                                    <span className="text-xs text-gray-400">• {new Date(event.created_at).toLocaleString()}</span>
-                                </div>
-                                <p className="text-gray-800 text-base">{event.content}</p>
-                            </div>
-                        ))}
-                        {deal.fub_history.length === 0 && <p className="text-gray-500 italic">No history found.</p>}
-                    </div>
-                )}
+                            // Better approach: Re-read the logic.
+                            // `fetchDealData` aggregated them. 
+                            // I should instead keep the RAW aggregated data or change how I access it.
+                            // But I can't easily change `fetchDealData` output without refactoring `DealDetailData` heavily.
+                            /* 
+                               Problem: `deal.files` items have `type` which is 'purchase', 'deed', 'plat', 'other'.
+                               FILE_CATEGORIES have `type` too.
+                               If I filter `deal.files` by `type`, checking if `file.type === category.type`:
+                               - purchase checks purchase -> OK
+                               - other checks other -> Sale Contract, Soil Test, HUD all get lumped invalidly?
+                               Yes.
+                               
+                               Solution: I need to know which CATEGORY key a file belongs to.
+                               I will update `fetchDealData` to include `categoryKey` in the file object.
+                            */
 
-                {activeTab === 'assistant' && (
-                    <DealChat dealId={deal.id} dealName={deal.deal_name} />
+                            /*
+                             For now, I will modify `fetchDealData` in a separate step or assume I can't filter correctly yet?
+                             I will update `fetchDealData` first!
+                             
+                             Actually, I can do it right here if I update the transform logic.
+                             I will update `fetchDealData` transform logic in a separate edit (lines 103-117).
+                             Then I can filter by `categoryKey`.
+                            */
+
+                            const categoryFiles = deal.files.filter(f => (f as any).categoryKey === category.key);
+
+                            return (
+                                <div key={category.key} className="space-y-3">
+                                    <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                                        <h3 className="text-sm font-semibold text-gray-900">{category.label}</h3>
+                                        <div className="relative">
+                                            <input
+                                                type="file"
+                                                id={`upload-${category.key}`}
+                                                className="hidden"
+                                                onChange={(e) => handleFileUpload(e, category.key)}
+                                            />
+                                            <label
+                                                htmlFor={`upload-${category.key}`}
+                                                className="cursor-pointer text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1"
+                                            >
+                                                <Plus size={14} /> Upload
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {categoryFiles.map((file, idx) => (
+                                            <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                                <div className="flex items-center gap-3">
+                                                    <FileText size={16} className="text-gray-400" />
+                                                    <span className="text-sm text-gray-700 truncate max-w-[200px]">{file.name}</span>
+                                                </div>
+                                                <a href={file.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs">
+                                                    View
+                                                </a>
+                                            </div>
+                                        ))}
+                                        {categoryFiles.length === 0 && (
+                                            <p className="text-xs text-gray-400 italic pl-2">No files uploaded.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </div>
-
         </div>
     );
 };

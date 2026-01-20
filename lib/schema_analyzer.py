@@ -3,6 +3,9 @@ import sys
 import json
 import urllib.request
 import urllib.error
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def get_schema(pat, base_id):
     url = f"https://api.airtable.com/v0/meta/bases/{base_id}/tables"

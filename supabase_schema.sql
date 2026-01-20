@@ -10,6 +10,8 @@ create table if not exists deal_vault (
   updated_at timestamp with time zone default now(),
   
   -- Core Deal Fields
+  deal_name text,
+  last_name text, -- Extracted from deal_name for card display
   deal_type text, -- Mapped from 'Deal type'
   stage text, -- Mapped from 'Status'
   county text,
