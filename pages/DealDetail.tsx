@@ -35,10 +35,26 @@ export const DealDetail: React.FC = () => {
     const [selectedStage, setSelectedStage] = useState('');
     const [updatingStage, setUpdatingStage] = useState(false);
 
-    // Detail Editing State
-    const [isEditingDetails, setIsEditingDetails] = useState(false);
-    const [editedDeal, setEditedDeal] = useState<DealDetailData | null>(null);
-    const [updatingDetails, setUpdatingDetails] = useState(false);
+    // Detail Auto-Save Handler
+    const handleFieldUpdate = async (field: keyof DealDetailData, value: any) => {
+        if (!deal) return;
+
+        // Optimistic update
+        setDeal(prev => prev ? { ...prev, [field]: value } : null);
+
+        try {
+            const { error } = await supabase
+                .from('deal_vault')
+                .update({
+                    [field === 'contract_date' ? 'contract_execution_date' : field]: value
+                })
+                .eq('id', deal.id);
+
+            if (error) throw error;
+        } catch (error) {
+            console.error('Error auto-saving:', error);
+        }
+    };
 
     useEffect(() => {
         if (id) {
@@ -327,126 +343,74 @@ export const DealDetail: React.FC = () => {
             {/* Content */}
             <div className={`bg-white rounded-xl shadow-sm border border-gray-200 p-6 min-h-[400px] ${activeTab === 'assistant' ? 'bg-gray-50 border-none shadow-none p-0' : ''}`}>
                 {activeTab === 'details' && (
-                    <div className="relative">
-                        <div className="absolute -top-12 right-0">
-                            {isEditingDetails ? (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => setIsEditingDetails(false)}
-                                        className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
-                                        disabled={updatingDetails}
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={handleUpdateDetails}
-                                        disabled={updatingDetails}
-                                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                                    >
-                                        {updatingDetails ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Save
-                                    </button>
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={() => {
-                                        setEditedDeal(deal);
-                                        setIsEditingDetails(true);
-                                    }}
-                                    className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 shadow-sm"
-                                >
-                                    <Edit2 size={14} /> Edit Details
-                                </button>
-                            )}
+                    <div className="grid grid-cols-2 gap-8">
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Financials</h3>
+                            <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Purchase Price</span>
+                                <input
+                                    type="number"
+                                    value={deal.purchase_price}
+                                    onChange={e => setDeal({ ...deal, purchase_price: Number(e.target.value) })}
+                                    onBlur={e => handleFieldUpdate('purchase_price', Number(e.target.value))}
+                                    className="w-2/3 bg-transparent hover:bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-right transition-colors"
+                                />
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Expected Sales</span>
+                                <input
+                                    type="number"
+                                    value={deal.expected_sales_price}
+                                    onChange={e => setDeal({ ...deal, expected_sales_price: Number(e.target.value) })}
+                                    onBlur={e => handleFieldUpdate('expected_sales_price', Number(e.target.value))}
+                                    className="w-2/3 bg-transparent hover:bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-right transition-colors"
+                                />
+                            </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-8">
-                            <div className="space-y-4">
-                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Financials</h3>
-                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
-                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Purchase Price</span>
-                                    {isEditingDetails && editedDeal ? (
-                                        <input
-                                            type="number"
-                                            value={editedDeal.purchase_price}
-                                            onChange={e => setEditedDeal({ ...editedDeal, purchase_price: Number(e.target.value) })}
-                                            className="w-2/3 border rounded px-2 py-1 text-right"
-                                        />
-                                    ) : (
-                                        <span className="font-medium">${deal.purchase_price.toLocaleString()}</span>
-                                    )}
-                                </div>
-                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
-                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><DollarSign size={16} /> Expected Sales</span>
-                                    {isEditingDetails && editedDeal ? (
-                                        <input
-                                            type="number"
-                                            value={editedDeal.expected_sales_price}
-                                            onChange={e => setEditedDeal({ ...editedDeal, expected_sales_price: Number(e.target.value) })}
-                                            className="w-2/3 border rounded px-2 py-1 text-right"
-                                        />
-                                    ) : (
-                                        <span className="font-medium">${deal.expected_sales_price.toLocaleString()}</span>
-                                    )}
-                                </div>
+                        <div className="space-y-4">
+                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Dates & Contacts</h3>
+                            <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Contract Date</span>
+                                <input
+                                    type="date"
+                                    value={deal.contract_date === 'TBD' ? '' : deal.contract_date}
+                                    onChange={e => setDeal({ ...deal, contract_date: e.target.value })}
+                                    onBlur={e => handleFieldUpdate('contract_date', e.target.value)}
+                                    className="w-2/3 bg-transparent hover:bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-right transition-colors"
+                                />
                             </div>
+                            <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Close Date</span>
+                                <input
+                                    type="date"
+                                    value={deal.close_date === 'TBD' ? '' : deal.close_date}
+                                    onChange={e => setDeal({ ...deal, close_date: e.target.value })}
+                                    onBlur={e => handleFieldUpdate('close_date', e.target.value)}
+                                    className="w-2/3 bg-transparent hover:bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-right transition-colors"
+                                />
+                            </div>
+                            <div className="flex justify-between py-2 border-b border-gray-100 items-center">
+                                <span className="text-gray-500 flex items-center gap-2 w-1/3">📱 Phone</span>
+                                <input
+                                    type="text"
+                                    value={deal.phone_number || ''}
+                                    onChange={e => setDeal({ ...deal, phone_number: e.target.value })}
+                                    onBlur={e => handleFieldUpdate('phone_number', e.target.value)}
+                                    className="w-2/3 bg-transparent hover:bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-2 py-1 text-right transition-colors"
+                                />
+                            </div>
+                        </div>
 
-                            <div className="space-y-4">
-                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-4">Dates & Contacts</h3>
-                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
-                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Contract Date</span>
-                                    {isEditingDetails && editedDeal ? (
-                                        <input
-                                            type="date"
-                                            value={editedDeal.contract_date === 'TBD' ? '' : editedDeal.contract_date}
-                                            onChange={e => setEditedDeal({ ...editedDeal, contract_date: e.target.value })}
-                                            className="w-2/3 border rounded px-2 py-1 text-right"
-                                        />
-                                    ) : (
-                                        <span className="font-medium">{deal.contract_date}</span>
-                                    )}
-                                </div>
-                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
-                                    <span className="text-gray-500 flex items-center gap-2 w-1/3"><Calendar size={16} /> Close Date</span>
-                                    {isEditingDetails && editedDeal ? (
-                                        <input
-                                            type="date"
-                                            value={editedDeal.close_date === 'TBD' ? '' : editedDeal.close_date}
-                                            onChange={e => setEditedDeal({ ...editedDeal, close_date: e.target.value })}
-                                            className="w-2/3 border rounded px-2 py-1 text-right"
-                                        />
-                                    ) : (
-                                        <span className="font-medium">{deal.close_date}</span>
-                                    )}
-                                </div>
-                                <div className="flex justify-between py-2 border-b border-gray-100 items-center">
-                                    <span className="text-gray-500 flex items-center gap-2 w-1/3">📱 Phone</span>
-                                    {isEditingDetails && editedDeal ? (
-                                        <input
-                                            type="text"
-                                            value={editedDeal.phone_number || ''}
-                                            onChange={e => setEditedDeal({ ...editedDeal, phone_number: e.target.value })}
-                                            className="w-2/3 border rounded px-2 py-1 text-right"
-                                        />
-                                    ) : (
-                                        <span className="font-medium">{deal.phone_number}</span>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="col-span-2 mt-4">
-                                <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">Notes</h3>
-                                {isEditingDetails && editedDeal ? (
-                                    <textarea
-                                        value={editedDeal.notes || ''}
-                                        onChange={e => setEditedDeal({ ...editedDeal, notes: e.target.value })}
-                                        className="w-full border rounded-lg p-3 text-sm min-h-[100px]"
-                                    />
-                                ) : (
-                                    <p className="text-gray-600 bg-gray-50 p-4 rounded-lg text-sm leading-relaxed whitespace-pre-wrap">
-                                        {deal.notes || 'No notes available.'}
-                                    </p>
-                                )}
-                            </div>
+                        <div className="col-span-2 mt-4">
+                            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-2">Notes</h3>
+                            <textarea
+                                value={deal.notes || ''}
+                                onChange={e => setDeal({ ...deal, notes: e.target.value })}
+                                onBlur={e => handleFieldUpdate('notes', e.target.value)}
+                                className="w-full bg-gray-50 hover:bg-white focus:bg-white focus:ring-1 focus:ring-blue-500 border border-transparent focus:border-blue-500 rounded-lg p-3 text-sm min-h-[100px] transition-all"
+                                placeholder="Add notes here..."
+                            />
                         </div>
                     </div>
                 )}
