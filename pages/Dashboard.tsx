@@ -9,7 +9,7 @@ import { CreateDealModal } from '../components/CreateDealModal';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { DealOverviewCard } from '../components/DealOverviewCard';
-import { syncAirtableToSupabase, updateAirtableRecord } from '../lib/sync';
+import { syncAirtableToSupabase, updateAirtableRecord, deleteAirtableRecord } from '../lib/sync';
 
 export const Dashboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -101,11 +101,36 @@ export const Dashboard: React.FC = () => {
       if (error) throw error;
       setToast({ message: "Stage updated & synced", type: 'success' });
 
-    } catch (error) {
       console.error("Error updating stage:", error);
       setToast({ message: "Failed to update stage", type: 'error' });
       // Revert optimistic update?
       setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: deal.stage } : d));
+    }
+  };
+
+  const handleDeleteDeal = async (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+
+    // Optimistic Remove
+    setDeals(prev => prev.filter(d => d.id !== dealId));
+
+    try {
+      // 1. Delete from Airtable
+      if (deal.airtable_id) {
+        await deleteAirtableRecord(deal.airtable_id);
+      }
+
+      // 2. Delete from Supabase
+      const { error } = await supabase.from('deal_vault').delete().eq('id', dealId);
+      if (error) throw error;
+
+      setToast({ message: "Deal deleted completely.", type: 'success' });
+
+    } catch (err) {
+      console.error("Deletion failed:", err);
+      setToast({ message: "Failed to delete deal", type: 'error' });
+      fetchData(); // Revert
     }
   };
 
@@ -209,6 +234,7 @@ export const Dashboard: React.FC = () => {
                 key={deal.id}
                 deal={deal}
                 onStageUpdate={handleStageUpdate}
+                onDelete={handleDeleteDeal}
               />
             ))}
           </div>

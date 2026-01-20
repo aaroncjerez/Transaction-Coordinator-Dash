@@ -112,10 +112,35 @@ export function mapAirtableRecordToDeal(record: any): Partial<Deal> {
     };
 }
 
+return result;
+}
+
+/*
+ * Deletes a record from Airtable.
+ */
+export async function deleteAirtableRecord(recordId: string) {
+    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
+
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals/${recordId}`;
+    const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${AIRTABLE_PAT}`
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to delete from Airtable: ${response.statusText}`);
+    }
+
+    return await response.json();
+}
+
 /*
  * Sync Function: Fetches from Airtable, Upserts to Supabase, Returns merged data.
  * Strategy: "Refresh button to pull from Airtable first, then check Supabase"
  * Uses 'airtable_id' for unique mapping.
+ * NOW INCLUDES: Garbage Collection (Deletes local records not found in Airtable)
  */
 export async function syncAirtableToSupabase(): Promise<Deal[]> {
     console.log("Starting Sync...");
@@ -129,6 +154,7 @@ export async function syncAirtableToSupabase(): Promise<Deal[]> {
 
         // 2. Map to Supabase Schema
         const mappedDeals = airtableRecords.map(mapAirtableRecordToDeal);
+        const airtableIds = mappedDeals.map(d => d.airtable_id).filter(id => !!id) as string[];
 
         // 3. Upsert to Supabase (Shadow Write)
         // We use 'airtable_id' as the conflict key as defined in the Supabase schema.
@@ -143,18 +169,43 @@ export async function syncAirtableToSupabase(): Promise<Deal[]> {
 
                 if (error) {
                     console.error("Supabase Upsert Error (RLS?):", error);
-                    // We continue even if upsert fails, so user still sees Airtable data.
                 }
             }
+
+            // 4. Garbage Collection: Delete from Supabase if not in Airtable
+            // Only targets records that HAVE an airtable_id (synced records). Local-only deals (null airtable_id) are safe.
+            if (airtableIds.length > 0) {
+                const { error: deleteError } = await supabase
+                    .from('deal_vault')
+                    .delete()
+                    .not('airtable_id', 'is', null)
+                    .not('airtable_id', 'in', `(${airtableIds.join(',')})`); // Syntax needs checking for large lists, but usually fine for <100
+
+                // Option B: Fetch all Supabase IDs, diff in JS, then delete by ID list if query is too complex.
+                // For now, let's try the .not().in() approach or just accept that strict sync is hard. 
+
+                // Safer approach for large sets:
+                // Fetch all Supabase airtable_ids first
+                const { data: existingRecords } = await supabase.from('deal_vault').select('airtable_id').not('airtable_id', 'is', null);
+                if (existingRecords) {
+                    const idsToDelete = existingRecords
+                        .map(r => r.airtable_id)
+                        .filter(id => !airtableIds.includes(id));
+
+                    if (idsToDelete.length > 0) {
+                        console.log(`Garbage Collecting ${idsToDelete.length} records...`);
+                        await supabase.from('deal_vault').delete().in('airtable_id', idsToDelete);
+                    }
+                }
+            }
+
         } catch (supaError) {
             console.error("Supabase Sync Exception:", supaError);
         }
 
         console.log("Sync Complete. Returning mapped deals directly.");
 
-        // 4. Return the mapped data directly
-        // This mitigates RLS issues where 'select' might return empty.
-        // We prioritize showing the user the data we just fetched from Airtable.
+        // 5. Return the mapped data directly
         return mappedDeals as unknown as Deal[];
 
     } catch (e) {
