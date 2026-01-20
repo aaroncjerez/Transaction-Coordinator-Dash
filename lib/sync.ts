@@ -13,32 +13,63 @@ if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) {
  * Fetches all records from the 'Deals' table in Airtable.
  */
 export async function fetchAirtableDeals(): Promise<any[]> {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) return [];
+    // Use Serverless Function to proxy request (avoids CORS and handles Env vars securely)
+    // In local development with 'vite', this might 404 unless we setup a proxy or run 'vercel dev'.
+    // We will attempt the API route first.
+
+    try {
+        const response = await fetch('/api/sync');
+
+        // If API route is not found (e.g. local without vercel dev), fallback to direct logic if Env vars exist
+        // Note: Direct logic requires VITE_ keys to be exposed to client. 
+        if (response.status === 404 && import.meta.env.DEV) {
+            console.warn("API route not found (local?), falling back to direct fetch.");
+            return fetchAirtableDealsDirect();
+        }
+
+        if (!response.ok) {
+            throw new Error(`Sync API failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return data.records || [];
+    } catch (error) {
+        console.error("Error fetching from /api/sync:", error);
+        // Fallback or re-throw? 
+        // If we are local and simple 'fetch' failed, maybe try direct?
+        if (import.meta.env.DEV) {
+            return fetchAirtableDealsDirect();
+        }
+        throw error;
+    }
+}
+
+/*
+ * Legacy/Local Method: Fetches directly from Airtable (Client-side)
+ * Kept for local dev fallback.
+ */
+async function fetchAirtableDealsDirect(): Promise<any[]> {
+    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) {
+        console.error("Missing Airtable keys for direct fetch");
+        return [];
+    }
 
     let allRecords: any[] = [];
     let offset = '';
-
-    const headers = {
-        Authorization: `Bearer ${AIRTABLE_PAT}`
-    };
+    const headers = { Authorization: `Bearer ${AIRTABLE_PAT}` };
 
     try {
         do {
             const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals?offset=${offset}`;
             const response = await fetch(url, { headers });
-
-            if (!response.ok) {
-                throw new Error(`Airtable fetch failed: ${response.statusText}`);
-            }
-
+            if (!response.ok) throw new Error(`Airtable fetch failed: ${response.statusText}`);
             const data = await response.json();
             allRecords = [...allRecords, ...data.records];
             offset = data.offset;
         } while (offset);
-
         return allRecords;
     } catch (error) {
-        console.error("Error fetching from Airtable:", error);
+        console.error("Direct Airtable fetch failed:", error);
         throw error;
     }
 }
