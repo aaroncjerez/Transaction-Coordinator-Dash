@@ -2,12 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, FileText, Edit2, Calendar, DollarSign, ExternalLink, X, Check, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { DEAL_STAGES } from '../constants';
+import { DEAL_STAGES, DEAL_TYPES } from '../constants';
+import { updateAirtableRecord } from '../lib/sync';
+import { uploadFileAirtableFirst } from '../lib/uploadHandler';
 
 // Data Types
 interface DealDetailData {
     id: string;
+    airtable_id: string; // Add this
     deal_name: string;
+    deal_type?: string;
     stage: string;
     county: string;
     state: string;
@@ -32,10 +36,30 @@ export const DealDetail: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'details' | 'files' | 'chat'>('details');
 
-    // Stage Editing State
-    const [isEditingStage, setIsEditingStage] = useState(false);
-    const [selectedStage, setSelectedStage] = useState('');
-    const [updatingStage, setUpdatingStage] = useState(false);
+    // Airtable Sync Helper
+    const syncToAirtable = async (field: string, value: any) => {
+        if (!deal?.airtable_id) return;
+
+        try {
+            const fieldMap: Record<string, string> = {
+                'stage': 'Stage',
+                'deal_type': 'Deal type',
+                'purchase_price': 'Purchase Price',
+                'expected_sales_price': 'Expected sales price',
+                'contract_date': 'Contract Execution date',
+                'close_date': 'Close date',
+                'phone_number': 'Phone (from Contacts)',
+                'notes': 'Notes',
+            };
+
+            const airtableField = fieldMap[field] || field;
+            await updateAirtableRecord(deal.airtable_id, { [airtableField]: value });
+            console.log(`Synced ${airtableField} to Airtable.`);
+
+        } catch (airtableError) {
+            console.warn('Airtable sync failed:', airtableError);
+        }
+    };
 
     // Detail Auto-Save Handler
     const handleFieldUpdate = async (field: keyof DealDetailData, value: any) => {
@@ -55,21 +79,8 @@ export const DealDetail: React.FC = () => {
             if (error) throw error;
 
             // Sync to Airtable
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                const dbField = field === 'contract_date' ? 'contract_execution_date' : field;
-                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-                await fetch(`${supabaseUrl}/functions/v1/update-airtable`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${session?.access_token || ''}`,
-                    },
-                    body: JSON.stringify({ dealId: deal.id, field: dbField, value }),
-                });
-            } catch (airtableError) {
-                console.warn('Airtable sync failed:', airtableError);
-            }
+            await syncToAirtable(field, value);
+
         } catch (error) {
             console.error('Error auto-saving:', error);
         }
@@ -126,6 +137,7 @@ export const DealDetail: React.FC = () => {
             // 4. Transform to State
             setDeal({
                 id: dealData.id,
+                airtable_id: dealData.airtable_id, // Map it
                 deal_name: dealData.deal_name || 'Unnamed Deal',
                 deal_type: dealData.deal_type || 'Unclassified',
                 stage: dealData.stage || 'New',
@@ -157,105 +169,75 @@ export const DealDetail: React.FC = () => {
         { key: 'funding_agreement_files', label: 'Funding Agreement', type: 'other' },
     ] as const;
 
+
+
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, categoryKey: string) => {
         if (!event.target.files || event.target.files.length === 0 || !deal) return;
 
         const file = event.target.files[0];
-        const filePath = `${deal.id}/${categoryKey}/${Date.now()}_${file.name}`;
+
 
         try {
-            setLoading(true); // Re-use loading or create new state? Better create 'uploading' state if specific UI needed, but global loading is safe for now to prevent interactions.
+            setLoading(true);
 
-            // 1. Upload to Storage
-            const { error: uploadError } = await supabase.storage
-                .from('deal_attachments') // Ensure this bucket exists!
-                .upload(filePath, file);
+            if (deal.airtable_id) {
+                // Use new Airtable-First Logic
+                await uploadFileAirtableFirst(deal.airtable_id, file, categoryKey, (msg) => console.log(msg));
 
-            if (uploadError) throw uploadError;
+                // Refresh local state by fetching (or relying on result)
+                fetchDealData(deal.id);
+                alert('File uploaded via Airtable-First pipeline!');
 
-            // 2. Get Public URL
-            const { data: { publicUrl } } = supabase.storage
-                .from('deal_attachments')
-                .getPublicUrl(filePath);
+            } else {
+                // Fallback for non-synced deals (e.g. newly created locally)
+                // Existing Supabase-only logic
+                const filePath = `${deal.id}/${categoryKey}/${Date.now()}_${file.name}`;
+                const { error: uploadError } = await supabase.storage
+                    .from('transaction-docs')
+                    .upload(filePath, file);
 
-            // 3. Update Database (deal_vault)
-            // Need to fetch current array first? or append using Postgres function?
-            // Easiest is to READ deals current data for this column, append, UPDATE.
-            // But we have `deal.files` which is aggregated. We don't have the raw column data in state easily.
-            // I'll fetch the specific column.
+                if (uploadError) throw uploadError;
 
-            const { data: currentData, error: fetchError } = await supabase
-                .from('deal_vault')
-                .select(categoryKey)
-                .eq('id', deal.id)
-                .single();
+                const { data: { publicUrl } } = supabase.storage
+                    .from('transaction-docs')
+                    .getPublicUrl(filePath);
 
-            if (fetchError) throw fetchError;
+                const { data: currentData, error: fetchError } = await supabase
+                    .from('deal_vault')
+                    .select(categoryKey)
+                    .eq('id', deal.id)
+                    .single();
 
-            const currentFiles = currentData[categoryKey] || [];
-            const newFileObj = { name: file.name, url: publicUrl, uploaded_at: new Date().toISOString() };
-            const updatedFiles = [...currentFiles, newFileObj];
+                if (fetchError) throw fetchError;
 
-            const { error: updateError } = await supabase
-                .from('deal_vault')
-                .update({ [categoryKey]: updatedFiles })
-                .eq('id', deal.id);
+                const currentFiles = currentData[categoryKey] || [];
+                const newFileObj = { name: file.name, url: publicUrl, uploaded_at: new Date().toISOString() };
+                const updatedFiles = [...currentFiles, newFileObj];
 
-            if (updateError) throw updateError;
+                const { error: updateError } = await supabase
+                    .from('deal_vault')
+                    .update({ [categoryKey]: updatedFiles })
+                    .eq('id', deal.id);
 
-            // 4. Update Local State
-            // We need to add to `deal.files` logic.
-            // Currently `deal.files` is a flattened list.
-            // I should construct the new flattened item.
-            const category = FILE_CATEGORIES.find(c => c.key === categoryKey);
-            const newFlatFile = {
-                name: file.name,
-                url: publicUrl,
-                type: category?.type || 'other'
-            };
+                if (updateError) throw updateError;
 
-            // Re-fetch deal data to be safe? Or update state.
-            // Updating state is faster.
-            setDeal(prev => {
-                if (!prev) return null;
-                return {
-                    ...prev,
-                    files: [...prev.files, newFlatFile as any]
-                };
-            });
+                setDeal(prev => {
+                    if (!prev) return null;
+                    const newFlatFile = { name: file.name, url: publicUrl, type: FILE_CATEGORIES.find(c => c.key === categoryKey)?.type || 'other' };
+                    return { ...prev, files: [...prev.files, newFlatFile as any] };
+                });
+                alert('File uploaded to Supabase (Local Deal)!');
+            }
 
-            alert('File uploaded successfully!');
-
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error uploading file:', error);
-            alert('Failed to upload file.');
+            alert(error.message || 'Failed to upload file.');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleUpdateStage = async () => {
-        if (!deal || !selectedStage) return;
 
-        try {
-            setUpdatingStage(true);
-            const { error } = await supabase
-                .from('deal_vault')
-                .update({ stage: selectedStage })
-                .eq('id', deal.id);
-
-            if (error) throw error;
-
-            // Optimistic update
-            setDeal(prev => prev ? { ...prev, stage: selectedStage } : null);
-            setIsEditingStage(false);
-        } catch (error) {
-            console.error('Error updating stage:', error);
-            alert('Failed to update stage. Please try again.');
-        } finally {
-            setUpdatingStage(false);
-        }
-    };
 
     if (loading) return <div className="p-8 text-center text-gray-500">Loading deal details...</div>;
     if (!deal) return <div className="p-8 text-center text-red-500">Deal not found.</div>;
@@ -270,76 +252,31 @@ export const DealDetail: React.FC = () => {
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900">{deal.deal_name}</h1>
                     <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-                        <span className="font-medium text-gray-700">{deal.deal_type}</span>
+                        <select
+                            value={deal.deal_type}
+                            onChange={(e) => handleFieldUpdate('deal_type', e.target.value)}
+                            className="bg-transparent font-medium text-gray-700 hover:bg-gray-100 rounded px-1 -ml-1 py-0.5 border border-transparent hover:border-gray-200 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none cursor-pointer"
+                        >
+                            {DEAL_TYPES.map(type => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                        </select>
                         <span>•</span>
-                        <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-medium">{deal.stage}</span>
+                        <select
+                            value={deal.stage}
+                            onChange={(e) => handleFieldUpdate('stage', e.target.value)}
+                            className="bg-blue-100 text-blue-800 text-xs font-medium rounded-full px-2 py-0.5 border border-transparent hover:border-blue-300 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none cursor-pointer appearance-none"
+                            style={{ textAlignLast: 'center' }}
+                        >
+                            {DEAL_STAGES.map(stage => (
+                                <option key={stage} value={stage}>{stage}</option>
+                            ))}
+                        </select>
                         <span>•</span>
                         <span>{deal.county}, {deal.state}</span>
                     </div>
                 </div>
-                <div className="ml-auto flex gap-2">
-                    <button
-                        onClick={() => {
-                            setSelectedStage(deal.stage);
-                            setIsEditingStage(true);
-                        }}
-                        className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
-                    >
-                        <Edit2 size={16} /> Edit Stage
-                    </button>
-                </div>
             </div>
-
-            {/* Stage Edit Modal */}
-            {isEditingStage && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-                    <div className="bg-white rounded-lg shadow-xl p-6 w-96 max-w-full">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-lg font-bold text-gray-900">Update Stage</h3>
-                            <button onClick={() => setIsEditingStage(false)} className="text-gray-400 hover:text-gray-600">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="space-y-3">
-                            <label className="block text-sm font-medium text-gray-700">Select New Stage</label>
-                            <div className="grid grid-cols-1 gap-2">
-                                {DEAL_STAGES.map((stage) => (
-                                    <button
-                                        key={stage}
-                                        onClick={() => setSelectedStage(stage)}
-                                        className={`px-4 py-2 text-left rounded-md text-sm transition-colors ${selectedStage === stage
-                                            ? 'bg-blue-50 text-blue-700 font-medium border border-blue-200'
-                                            : 'hover:bg-gray-50 text-gray-700 border border-transparent'
-                                            }`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            {stage}
-                                            {selectedStage === stage && <Check size={16} />}
-                                        </div>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="mt-6 flex justify-end gap-3">
-                            <button
-                                onClick={() => setIsEditingStage(false)}
-                                className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm font-medium"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleUpdateStage}
-                                disabled={updatingStage}
-                                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                            >
-                                {updatingStage ? 'Saving...' : 'Save Changes'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Tabs */}
             <div className="border-b border-gray-200">

@@ -71,3 +71,32 @@ export interface Task {
   deal_id?: string;
   airtable_id?: string;
 }
+
+export interface Deal {
+  id: string; // Supabase UUID
+  airtable_id: string; // Airtable Record ID
+  created_at?: string;
+  deal_name: string; // "Last Name - County, State"
+  last_name?: string;
+  deal_type: string;
+  stage: string;
+  county: string;
+  state: string;
+  notes?: string;
+  purchase_price: number;
+  expected_sales_price: number;
+  contract_execution_date?: string;
+  expected_close_date?: string;
+  close_date?: string;
+  phone_number?: string;
+  assigned_to?: any;
+  days_to_close?: string;
+  purchase_agreement_files?: any[];
+  funding_agreement_files?: any[];
+  deed_files?: any[];
+  plat_files?: any[];
+  soil_test_files?: any[];
+  hud_files?: any[];
+  sale_contract_files?: any[];
+  due_diligence_link?: string;
+}

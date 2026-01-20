@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, ArrowUpRight, ArrowDownRight, RefreshCw, Bell } from 'lucide-react';
 import { MOCK_USERS, MOCK_METRICS } from '../constants';
-import { User, Metric } from '../types';
+import { User, Metric, Deal } from '../types';
 import { DataTable } from '../components/DataTable';
 import { Button } from '../components/ui/Button';
-import { CreateUserModal } from '../components/CreateUserModal';
+
+import { CreateDealModal } from '../components/CreateDealModal';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { DealOverviewCard } from '../components/DealOverviewCard';
+import { syncAirtableToSupabase, updateAirtableRecord } from '../lib/sync';
 
 export const Dashboard: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -16,64 +18,94 @@ export const Dashboard: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  const [deals, setDeals] = useState<any[]>([]);
+  const [deals, setDeals] = useState<Deal[]>([]);
   const [viewMode, setViewMode] = useState<'All' | 'Live'>('Live');
 
   // Initial Data Fetch
+  const fetchData = async () => {
+    try {
+      setIsLoading(true);
+
+      const { data: fetchedDeals, error } = await supabase
+        .from('deal_vault')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setDeals((fetchedDeals || []) as Deal[]);
+
+      const activeDeals = fetchedDeals?.filter(d => !['Closed', 'Dead', 'Cancelled'].includes(d.stage)) || [];
+
+      const newMetrics: Metric[] = [
+        { label: 'Active Deals', value: activeDeals.length.toString(), trend: 0, trendDirection: 'neutral' },
+      ];
+
+      setMetrics(newMetrics);
+      setUsers(MOCK_USERS);
+
+    } catch (err) {
+      console.error("Error fetching dashboard data:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-
-        const { data: fetchedDeals, error } = await supabase
-          .from('deal_vault')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-        setDeals(fetchedDeals || []);
-
-        const activeDeals = fetchedDeals?.filter(d => !['Closed', 'Dead', 'Cancelled'].includes(d.stage)) || [];
-
-        const newMetrics: Metric[] = [
-          { label: 'Active Deals', value: activeDeals.length.toString(), trend: 0, trendDirection: 'neutral' },
-        ];
-
-        setMetrics(newMetrics);
-        setUsers(MOCK_USERS);
-
-      } catch (err) {
-        console.error("Error fetching dashboard data:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
     fetchData();
-  }, [isRefreshing]);
+  }, []); // Only run once on mount
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    setTimeout(() => setIsRefreshing(false), 500);
-  };
+    try {
+      // Sync Logic: Pull from Airtable first, then check Supabase (Sync returns fresh data)
+      const syncedDeals = await syncAirtableToSupabase();
 
-  const handleCreateUser = async (newUser: any) => {
-    setToast({ message: "Feature coming soon", type: 'success' });
-    setIsModalOpen(false);
+      // If sync returns empty (unconfigured), we might fallback or just toast.
+      // Assuming syncDealsFromAirtable handles the "check Supabase" part by upserting and returning fresh data.
+      if (syncedDeals.length > 0) {
+        setDeals(syncedDeals);
+        setToast({ message: "Synced with Airtable", type: 'success' });
+      } else {
+        // Fallback fetch if sync failed/empty (or if keys missing)
+        const { data } = await supabase.from('deal_vault').select('*').order('created_at', { ascending: false });
+        setDeals((data || []) as Deal[]);
+        setToast({ message: "Refreshed (Airtable Sync unavailable)", type: 'success' }); // Warning?
+      }
+    } catch (e) {
+      console.error("Sync failed:", e);
+      setToast({ message: "Sync failed", type: 'error' });
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleStageUpdate = async (dealId: string, newStage: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+
+    // Optimistic Update
     setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: newStage } : d));
 
-    const { error } = await supabase
-      .from('deal_vault')
-      .update({ stage: newStage })
-      .eq('id', dealId);
+    try {
+      // 1. Update Airtable (if linked)
+      if (deal.airtable_id && !deal.airtable_id.startsWith('temp-')) {
+        await updateAirtableRecord(deal.airtable_id, { "Stage": newStage });
+      }
 
-    if (error) {
+      // 2. Shadow Write (Upsert) to Supabase
+      const { error } = await supabase
+        .from('deal_vault')
+        .upsert({ ...deal, stage: newStage }) // Upsert entire object or just fields? upsert needs PK.
+        .eq('id', dealId); // Upsert doesn't need .eq, it needs payload with PK.
+
+      if (error) throw error;
+      setToast({ message: "Stage updated & synced", type: 'success' });
+
+    } catch (error) {
       console.error("Error updating stage:", error);
       setToast({ message: "Failed to update stage", type: 'error' });
-    } else {
-      setToast({ message: "Stage updated", type: 'success' });
+      // Revert optimistic update?
+      setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: deal.stage } : d));
     }
   };
 
@@ -103,7 +135,7 @@ export const Dashboard: React.FC = () => {
           <p className="text-sm text-gray-500">Manage {activeDealsCount} Active Deals</p>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="icon" onClick={handleRefresh}>
+          <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isRefreshing}>
             <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
           </Button>
           <Button onClick={() => setIsModalOpen(true)}>
@@ -172,11 +204,15 @@ export const Dashboard: React.FC = () => {
         )}
       </main>
 
-      <CreateUserModal
+      <CreateDealModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onSubmit={handleCreateUser}
+        onSuccess={() => {
+          setToast({ message: "Deal Created in Supabase (Sync pending)", type: 'success' });
+          fetchData();
+        }}
       />
     </div>
   );
 };
+

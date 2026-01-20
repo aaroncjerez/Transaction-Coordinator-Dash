@@ -64,7 +64,7 @@ serve(async (req) => {
         // Update Airtable
         const airtablePat = Deno.env.get('AIRTABLE_PAT')!
         const airtableBaseId = Deno.env.get('AIRTABLE_BASE_ID')!
-        const airtableUrl = `https://api.airtable.com/v0/${airtableBaseId}/Deal%20CRM/${dealData.airtable_id}`
+        const airtableUrl = `https://api.airtable.com/v0/${airtableBaseId}/Transactions/${dealData.airtable_id}`
 
         const airtableResponse = await fetch(airtableUrl, {
             method: 'PATCH',

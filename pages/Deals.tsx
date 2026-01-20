@@ -2,21 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { Search, Plus, Filter, MoreHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { CreateDealModal } from '../components/CreateDealModal';
 
 // Mock Data Type
-interface Deal {
-    id: string;
-    deal_name: string;
-    stage: string;
-    purchase_price: number;
-    expected_sales_price: number;
-    close_date: string;
-    phone_number: string;
-}
+import { Deal } from '../types';
 
 export const Deals: React.FC = () => {
+    const navigate = useNavigate();
     const [deals, setDeals] = useState<Deal[]>([]);
     const [loading, setLoading] = useState(true);
+
+
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
     useEffect(() => {
         fetchDeals();
@@ -35,10 +32,18 @@ export const Deals: React.FC = () => {
                 // Map Supabase fields to Deal interface
                 const mappedDeals: Deal[] = (data || []).map((item: any) => ({
                     id: item.id,
-                    deal_name: item.deal_type || 'Unnamed Deal', // Using deal_type as a proxy for name based on schema
-                    stage: item.deal_type || 'New', // Fallback
+                    airtable_id: item.airtable_id || '',
+                    deal_name: item.deal_name || item.deal_type || 'Unnamed Deal',
+                    last_name: item.last_name,
+                    deal_type: item.deal_type || 'New',
+                    stage: item.stage || 'New',
+                    county: item.county,
+                    state: item.state,
+                    notes: item.notes,
                     purchase_price: item.purchase_price || 0,
                     expected_sales_price: item.expected_sales_price || 0,
+                    contract_execution_date: item.contract_execution_date,
+                    expected_close_date: item.expected_close_date,
                     close_date: item.close_date || 'TBD',
                     phone_number: item.phone_number || 'No Phone'
                 }));
@@ -59,7 +64,10 @@ export const Deals: React.FC = () => {
                     <h2 className="text-2xl font-bold text-gray-900">Deals</h2>
                     <p className="text-sm text-gray-500">Manage all active transactions</p>
                 </div>
-                <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm">
+                <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors shadow-sm"
+                >
                     <Plus size={18} />
                     New Deal
                 </button>
@@ -87,7 +95,11 @@ export const Deals: React.FC = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {deals.map((deal) => (
-                        <div key={deal.id} className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer group">
+                        <div
+                            key={deal.id}
+                            onClick={() => navigate(`/deals/${deal.id}`)}
+                            className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow cursor-pointer group"
+                        >
                             <div className="flex justify-between items-start mb-4">
                                 <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide">
                                     {deal.stage}
@@ -118,6 +130,13 @@ export const Deals: React.FC = () => {
                     ))}
                 </div>
             )}
+
+            <CreateDealModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                onSuccess={fetchDeals}
+            />
         </div>
     );
 };
+

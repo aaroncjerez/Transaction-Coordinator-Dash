@@ -52,10 +52,15 @@ export const DEAL_STAGES = [
   'Due Diligence',
   'Sent to Escrow',
   'Purchase Escrow',
-  'Purchased Escrow',
   'Purchased',
   'Listed',
   'Sale Escrow',
   'Sold',
   'Cancelled'
 ];
+
+export const DEAL_TYPES = [
+  'Standard flip',
+  'Double close',
+  'Subdivide'
+] as const;

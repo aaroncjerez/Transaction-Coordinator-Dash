@@ -5,7 +5,8 @@ import os
 image = modal.Image.debian_slim().pip_install(
     "google-cloud-aiplatform",
     "requests",
-    "supabase"
+    "supabase",
+    "fastapi"
 )
 
 app = modal.App("tc-engine-intelligence")
@@ -125,3 +126,21 @@ def test_pdf_extraction():
     test_pdf_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" 
     result = process_pdf.remote(test_pdf_url, "test-deal-123")
     print(result)
+
+@app.function(image=image, secrets=[modal.Secret.from_name("tc-engine-secrets")])
+@modal.web_endpoint(method="POST")
+def trigger_process_pdf(data: dict):
+    """
+    Web endpoint to trigger PDF processing from the dashboard.
+    Payload: {"url": "...", "deal_id": "..."}
+    """
+    url = data.get("url")
+    deal_id = data.get("deal_id")
+    
+    if not url or not deal_id:
+        return {"error": "Missing url or deal_id"}, 400
+        
+    # Trigger the processing function asynchronously
+    process_pdf.remote(url, deal_id)
+    
+    return {"status": "queued", "message": f"Processing started for {deal_id}"}

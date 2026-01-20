@@ -1,0 +1,412 @@
+Fetching schema for Base ID: appASpAOe1qaXiH84...
+{
+  "status": "success",
+  "found_tables": [
+    "Deals",
+    "Tasks"
+  ],
+  "details": {
+    "Deals": {
+      "id": "tblWdXFCmC7Bhja2b",
+      "name": "Deals",
+      "primaryFieldId": "fldNuVqvXtuZ9Bwz3",
+      "fields": [
+        {
+          "type": "formula",
+          "options": {
+            "isValid": true,
+            "formula": "CONCATENATE({fldQAQLSjT3NyrXyN}, \" - \", {fldYoxjTZsWNtodUM}, \", \", {fldC1naaAlfBLGcQG})",
+            "referencedFieldIds": [
+              "fldQAQLSjT3NyrXyN",
+              "fldYoxjTZsWNtodUM",
+              "fldC1naaAlfBLGcQG"
+            ],
+            "result": {
+              "type": "singleLineText"
+            }
+          },
+          "id": "fldNuVqvXtuZ9Bwz3",
+          "name": "Deal Name",
+          "description": "Concatenates the Contacts, County, and State fields in the format: Contact | County, State."
+        },
+        {
+          "type": "singleSelect",
+          "options": {
+            "choices": [
+              {
+                "id": "sel6oJfBpjUBdVWKh",
+                "name": "Offer accepted",
+                "color": "greenLight2"
+              },
+              {
+                "id": "sel2Fg6yb0FL16PIL",
+                "name": "Due Diligence",
+                "color": "greenLight1"
+              },
+              {
+                "id": "selY5Kn0AO05bbWHf",
+                "name": "Send to escrow",
+                "color": "greenBright"
+              },
+              {
+                "id": "sel4JyzIljOmLFza6",
+                "name": "Purchase escrow",
+                "color": "greenDark1"
+              },
+              {
+                "id": "selQ17G7hIgnXM2WQ",
+                "name": "Purchased",
+                "color": "grayLight2"
+              },
+              {
+                "id": "sellxQmvy20wddtR8",
+                "name": "Listed",
+                "color": "grayLight1"
+              },
+              {
+                "id": "selsNO7isfmFkj9OB",
+                "name": "Sale escrow",
+                "color": "purpleLight1"
+              },
+              {
+                "id": "selcgMDxE5yqx1r5m",
+                "name": "Sold",
+                "color": "grayDark1"
+              },
+              {
+                "id": "selhUXjPwhANMjGRQ",
+                "name": "Cancelled",
+                "color": "redBright"
+              }
+            ]
+          },
+          "id": "fldvweiL8hhfighfH",
+          "name": "Stage"
+        },
+        {
+          "type": "singleSelect",
+          "options": {
+            "choices": [
+              {
+                "id": "selCrrb93isbIvsAy",
+                "name": "Standard flip",
+                "color": "greenLight2"
+              },
+              {
+                "id": "selpH3f030gUH4fEI",
+                "name": "Double close",
+                "color": "tealLight2"
+              },
+              {
+                "id": "selKC8JSrDWkmnoAv",
+                "name": "Subdivide",
+                "color": "cyanLight2"
+              }
+            ]
+          },
+          "id": "flda3PDzfyNbIYvPe",
+          "name": "Deal type"
+        },
+        {
+          "type": "singleLineText",
+          "id": "fldYoxjTZsWNtodUM",
+          "name": "County"
+        },
+        {
+          "type": "singleLineText",
+          "id": "fldC1naaAlfBLGcQG",
+          "name": "State"
+        },
+        {
+          "type": "multilineText",
+          "id": "fldrLJz3yvRwunHXB",
+          "name": "Notes"
+        },
+        {
+          "type": "currency",
+          "options": {
+            "precision": 0,
+            "symbol": "$"
+          },
+          "id": "fldcXSxWCMkKllrPN",
+          "name": "Purchase Price"
+        },
+        {
+          "type": "currency",
+          "options": {
+            "precision": 2,
+            "symbol": "$"
+          },
+          "id": "fldYY8gffTxrkAA8e",
+          "name": "Expected sales price"
+        },
+        {
+          "type": "date",
+          "options": {
+            "dateFormat": {
+              "name": "local",
+              "format": "l"
+            }
+          },
+          "id": "fldQKC6W3UrsdYHc1",
+          "name": "Contract Execution date"
+        },
+        {
+          "type": "date",
+          "options": {
+            "dateFormat": {
+              "name": "us",
+              "format": "M/D/YYYY"
+            }
+          },
+          "id": "fldKyTnTC6zKBA9Dn",
+          "name": "Expected close date"
+        },
+        {
+          "type": "date",
+          "options": {
+            "dateFormat": {
+              "name": "local",
+              "format": "l"
+            }
+          },
+          "id": "fldnxxYyI319KCoOz",
+          "name": "Close date"
+        },
+        {
+          "type": "formula",
+          "options": {
+            "isValid": true,
+            "formula": "IF({fldnxxYyI319KCoOz}, DATETIME_DIFF({fldnxxYyI319KCoOz}, TODAY(), 'days'), \"Unknown\")",
+            "referencedFieldIds": [
+              "fldnxxYyI319KCoOz"
+            ],
+            "result": {
+              "type": "singleLineText"
+            }
+          },
+          "id": "fldgavA9ecTta13dj",
+          "name": "Days To Close",
+          "description": "Counts the number of days from today until the Close date, or shows 'unknown' if blank."
+        },
+        {
+          "type": "autoNumber",
+          "id": "fldujGscE7qKP69wb",
+          "name": "Deal ID"
+        },
+        {
+          "type": "singleCollaborator",
+          "id": "fldibKEKxHD8ImDJj",
+          "name": "Assigned To"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldQ2qHoKb3x8bAdU",
+          "name": "Purchase Agreement"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldfbawfyuyV8TdfI",
+          "name": "Funding agreement"
+        },
+        {
+          "type": "url",
+          "id": "fldpVzc3lgNIRdLyZ",
+          "name": "Due Diligence link"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldHH789MHOwM7W37",
+          "name": "Deed"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldYhss7KAeuWVcKL",
+          "name": "Plat"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldVOxGCxL0u0wV5a",
+          "name": "Soil test"
+        },
+        {
+          "type": "multipleRecordLinks",
+          "options": {
+            "linkedTableId": "tblYlhnGA22TfZ9Qw",
+            "isReversed": false,
+            "prefersSingleRecordLink": false,
+            "inverseLinkFieldId": "fldjLQXN9CgkHNnzB"
+          },
+          "id": "fldQAQLSjT3NyrXyN",
+          "name": "Contacts"
+        },
+        {
+          "type": "multipleRecordLinks",
+          "options": {
+            "linkedTableId": "tblR28xzcjFrG1vRu",
+            "isReversed": false,
+            "prefersSingleRecordLink": false,
+            "inverseLinkFieldId": "fldBV0UGTZhLO7ydO"
+          },
+          "id": "fldS5S1vdxanoI7Rz",
+          "name": "Tasks"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fld4QYxdCVsbIionv",
+          "name": "HUD"
+        },
+        {
+          "type": "multipleAttachments",
+          "options": {
+            "isReversed": false
+          },
+          "id": "fldaZWJt69GDahcol",
+          "name": "Sale Contract"
+        },
+        {
+          "type": "multipleLookupValues",
+          "options": {
+            "isValid": true,
+            "recordLinkFieldId": "fldQAQLSjT3NyrXyN",
+            "fieldIdInLinkedTable": "flddHvsM0oiDnSKRG",
+            "result": {
+              "type": "phoneNumber"
+            }
+          },
+          "id": "fldd38KAMwZ171E1o",
+          "name": "Phone (from Contacts)"
+        }
+      ],
+      "views": [
+        {
+          "id": "viwO8vHiJ5fXZt0KW",
+          "name": "All Deals",
+          "type": "grid"
+        },
+        {
+          "id": "viwU13fYCRx415iSS",
+          "name": "Live Deals",
+          "type": "grid"
+        }
+      ]
+    },
+    "Tasks": {
+      "id": "tblR28xzcjFrG1vRu",
+      "name": "Tasks",
+      "primaryFieldId": "fld5IM5ULkIPdl9o7",
+      "fields": [
+        {
+          "type": "formula",
+          "options": {
+            "isValid": true,
+            "formula": "CONCATENATE(\n  {fldpDSg2idTyRjCyx},\n  \" | \",\n  SUBSTITUTE({fldBV0UGTZhLO7ydO}, '\"', \"\")\n)",
+            "referencedFieldIds": [
+              "fldpDSg2idTyRjCyx",
+              "fldBV0UGTZhLO7ydO"
+            ],
+            "result": {
+              "type": "singleLineText"
+            }
+          },
+          "id": "fld5IM5ULkIPdl9o7",
+          "name": "Name",
+          "description": "Concatenates the Task name and Deals fields"
+        },
+        {
+          "type": "singleLineText",
+          "id": "fldpDSg2idTyRjCyx",
+          "name": "Task name"
+        },
+        {
+          "type": "singleSelect",
+          "options": {
+            "choices": [
+              {
+                "id": "seli3d6rvSGVDLkhV",
+                "name": "To do",
+                "color": "redDark1"
+              },
+              {
+                "id": "selQolVYvEjgzmYZa",
+                "name": "In progress",
+                "color": "yellowLight2"
+              },
+              {
+                "id": "selINuzOWQG2iIPee",
+                "name": "Done",
+                "color": "greenDark1"
+              },
+              {
+                "id": "selzFK6dbIcTbAKzb",
+                "name": "Canceled",
+                "color": "grayLight1"
+              }
+            ]
+          },
+          "id": "fldLcXzYAG5oTLMk0",
+          "name": "Status"
+        },
+        {
+          "type": "multilineText",
+          "id": "fldLEmfusp10Wy4QC",
+          "name": "Notes"
+        },
+        {
+          "type": "singleCollaborator",
+          "id": "fldIdLo9626HqqG3C",
+          "name": "Assignee"
+        },
+        {
+          "type": "multipleRecordLinks",
+          "options": {
+            "linkedTableId": "tblWdXFCmC7Bhja2b",
+            "isReversed": false,
+            "prefersSingleRecordLink": true,
+            "inverseLinkFieldId": "fldS5S1vdxanoI7Rz"
+          },
+          "id": "fldBV0UGTZhLO7ydO",
+          "name": "Deals"
+        },
+        {
+          "type": "number",
+          "options": {
+            "precision": 0
+          },
+          "id": "fldmwsCnBgTpTQDat",
+          "name": "Task Order"
+        }
+      ],
+      "views": [
+        {
+          "id": "viwk2KdgyRtDOCVVt",
+          "name": "Grid view",
+          "type": "grid"
+        },
+        {
+          "id": "viwXYjnbEdmEX8Xld",
+          "name": "Aaron's Kanban",
+          "type": "kanban"
+        }
+      ]
+    }
+  }
+}
