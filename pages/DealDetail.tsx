@@ -51,6 +51,22 @@ export const DealDetail: React.FC = () => {
                 .eq('id', deal.id);
 
             if (error) throw error;
+
+            // Sync to Airtable
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                const dbField = field === 'contract_date' ? 'contract_execution_date' : field;
+                await fetch(`${supabase.supabaseUrl}/functions/v1/update-airtable`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session?.access_token || ''}`,
+                    },
+                    body: JSON.stringify({ dealId: deal.id, field: dbField, value }),
+                });
+            } catch (airtableError) {
+                console.warn('Airtable sync failed:', airtableError);
+            }
         } catch (error) {
             console.error('Error auto-saving:', error);
         }
