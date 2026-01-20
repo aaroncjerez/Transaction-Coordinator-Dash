@@ -56,7 +56,8 @@ export const DealDetail: React.FC = () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
                 const dbField = field === 'contract_date' ? 'contract_execution_date' : field;
-                await fetch(`${supabase.supabaseUrl}/functions/v1/update-airtable`, {
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+                await fetch(`${supabaseUrl}/functions/v1/update-airtable`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
