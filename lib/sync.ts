@@ -1,335 +1,176 @@
-
-import { supabase } from './supabase';
 import { Deal } from '../types';
+import {
+  airtableFetchDeals,
+  airtableFetchTasks,
+  airtableCreateRecord,
+  airtableUpdateRecord,
+  airtableDeleteRecord,
+  airtableUpdateTask,
+  upsertDeals,
+  upsertTasks,
+  getExistingAirtableIds,
+  getExistingTaskAirtableIds,
+  deleteDealsByAirtableIds,
+  deleteTasksByAirtableIds,
+} from './database';
 
-const AIRTABLE_PAT = import.meta.env.VITE_AIRTABLE_PAT;
-const AIRTABLE_BASE_ID = import.meta.env.VITE_AIRTABLE_BASE_ID;
-
-if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) {
-    console.error("Missing Airtable environment variables");
-}
-
-/*
- * Fetches all records from the 'Deals' table in Airtable.
- */
-export async function fetchAirtableDeals(): Promise<any[]> {
-    // Use Serverless Function to proxy request (avoids CORS and handles Env vars securely)
-    // In local development with 'vite', this might 404 unless we setup a proxy or run 'vercel dev'.
-    // We will attempt the API route first.
-
-    try {
-        const response = await fetch('/api/sync');
-
-        // If API route is not found (e.g. local without vercel dev), fallback to direct logic if Env vars exist
-        // Note: Direct logic requires VITE_ keys to be exposed to client. 
-        if (response.status === 404 && import.meta.env.DEV) {
-            console.warn("API route not found (local?), falling back to direct fetch.");
-            return fetchAirtableDealsDirect();
-        }
-
-        if (!response.ok) {
-            throw new Error(`Sync API failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return data.records || [];
-    } catch (error) {
-        console.error("Error fetching from /api/sync:", error);
-        // Fallback or re-throw? 
-        // If we are local and simple 'fetch' failed, maybe try direct?
-        if (import.meta.env.DEV) {
-            return fetchAirtableDealsDirect();
-        }
-        throw error;
-    }
-}
-
-/*
- * Legacy/Local Method: Fetches directly from Airtable (Client-side)
- * Kept for local dev fallback.
- */
-async function fetchAirtableDealsDirect(): Promise<any[]> {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) {
-        console.error("Missing Airtable keys for direct fetch");
-        return [];
-    }
-
-    let allRecords: any[] = [];
-    let offset = '';
-    const headers = { Authorization: `Bearer ${AIRTABLE_PAT}` };
-
-    try {
-        do {
-            const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals?offset=${offset}`;
-            const response = await fetch(url, { headers });
-            if (!response.ok) throw new Error(`Airtable fetch failed: ${response.statusText}`);
-            const data = await response.json();
-            allRecords = [...allRecords, ...data.records];
-            offset = data.offset;
-        } while (offset);
-        return allRecords;
-    } catch (error) {
-        console.error("Direct Airtable fetch failed:", error);
-        throw error;
-    }
-}
-
-/*
+/**
  * Maps an Airtable record to our Deal interface.
  */
 export function mapAirtableRecordToDeal(record: any): Partial<Deal> {
-    const f = record.fields || {};
-    const dealName = f["Deal Name"] || "";
-    const lastName = dealName.includes(" - ") ? dealName.split(" - ")[0].trim() : "";
+  const f = record.fields || {};
+  const dealName = f["Deal Name"] || "";
+  const lastName = dealName.includes(" - ") ? dealName.split(" - ")[0].trim() : "";
 
-    return {
-        airtable_id: record.id,
-        deal_name: dealName,
-        last_name: lastName,
-        deal_type: f["Deal type"] || "New",
-        stage: f["Stage"] || "New",
-        county: f["County"] || "",
-        state: f["State"] || "",
-        notes: f["Notes"] || "",
-        purchase_price: f["Purchase Price"] || 0,
-        expected_sales_price: f["Expected sales price"] || 0,
-        contract_execution_date: f["Contract Execution date"] || null,
-        expected_close_date: f["Expected close date"] || null,
-        close_date: f["Close date"] || null,
-        phone_number: Array.isArray(f["Phone (from Contacts)"]) ? f["Phone (from Contacts)"][0] : f["Phone (from Contacts)"],
-
-        // New Mapped Fields
-        assigned_to: f["Assigned To"] || null,
-        days_to_close: f["Days To Close"] || null,
-        purchase_agreement_files: f["Purchase Agreement"] || [],
-        funding_agreement_files: f["Funding agreement"] || [],
-        deed_files: f["Deed"] || [],
-        plat_files: f["Plat"] || [],
-        soil_test_files: f["Soil test"] || [],
-        hud_files: f["HUD"] || [],
-        sale_contract_files: f["Sale Contract"] || [],
-        due_diligence_link: f["Due Diligence link"] || "",
-    };
+  return {
+    airtable_id: record.id,
+    deal_name: dealName,
+    last_name: lastName,
+    deal_type: f["Deal type"] || "New",
+    stage: f["Stage"] || "New",
+    county: f["County"] || "",
+    state: f["State"] || "",
+    notes: f["Notes"] || "",
+    purchase_price: f["Purchase Price"] || 0,
+    expected_sales_price: f["Expected sales price"] || 0,
+    contract_execution_date: f["Contract Execution date"] || null,
+    expected_close_date: f["Expected close date"] || null,
+    close_date: f["Close date"] || null,
+    phone_number: Array.isArray(f["Phone (from Contacts)"]) ? f["Phone (from Contacts)"][0] : f["Phone (from Contacts)"],
+    assigned_to: f["Assigned To"] || null,
+    days_to_close: f["Days To Close"] || null,
+    purchase_agreement_files: f["Purchase Agreement"] || [],
+    funding_agreement_files: f["Funding agreement"] || [],
+    deed_files: f["Deed"] || [],
+    plat_files: f["Plat"] || [],
+    soil_test_files: f["Soil test"] || [],
+    hud_files: f["HUD"] || [],
+    sale_contract_files: f["Sale Contract"] || [],
+    due_diligence_link: f["Due Diligence link"] || "",
+  };
 }
 
+/**
+ * Maps an Airtable task record to our local task schema.
+ */
+export function mapAirtableRecordToTask(record: any): any {
+  const f = record.fields || {};
+  return {
+    airtable_id: record.id,
+    task_name: f["Task Name"] || f["Name"] || "",
+    status: f["Status"] || "To Do",
+    notes: f["Notes"] || "",
+    assignee: f["Assignee"] || null,
+    task_order: f["Order"] || null,
+    deal_airtable_id: Array.isArray(f["Deal"]) ? f["Deal"][0] : (f["Deal"] || null),
+  };
+}
 
+/**
+ * Fetches all records from Airtable via the Electron main process.
+ */
+export async function fetchAirtableDeals(): Promise<any[]> {
+  return airtableFetchDeals();
+}
 
-/*
+/**
+ * Sync: Fetches from Airtable, upserts to local SQLite, garbage collects stale records.
+ */
+export async function syncFromAirtable(): Promise<Deal[]> {
+  console.log("Starting Sync...");
+
+  try {
+    // 1. Fetch from Airtable
+    const airtableRecords = await airtableFetchDeals();
+    console.log(`Fetched ${airtableRecords.length} records from Airtable.`);
+
+    if (airtableRecords.length === 0) return [];
+
+    // 2. Map to local schema
+    const mappedDeals = airtableRecords.map(mapAirtableRecordToDeal);
+    const airtableIds = mappedDeals.map(d => d.airtable_id).filter(Boolean) as string[];
+
+    // 3. Upsert to local SQLite
+    await upsertDeals(mappedDeals);
+
+    // 4. Garbage collection: delete local records not in Airtable
+    if (airtableIds.length > 0) {
+      const existingIds = await getExistingAirtableIds();
+      const idsToDelete = existingIds.filter(id => !airtableIds.includes(id));
+      if (idsToDelete.length > 0) {
+        console.log(`Garbage collecting ${idsToDelete.length} records...`);
+        await deleteDealsByAirtableIds(idsToDelete);
+      }
+    }
+
+    // 5. Sync Tasks from Airtable
+    try {
+      const airtableTaskRecords = await airtableFetchTasks();
+      console.log(`Fetched ${airtableTaskRecords.length} tasks from Airtable.`);
+
+      if (airtableTaskRecords.length > 0) {
+        const mappedTasks = airtableTaskRecords.map(mapAirtableRecordToTask);
+        const taskAirtableIds = mappedTasks.map((t: any) => t.airtable_id).filter(Boolean) as string[];
+
+        await upsertTasks(mappedTasks);
+
+        // Garbage collect stale tasks
+        if (taskAirtableIds.length > 0) {
+          const existingTaskIds = await getExistingTaskAirtableIds();
+          const taskIdsToDelete = existingTaskIds.filter(id => !taskAirtableIds.includes(id));
+          if (taskIdsToDelete.length > 0) {
+            console.log(`Garbage collecting ${taskIdsToDelete.length} tasks...`);
+            await deleteTasksByAirtableIds(taskIdsToDelete);
+          }
+        }
+      }
+    } catch (taskErr: any) {
+      console.error("Task sync FAILED (deals still synced):", taskErr?.message || taskErr);
+      console.error("Full task sync error:", taskErr);
+    }
+
+    console.log("Sync Complete.");
+    return mappedDeals as unknown as Deal[];
+
+  } catch (e) {
+    console.error("Sync Logic Error:", e);
+    throw e;
+  }
+}
+
+/**
+ * Updates a record in Airtable and triggers sync.
+ */
+export async function updateAirtableRecord(recordId: string, fields: Record<string, any>) {
+  const result = await airtableUpdateRecord(recordId, fields);
+
+  // Trigger sync after success
+  try {
+    await syncFromAirtable();
+  } catch (syncError) {
+    console.error("Sync Error: Airtable update succeeded but local sync failed.", syncError);
+  }
+
+  return result;
+}
+
+/**
+ * Updates a TASK record in Airtable.
+ */
+export async function updateAirtableTask(recordId: string, fields: Record<string, any>) {
+  return airtableUpdateTask(recordId, fields);
+}
+
+/**
  * Deletes a record from Airtable.
  */
 export async function deleteAirtableRecord(recordId: string) {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
-
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals/${recordId}`;
-    const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-            'Authorization': `Bearer ${AIRTABLE_PAT}`
-        }
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to delete from Airtable: ${response.statusText}`);
-    }
-
-    return await response.json();
+  return airtableDeleteRecord(recordId);
 }
 
-/*
- * Sync Function: Fetches from Airtable, Upserts to Supabase, Returns merged data.
- * Strategy: "Refresh button to pull from Airtable first, then check Supabase"
- * Uses 'airtable_id' for unique mapping.
- * NOW INCLUDES: Garbage Collection (Deletes local records not found in Airtable)
- */
-export async function syncAirtableToSupabase(): Promise<Deal[]> {
-    console.log("Starting Sync...");
-
-    try {
-        // 1. Fetch from Airtable
-        const airtableRecords = await fetchAirtableDeals();
-        console.log(`Fetched ${airtableRecords.length} records from Airtable.`);
-
-        if (airtableRecords.length === 0) return [];
-
-        // 2. Map to Supabase Schema
-        const mappedDeals = airtableRecords.map(mapAirtableRecordToDeal);
-        const airtableIds = mappedDeals.map(d => d.airtable_id).filter(id => !!id) as string[];
-
-        // 3. Upsert to Supabase (Shadow Write)
-        // We use 'airtable_id' as the conflict key as defined in the Supabase schema.
-        try {
-            const batchSize = 50;
-            for (let i = 0; i < mappedDeals.length; i += batchSize) {
-                const chunk = mappedDeals.slice(i, i + batchSize);
-                const { error } = await supabase.from('deal_vault').upsert(chunk, {
-                    onConflict: 'airtable_id',
-                    ignoreDuplicates: false
-                });
-
-                if (error) {
-                    console.error("Supabase Upsert Error (RLS?):", error);
-                }
-            }
-
-            // 4. Garbage Collection: Delete from Supabase if not in Airtable
-            // Only targets records that HAVE an airtable_id (synced records). Local-only deals (null airtable_id) are safe.
-            if (airtableIds.length > 0) {
-                const { error: deleteError } = await supabase
-                    .from('deal_vault')
-                    .delete()
-                    .not('airtable_id', 'is', null)
-                    .not('airtable_id', 'in', `(${airtableIds.join(',')})`); // Syntax needs checking for large lists, but usually fine for <100
-
-                // Option B: Fetch all Supabase IDs, diff in JS, then delete by ID list if query is too complex.
-                // For now, let's try the .not().in() approach or just accept that strict sync is hard. 
-
-                // Safer approach for large sets:
-                // Fetch all Supabase airtable_ids first
-                const { data: existingRecords } = await supabase.from('deal_vault').select('airtable_id').not('airtable_id', 'is', null);
-                if (existingRecords) {
-                    const idsToDelete = existingRecords
-                        .map(r => r.airtable_id)
-                        .filter(id => !airtableIds.includes(id));
-
-                    if (idsToDelete.length > 0) {
-                        console.log(`Garbage Collecting ${idsToDelete.length} records...`);
-                        await supabase.from('deal_vault').delete().in('airtable_id', idsToDelete);
-                    }
-                }
-            }
-
-        } catch (supaError) {
-            console.error("Supabase Sync Exception:", supaError);
-        }
-
-        console.log("Sync Complete. Returning mapped deals directly.");
-
-        // 5. Return the mapped data directly
-        return mappedDeals as unknown as Deal[];
-
-    } catch (e) {
-        console.error("Sync Logic Error:", e);
-        throw e;
-    }
-}
-
-
-/*
- * Updates a record in Airtable and triggers Sync.
- */
-export async function updateAirtableRecord(recordId: string, fields: Record<string, any>) {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
-
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals/${recordId}`;
-    const response = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-            'Authorization': `Bearer ${AIRTABLE_PAT}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fields })
-    });
-
-    if (!response.ok) {
-        const err = await response.text();
-        throw new Error(`Failed to update Airtable: ${err}`);
-    }
-
-    const result = await response.json();
-
-    // Trigger Sync immediately after success
-    try {
-        await syncAirtableToSupabase();
-    } catch (syncError) {
-        // Requirement 4: Log error locally. 
-        // NOTE: In a browser environment, we cannot write a file to the project folder.
-        // We log clearly to console.
-        console.error("Sync Error: Airtable update succeeded but Supabase sync failed.", syncError);
-    }
-
-    return result;
-}
-
-/*
- * Updates a TASK record in Airtable.
- * Assumes table name is 'Tasks'.
- */
-export async function updateAirtableTask(recordId: string, fields: Record<string, any>) {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
-
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Tasks/${recordId}`;
-    const response = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-            'Authorization': `Bearer ${AIRTABLE_PAT}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fields })
-    });
-
-    if (!response.ok) {
-        // Warning only, don't crash UI
-        console.warn(`Failed to update Airtable Task: ${response.statusText}`);
-        return null; // Silent fail
-    }
-
-    return await response.json();
-}
-
-// Deprecated alias compatibility if needed, but we will update usages.
-// Update existing tool
-export const syncDealsFromAirtable = syncAirtableToSupabase;
-
-/*
+/**
  * Creates a new record in Airtable.
  */
 export async function createAirtableRecord(fields: Record<string, any>) {
-    // 1. Try Serverless Function (Preferred)
-    try {
-        const response = await fetch('/api/create-deal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fields })
-        });
-
-        // Fallback for local dev if API 404
-        if (response.status === 404 && import.meta.env.DEV) {
-            console.warn("API route not found (local), using direct create.");
-            return createAirtableRecordDirect(fields);
-        }
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.details || response.statusText);
-        }
-
-        return await response.json();
-
-    } catch (e) {
-        console.error("Create API failed:", e);
-        if (import.meta.env.DEV) return createAirtableRecordDirect(fields);
-        throw e;
-    }
-}
-
-// Fallback for Local Dev
-async function createAirtableRecordDirect(fields: Record<string, any>) {
-    if (!AIRTABLE_PAT || !AIRTABLE_BASE_ID) throw new Error("Missing Config");
-
-    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/Deals`;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${AIRTABLE_PAT}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fields })
-    });
-
-    if (!response.ok) {
-        const txt = await response.text();
-        throw new Error(`Direct Create Failed: ${txt}`);
-    }
-
-    return await response.json();
+  return airtableCreateRecord(fields);
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, MessageSquare, CheckCircle, ChevronDown, Paperclip, Loader2, Trash2 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { fetchTasksByDeal, updateTaskFields } from '../lib/database';
 import { Link } from 'react-router-dom';
 import { DEAL_STAGES } from '../constants';
 
@@ -25,25 +25,21 @@ export const DealOverviewCard: React.FC<DealOverviewCardProps> = ({ deal, onStag
 
     // Fetch Linked Tasks
     useEffect(() => {
-        const fetchTasks = async () => {
+        const loadTasks = async () => {
             if (!deal.airtable_id) return;
-            const { data } = await supabase
-                .from('tasks_vault')
-                .select('*')
-                .eq('deal_airtable_id', deal.airtable_id)
-                .neq('status', 'Done')
-                .limit(3);
-            setTasks(data || []);
+            const data = await fetchTasksByDeal(deal.airtable_id);
+            const pending = (data || []).filter(t => t.status !== 'Done').slice(0, 3);
+            setTasks(pending);
             setLoadingTasks(false);
         };
-        fetchTasks();
+        loadTasks();
     }, [deal.airtable_id]);
 
 
     const handleCompleteTask = async (taskId: string) => {
         // Optimistic update
         setTasks(prev => prev.filter(t => t.id !== taskId));
-        await supabase.from('tasks_vault').update({ status: 'Done' }).eq('id', taskId);
+        await updateTaskFields(taskId, { status: 'Done' });
     };
 
     // Calculate file counts

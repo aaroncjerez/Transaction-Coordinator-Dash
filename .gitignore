@@ -30,3 +30,7 @@ service-account.json
 
 # Supabase
 supabase/.temp/
+
+# Electron
+electron-dist/
+*.db

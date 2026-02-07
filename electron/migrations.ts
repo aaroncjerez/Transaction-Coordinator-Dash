@@ -1,0 +1,498 @@
+import Database from 'better-sqlite3';
+import crypto from 'crypto';
+
+/**
+ * Versioned schema migration system.
+ * Each migration runs exactly once, tracked in `schema_version` table.
+ */
+
+interface Migration {
+  version: number;
+  description: string;
+  up: (db: Database.Database) => void;
+}
+
+function generateUUID(): string {
+  return crypto.randomUUID();
+}
+
+const migrations: Migration[] = [
+  {
+    version: 1,
+    description: 'Baseline — mark existing schema as v1',
+    up: (_db) => {
+      // No-op: the old createTables() already ran. This just marks existing DBs as v1.
+    },
+  },
+  {
+    version: 2,
+    description: 'Overhaul: deals, tasks, deadlines, files, audit_log, sync_jobs, settings',
+    up: (db) => {
+      // ── 1. Create new tables ──
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deals (
+          id TEXT PRIMARY KEY,
+          airtable_id TEXT UNIQUE,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          deal_name TEXT,
+          last_name TEXT,
+          deal_type TEXT DEFAULT 'Standard Flip',
+          stage TEXT DEFAULT 'Offer accepted',
+          previous_stage TEXT,
+          county TEXT,
+          state TEXT,
+          notes TEXT,
+          purchase_price REAL DEFAULT 0,
+          expected_sales_price REAL DEFAULT 0,
+          contract_execution_date TEXT,
+          expected_close_date TEXT,
+          close_date TEXT,
+          days_to_close TEXT,
+          phone_number TEXT,
+          assigned_to TEXT,
+          due_diligence_link TEXT,
+          fub_person_id TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,
+          deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+          source_rule_key TEXT,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT DEFAULT 'To Do',
+          assignee TEXT,
+          notes TEXT,
+          task_order REAL,
+          completed_at TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now')),
+          airtable_id TEXT,
+          UNIQUE(deal_id, source_rule_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS deadlines (
+          id TEXT PRIMARY KEY,
+          deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+          label TEXT NOT NULL,
+          due_date TEXT NOT NULL,
+          alert_schedule TEXT DEFAULT '[]',
+          is_acknowledged INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS files (
+          id TEXT PRIMARY KEY,
+          deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+          file_name TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          category TEXT,
+          sha256 TEXT,
+          file_size INTEGER,
+          uploaded_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(deal_id, sha256)
+        );
+
+        CREATE TABLE IF NOT EXISTS pdf_extractions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT NOT NULL,
+          file_id TEXT REFERENCES files(id),
+          file_name TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          category TEXT,
+          extracted_text TEXT,
+          summary TEXT,
+          key_findings TEXT,
+          page_count INTEGER DEFAULT 0,
+          analyzed_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(deal_id, file_path)
+        );
+
+        CREATE TABLE IF NOT EXISTS kb_chunks (
+          id TEXT PRIMARY KEY,
+          deal_id TEXT,
+          file_id TEXT REFERENCES files(id),
+          content TEXT NOT NULL,
+          chunk_index INTEGER DEFAULT 0,
+          token_count INTEGER,
+          embedding TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT,
+          event_type TEXT NOT NULL,
+          details TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS sync_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          payload TEXT,
+          status TEXT DEFAULT 'pending',
+          attempts INTEGER DEFAULT 0,
+          max_attempts INTEGER DEFAULT 3,
+          error TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          completed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT,
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // ── 2. Migrate data from old tables ──
+
+      // Check if old tables exist
+      const oldTablesExist = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='deal_vault'"
+      ).get();
+
+      if (oldTablesExist) {
+        // 2a. Migrate deal_vault → deals
+        const oldDeals = db.prepare('SELECT * FROM deal_vault').all() as any[];
+        if (oldDeals.length > 0) {
+          const insertDeal = db.prepare(`
+            INSERT OR IGNORE INTO deals (
+              id, airtable_id, created_at, updated_at, deal_name, last_name,
+              deal_type, stage, county, state, notes, purchase_price,
+              expected_sales_price, contract_execution_date, expected_close_date,
+              close_date, days_to_close, phone_number, assigned_to, due_diligence_link
+            ) VALUES (
+              @id, @airtable_id, @created_at, @updated_at, @deal_name, @last_name,
+              @deal_type, @stage, @county, @state, @notes, @purchase_price,
+              @expected_sales_price, @contract_execution_date, @expected_close_date,
+              @close_date, @days_to_close, @phone_number, @assigned_to, @due_diligence_link
+            )
+          `);
+
+          const insertFile = db.prepare(`
+            INSERT OR IGNORE INTO files (id, deal_id, file_name, file_path, category, uploaded_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+          `);
+
+          const migrateDeals = db.transaction(() => {
+            for (const deal of oldDeals) {
+              // Normalize deal_type to match ruleset keys
+              let dealType = deal.deal_type || 'Standard Flip';
+              if (dealType === 'Standard flip') dealType = 'Standard Flip';
+              if (dealType === 'Double close') dealType = 'Double Close';
+
+              insertDeal.run({
+                id: deal.id,
+                airtable_id: deal.airtable_id || null,
+                created_at: deal.created_at,
+                updated_at: deal.updated_at,
+                deal_name: deal.deal_name || '',
+                last_name: deal.last_name || '',
+                deal_type: dealType,
+                stage: deal.stage || 'Offer accepted',
+                county: deal.county || '',
+                state: deal.state || '',
+                notes: deal.notes || '',
+                purchase_price: deal.purchase_price || 0,
+                expected_sales_price: deal.expected_sales_price || 0,
+                contract_execution_date: deal.contract_execution_date || null,
+                expected_close_date: deal.expected_close_date || null,
+                close_date: deal.close_date || null,
+                days_to_close: deal.days_to_close || null,
+                phone_number: deal.phone_number || null,
+                assigned_to: deal.assigned_to || null,
+                due_diligence_link: deal.due_diligence_link || '',
+              });
+
+              // 2c. Extract file JSON arrays into files table
+              const fileCategories = [
+                'purchase_agreement_files', 'funding_agreement_files', 'deed_files',
+                'plat_files', 'soil_test_files', 'hud_files', 'sale_contract_files',
+              ];
+
+              const categoryMap: Record<string, string> = {
+                purchase_agreement_files: 'purchase_agreement',
+                funding_agreement_files: 'funding_agreement',
+                deed_files: 'deed',
+                plat_files: 'plat',
+                soil_test_files: 'soil_test',
+                hud_files: 'hud',
+                sale_contract_files: 'sale_contract',
+              };
+
+              for (const catKey of fileCategories) {
+                let files: any[] = [];
+                try {
+                  const raw = deal[catKey];
+                  if (typeof raw === 'string' && raw.trim()) {
+                    files = JSON.parse(raw);
+                  } else if (Array.isArray(raw)) {
+                    files = raw;
+                  }
+                } catch { /* skip unparseable */ }
+
+                for (const f of files) {
+                  if (f && (f.name || f.url)) {
+                    insertFile.run(
+                      generateUUID(),
+                      deal.id,
+                      f.name || f.filename || 'unknown',
+                      f.url || f.path || '',
+                      categoryMap[catKey] || 'other'
+                    );
+                  }
+                }
+              }
+            }
+          });
+
+          migrateDeals();
+          console.log(`[Migration v2] Migrated ${oldDeals.length} deals`);
+        }
+
+        // 2b. Migrate tasks_vault → tasks
+        const oldTasksExist = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks_vault'"
+        ).get();
+
+        if (oldTasksExist) {
+          const oldTasks = db.prepare('SELECT * FROM tasks_vault').all() as any[];
+          if (oldTasks.length > 0) {
+            const insertTask = db.prepare(`
+              INSERT OR IGNORE INTO tasks (
+                id, deal_id, title, description, status, assignee, notes,
+                task_order, completed_at, created_at, updated_at, airtable_id
+              ) VALUES (
+                @id, @deal_id, @title, @description, @status, @assignee, @notes,
+                @task_order, @completed_at, @created_at, @updated_at, @airtable_id
+              )
+            `);
+
+            // Build airtable_id → deal.id lookup
+            const dealLookup = new Map<string, string>();
+            const allNewDeals = db.prepare('SELECT id, airtable_id FROM deals WHERE airtable_id IS NOT NULL').all() as any[];
+            for (const d of allNewDeals) {
+              dealLookup.set(d.airtable_id, d.id);
+            }
+
+            const migrateTasks = db.transaction(() => {
+              for (const task of oldTasks) {
+                const dealId = task.deal_airtable_id ? dealLookup.get(task.deal_airtable_id) : null;
+                if (!dealId) {
+                  console.warn(`[Migration v2] Skipping task "${task.task_name}" — no matching deal for airtable_id ${task.deal_airtable_id}`);
+                  continue;
+                }
+
+                insertTask.run({
+                  id: task.id,
+                  deal_id: dealId,
+                  title: task.task_name || '',
+                  description: task.description || '',
+                  status: task.status || 'To Do',
+                  assignee: task.assignee || null,
+                  notes: task.notes || '',
+                  task_order: task.task_order || null,
+                  completed_at: task.completed_at || null,
+                  created_at: task.created_at,
+                  updated_at: task.updated_at,
+                  airtable_id: task.airtable_id || null,
+                });
+              }
+            });
+
+            migrateTasks();
+            console.log(`[Migration v2] Migrated ${oldTasks.length} tasks`);
+          }
+        }
+
+        // 2d. Migrate pdf_analysis → pdf_extractions
+        const oldPdfExist = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='pdf_analysis'"
+        ).get();
+
+        if (oldPdfExist) {
+          db.exec(`
+            INSERT OR IGNORE INTO pdf_extractions (id, deal_id, file_name, file_path, category, extracted_text, summary, key_findings, page_count, analyzed_at)
+            SELECT id, deal_id, file_name, file_path, category, extracted_text, summary, key_findings, page_count, analyzed_at
+            FROM pdf_analysis
+          `);
+          console.log('[Migration v2] Migrated pdf_analysis → pdf_extractions');
+        }
+
+        // 2e. Migrate document_vectors → kb_chunks
+        const oldVectorsExist = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='document_vectors'"
+        ).get();
+
+        if (oldVectorsExist) {
+          db.exec(`
+            INSERT OR IGNORE INTO kb_chunks (id, deal_id, content, chunk_index, embedding, created_at)
+            SELECT id, deal_id, content, chunk_index, embedding, datetime('now')
+            FROM document_vectors
+          `);
+          console.log('[Migration v2] Migrated document_vectors → kb_chunks');
+        }
+
+        // 2f. Migrate task_activity_log → audit_log
+        const oldActivityExist = db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='task_activity_log'"
+        ).get();
+
+        if (oldActivityExist) {
+          db.exec(`
+            INSERT INTO audit_log (deal_id, event_type, details, created_at)
+            SELECT NULL, 'task_' || action, json_object('task_id', task_id, 'details', details), created_at
+            FROM task_activity_log
+          `);
+          console.log('[Migration v2] Migrated task_activity_log → audit_log');
+        }
+      }
+
+      // ── 3. Create indexes ──
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_deals_airtable_id ON deals(airtable_id);
+        CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage);
+        CREATE INDEX IF NOT EXISTS idx_deals_phone ON deals(phone_number);
+        CREATE INDEX IF NOT EXISTS idx_tasks_deal_id ON tasks(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_source_rule_key ON tasks(source_rule_key);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_deal_id ON deadlines(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_deadlines_due_date ON deadlines(due_date);
+        CREATE INDEX IF NOT EXISTS idx_files_deal_id ON files(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_files_category ON files(category);
+        CREATE INDEX IF NOT EXISTS idx_pdf_extractions_deal ON pdf_extractions(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_kb_chunks_deal ON kb_chunks(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_deal ON audit_log(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_type ON audit_log(event_type);
+        CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON sync_jobs(status);
+      `);
+
+      console.log('[Migration v2] Schema overhaul complete');
+    },
+  },
+  {
+    version: 3,
+    description: 'FUB file sync: source tracking, fub_attachment_id, fub_file_sync table',
+    up: (db) => {
+      // ── 1. Add source tracking columns to files table ──
+      // ALTER TABLE can fail if column already exists — wrap each in try/catch
+      try {
+        db.exec(`ALTER TABLE files ADD COLUMN source TEXT DEFAULT 'local'`);
+      } catch {
+        // Column already exists — safe to ignore
+      }
+
+      try {
+        db.exec(`ALTER TABLE files ADD COLUMN fub_attachment_id TEXT`);
+      } catch {
+        // Column already exists — safe to ignore
+      }
+
+      // ── 2. Unique index on fub_attachment_id (prevents double-sync from FUB) ──
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_files_fub_attachment
+          ON files(fub_attachment_id) WHERE fub_attachment_id IS NOT NULL;
+      `);
+
+      // ── 3. FUB file sync state per deal ──
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fub_file_sync (
+          deal_id TEXT PRIMARY KEY REFERENCES deals(id) ON DELETE CASCADE,
+          fub_person_id TEXT NOT NULL,
+          last_synced_at TEXT,
+          last_status TEXT DEFAULT 'pending',
+          last_error TEXT,
+          local_file_count INTEGER DEFAULT 0,
+          fub_file_count INTEGER DEFAULT 0,
+          mismatched_files TEXT,
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // ── 4. Index for quick fub_file_sync lookups by status ──
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_fub_file_sync_status ON fub_file_sync(last_status);
+      `);
+
+      console.log('[Migration v3] FUB file sync schema complete');
+    },
+  },
+];
+
+/**
+ * Run all pending migrations.
+ * Called from database.ts on app startup.
+ */
+export function runMigrations(db: Database.Database): void {
+  // Ensure schema_version table exists
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Get current version
+  const row = db.prepare('SELECT MAX(version) as current_version FROM schema_version').get() as any;
+  const currentVersion = row?.current_version || 0;
+
+  // Check if this is a brand new DB (no old tables, no schema_version entries)
+  const isNewDb = currentVersion === 0 && !db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='deal_vault'"
+  ).get();
+
+  if (isNewDb) {
+    // Fresh install: run all migrations from v2 onward (v1 is a no-op for old DBs)
+    console.log('[Migrations] Fresh install detected, creating schema...');
+    const freshMigrations = migrations.filter(m => m.version >= 2);
+    for (const m of freshMigrations) {
+      m.up(db);
+    }
+    // Mark all versions as applied
+    const markApplied = db.prepare('INSERT OR IGNORE INTO schema_version (version) VALUES (?)');
+    for (const m of migrations) {
+      markApplied.run(m.version);
+    }
+    const latestVersion = migrations[migrations.length - 1].version;
+    console.log(`[Migrations] Fresh install: schema at v${latestVersion}`);
+    return;
+  }
+
+  // Existing DB: if v0 (no schema_version entries), old tables exist — mark as v1
+  if (currentVersion === 0) {
+    console.log('[Migrations] Existing DB detected with no version marker, marking as v1...');
+    db.prepare('INSERT INTO schema_version (version) VALUES (1)').run();
+  }
+
+  // Re-check version after potential v1 marking
+  const updatedRow = db.prepare('SELECT MAX(version) as current_version FROM schema_version').get() as any;
+  const updatedVersion = updatedRow?.current_version || 0;
+
+  // Run pending migrations
+  const pending = migrations.filter(m => m.version > updatedVersion);
+  if (pending.length === 0) {
+    console.log(`[Migrations] Schema up to date at v${updatedVersion}`);
+    return;
+  }
+
+  for (const migration of pending) {
+    console.log(`[Migrations] Running v${migration.version}: ${migration.description}...`);
+    try {
+      db.transaction(() => {
+        migration.up(db);
+        db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
+      })();
+      console.log(`[Migrations] v${migration.version} applied successfully`);
+    } catch (error) {
+      console.error(`[Migrations] FAILED v${migration.version}:`, error);
+      throw error; // Don't continue if a migration fails
+    }
+  }
+}

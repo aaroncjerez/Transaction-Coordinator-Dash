@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Send, Sparkles, User, Bot } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import { askAI } from '../lib/database';
 
 interface DealChatProps {
     dealId: string;
@@ -41,24 +41,13 @@ export const DealChat: React.FC<DealChatProps> = ({ dealId, dealName }) => {
         setInputValue('');
         setIsTyping(true);
 
-        setMessages(prev => [...prev, userMsg]);
-        setInputValue('');
-        setIsTyping(true);
-
         try {
-            const { data, error } = await supabase.functions.invoke('ask-ai', {
-                body: {
-                    query: userMsg.content,
-                    deal_id: dealId
-                }
-            });
-
-            if (error) throw error;
+            const result = await askAI(userMsg.content, dealId);
 
             const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
                 sender: 'ai',
-                content: data?.answer || "I apologize, but I couldn't process your request.",
+                content: result?.answer || "I apologize, but I couldn't process your request.",
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, aiMsg]);
@@ -82,7 +71,7 @@ export const DealChat: React.FC<DealChatProps> = ({ dealId, dealName }) => {
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
                 <Sparkles className="text-blue-600" size={18} />
                 <h3 className="font-semibold text-gray-800">Deal Assistant</h3>
-                <span className="text-xs text-gray-500 ml-auto">Powered by Gemini 1.5 Pro</span>
+                <span className="text-xs text-gray-500 ml-auto">Powered by Claude</span>
             </div>
 
             {/* Messages Area */}

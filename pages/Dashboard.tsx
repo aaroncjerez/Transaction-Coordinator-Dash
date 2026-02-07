@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, ArrowUpRight, ArrowDownRight, RefreshCw, Bell } from 'lucide-react';
-import { MOCK_USERS, MOCK_METRICS } from '../constants';
-import { User, Metric, Deal } from '../types';
-import { DataTable } from '../components/DataTable';
+import { Plus, ArrowUpRight, RefreshCw } from 'lucide-react';
+import { Metric, Deal } from '../types';
 import { Button } from '../components/ui/Button';
 
 import { CreateDealModal } from '../components/CreateDealModal';
 import { cn } from '../lib/utils';
-import { supabase } from '../lib/supabase';
+import { fetchAllDeals, updateDealFields, deleteDealById } from '../lib/database';
 import { DealOverviewCard } from '../components/DealOverviewCard';
-import { syncAirtableToSupabase, updateAirtableRecord, deleteAirtableRecord } from '../lib/sync';
+import { syncFromAirtable, updateAirtableRecord, deleteAirtableRecord } from '../lib/sync';
 
 export const Dashboard: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [metrics, setMetrics] = useState<Metric[]>(MOCK_METRICS);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,27 +18,30 @@ export const Dashboard: React.FC = () => {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [viewMode, setViewMode] = useState<'All' | 'Live'>('Live');
 
-  // Initial Data Fetch
+  // Initial Data Fetch — auto-syncs from Airtable on mount
   const fetchData = async () => {
     try {
       setIsLoading(true);
 
-      const { data: fetchedDeals, error } = await supabase
-        .from('deal_vault')
-        .select('*')
-        .order('created_at', { ascending: false });
+      // Auto-sync deals + tasks from Airtable on app launch
+      let fetchedDeals: any[];
+      try {
+        const syncedDeals = await syncFromAirtable();
+        fetchedDeals = syncedDeals.length > 0 ? syncedDeals : await fetchAllDeals();
+      } catch (syncErr) {
+        console.warn("Airtable sync failed on load, using local data:", syncErr);
+        fetchedDeals = await fetchAllDeals();
+      }
 
-      if (error) throw error;
-      setDeals((fetchedDeals || []) as Deal[]);
+      setDeals(fetchedDeals as Deal[]);
 
-      const activeDeals = fetchedDeals?.filter(d => !['Closed', 'Dead', 'Cancelled'].includes(d.stage)) || [];
+      const activeDeals = fetchedDeals.filter(d => !['Closed', 'Dead', 'Cancelled'].includes(d.stage));
 
       const newMetrics: Metric[] = [
         { label: 'Active Deals', value: activeDeals.length.toString(), trend: 0, trendDirection: 'neutral' },
       ];
 
       setMetrics(newMetrics);
-      setUsers(MOCK_USERS);
 
     } catch (err) {
       console.error("Error fetching dashboard data:", err);
@@ -57,18 +57,17 @@ export const Dashboard: React.FC = () => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Sync Logic: Pull from Airtable first, then check Supabase (Sync returns fresh data)
-      const syncedDeals = await syncAirtableToSupabase();
+      // Sync: Pull from Airtable and upsert to local SQLite
+      const syncedDeals = await syncFromAirtable();
 
       // If sync returns empty (unconfigured), we might fallback or just toast.
-      // Assuming syncDealsFromAirtable handles the "check Supabase" part by upserting and returning fresh data.
       if (syncedDeals.length > 0) {
         setDeals(syncedDeals);
         setToast({ message: "Synced with Airtable", type: 'success' });
       } else {
         // Fallback fetch if sync failed/empty (or if keys missing)
-        const { data } = await supabase.from('deal_vault').select('*').order('created_at', { ascending: false });
-        setDeals((data || []) as Deal[]);
+        const data = await fetchAllDeals();
+        setDeals(data as Deal[]);
         setToast({ message: "Refreshed (Airtable Sync unavailable)", type: 'success' }); // Warning?
       }
     } catch (e) {
@@ -92,13 +91,8 @@ export const Dashboard: React.FC = () => {
         await updateAirtableRecord(deal.airtable_id, { "Stage": newStage });
       }
 
-      // 2. Shadow Write (Upsert) to Supabase
-      const { error } = await supabase
-        .from('deal_vault')
-        .upsert({ ...deal, stage: newStage }) // Upsert entire object or just fields? upsert needs PK.
-
-
-      if (error) throw error;
+      // 2. Shadow Write to local SQLite
+      await updateDealFields(deal.id, { stage: newStage });
       setToast({ message: "Stage updated & synced", type: 'success' });
 
     } catch (error) {
@@ -122,9 +116,8 @@ export const Dashboard: React.FC = () => {
         await deleteAirtableRecord(deal.airtable_id);
       }
 
-      // 2. Delete from Supabase
-      const { error } = await supabase.from('deal_vault').delete().eq('id', dealId);
-      if (error) throw error;
+      // 2. Delete from local SQLite
+      await deleteDealById(dealId);
 
       setToast({ message: "Deal deleted completely.", type: 'success' });
 
@@ -246,7 +239,7 @@ export const Dashboard: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSuccess={() => {
-          setToast({ message: "Deal Created in Supabase (Sync pending)", type: 'success' });
+          setToast({ message: "Deal created and synced", type: 'success' });
           fetchData();
         }}
       />

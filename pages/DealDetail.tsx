@@ -1,13 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileText, Edit2, Calendar, DollarSign, ExternalLink, X, Check, Plus } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { DEAL_STAGES, DEAL_TYPES } from '../constants';
+import { ArrowLeft, FileText, Calendar, DollarSign, ExternalLink, Check, Plus, Sparkles, Loader2, Cloud, Monitor, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
+import { fetchDealById, updateDealFields, fetchTasksByDeal, updateTaskFields, analyzePdf, getPdfAnalysesByDeal, listFiles, getFubFileSyncStatus, triggerFubFileSync } from '../lib/database';
+import { DEAL_STAGES, DEAL_TYPES, FILE_CATEGORIES } from '../constants';
 import { updateAirtableRecord, updateAirtableTask } from '../lib/sync';
 import confetti from 'canvas-confetti';
-import { uploadFileAirtableFirst } from '../lib/uploadHandler';
+import { uploadFileLocal } from '../lib/uploadHandler';
+import { PdfAnalysisCard } from '../components/PdfAnalysisCard';
+import { DealAnalyzer } from '../components/DealAnalyzer';
 
 // Data Types
+interface FileItem {
+    id: string;
+    name: string;
+    url: string;
+    categoryKey: string;
+    source?: 'local' | 'fub';
+    fub_attachment_id?: string;
+}
+
 interface DealDetailData {
     id: string;
     airtable_id: string;
@@ -22,8 +33,8 @@ interface DealDetailData {
     close_date: string;
     phone_number: string;
     notes: string;
-    // File Vault
-    files: Array<{ name: string; url: string; type: 'purchase' | 'deed' | 'plat' | 'other'; categoryKey?: string }>;
+    fub_person_id?: string;
+    files: FileItem[];
 }
 
 import { DealChat } from '../components/DealChat';
@@ -33,7 +44,7 @@ export const DealDetail: React.FC = () => {
     const navigate = useNavigate();
     const [deal, setDeal] = useState<DealDetailData | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState<'details' | 'files' | 'chat'>('details');
+    const [activeTab, setActiveTab] = useState<'details' | 'files' | 'analysis' | 'chat'>('details');
 
     // Airtable Sync Helper
     const syncToAirtable = async (field: string, value: any) => {
@@ -68,14 +79,9 @@ export const DealDetail: React.FC = () => {
         setDeal(prev => prev ? { ...prev, [field]: value } : null);
 
         try {
-            const { error } = await supabase
-                .from('deal_vault')
-                .update({
-                    [field === 'contract_date' ? 'contract_execution_date' : field]: value
-                })
-                .eq('id', deal.id);
-
-            if (error) throw error;
+            await updateDealFields(deal.id, {
+                [field === 'contract_date' ? 'contract_execution_date' : field]: value
+            });
 
             // Sync to Airtable
             await syncToAirtable(field, value);
@@ -96,44 +102,21 @@ export const DealDetail: React.FC = () => {
             setLoading(true);
 
             // 1. Fetch Deal Details
-            const { data: dealData, error: dealError } = await supabase
-                .from('deal_vault')
-                .select('*')
-                .eq('id', dealId)
-                .single();
-
-            if (dealError) throw dealError;
+            const dealData = await fetchDealById(dealId);
             if (!dealData) throw new Error('Deal not found');
 
-            // 2. Aggregate Files
-            const files: DealDetailData['files'] = [];
-            const fileCategories = [
-                { key: 'purchase_agreement_files', type: 'purchase' },
-                { key: 'deed_files', type: 'deed' },
-                { key: 'plat_files', type: 'plat' },
-                { key: 'sale_contract_files', type: 'other' },
-                { key: 'soil_test_files', type: 'other' },
-                { key: 'hud_files', type: 'other' },
-                { key: 'funding_agreement_files', type: 'other' },
-            ] as const;
+            // 2. Load files from files table
+            const fileRecords = await listFiles(dealId);
+            const files: FileItem[] = (fileRecords || []).map((f: any) => ({
+                id: f.id,
+                name: f.file_name,
+                url: f.file_path ? `file://${f.file_path}` : '',
+                categoryKey: f.category || 'other',
+                source: f.source || 'local',
+                fub_attachment_id: f.fub_attachment_id,
+            }));
 
-            fileCategories.forEach(cat => {
-                const catFiles = dealData[cat.key];
-                if (Array.isArray(catFiles)) {
-                    catFiles.forEach((f: any) => {
-                        if (f && f.url) {
-                            files.push({
-                                name: f.filename || f.name || 'Unnamed File',
-                                url: f.url,
-                                type: cat.type,
-                                categoryKey: cat.key
-                            });
-                        }
-                    });
-                }
-            });
-
-            // 4. Transform to State
+            // 3. Transform to State
             setDeal({
                 id: dealData.id,
                 airtable_id: dealData.airtable_id, // Map it
@@ -148,6 +131,7 @@ export const DealDetail: React.FC = () => {
                 close_date: dealData.close_date || 'TBD',
                 phone_number: dealData.phone_number || '',
                 notes: dealData.notes || '',
+                fub_person_id: dealData.fub_person_id || undefined,
                 files: files
             });
 
@@ -157,17 +141,6 @@ export const DealDetail: React.FC = () => {
             setLoading(false);
         }
     };
-
-    const FILE_CATEGORIES = [
-        { key: 'purchase_agreement_files', label: 'Purchase Agreement', type: 'purchase' },
-        { key: 'deed_files', label: 'Deed', type: 'deed' },
-        { key: 'plat_files', label: 'Plat', type: 'plat' },
-        { key: 'sale_contract_files', label: 'Sale Contract', type: 'other' },
-        { key: 'soil_test_files', label: 'Soil Test', type: 'other' },
-        { key: 'hud_files', label: 'HUD', type: 'other' },
-        { key: 'funding_agreement_files', label: 'Funding Agreement', type: 'other' },
-    ] as const;
-
 
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, categoryKey: string) => {
@@ -179,54 +152,8 @@ export const DealDetail: React.FC = () => {
         try {
             setLoading(true);
 
-            if (deal.airtable_id) {
-                // Use new Airtable-First Logic
-                await uploadFileAirtableFirst(deal.airtable_id, file, categoryKey, (msg) => console.log(msg));
-
-                // Refresh local state by fetching (or relying on result)
-                fetchDealData(deal.id);
-                alert('File uploaded via Airtable-First pipeline!');
-
-            } else {
-                // Fallback for non-synced deals (e.g. newly created locally)
-                // Existing Supabase-only logic
-                const filePath = `${deal.id}/${categoryKey}/${Date.now()}_${file.name}`;
-                const { error: uploadError } = await supabase.storage
-                    .from('transaction-docs')
-                    .upload(filePath, file);
-
-                if (uploadError) throw uploadError;
-
-                const { data: { publicUrl } } = supabase.storage
-                    .from('transaction-docs')
-                    .getPublicUrl(filePath);
-
-                const { data: currentData, error: fetchError } = await supabase
-                    .from('deal_vault')
-                    .select(categoryKey)
-                    .eq('id', deal.id)
-                    .single();
-
-                if (fetchError) throw fetchError;
-
-                const currentFiles = currentData[categoryKey] || [];
-                const newFileObj = { name: file.name, url: publicUrl, uploaded_at: new Date().toISOString() };
-                const updatedFiles = [...currentFiles, newFileObj];
-
-                const { error: updateError } = await supabase
-                    .from('deal_vault')
-                    .update({ [categoryKey]: updatedFiles })
-                    .eq('id', deal.id);
-
-                if (updateError) throw updateError;
-
-                setDeal(prev => {
-                    if (!prev) return null;
-                    const newFlatFile = { name: file.name, url: publicUrl, type: FILE_CATEGORIES.find(c => c.key === categoryKey)?.type || 'other' };
-                    return { ...prev, files: [...prev.files, newFlatFile as any] };
-                });
-                alert('File uploaded to Supabase (Local Deal)!');
-            }
+            await uploadFileLocal(deal.id, file, categoryKey, (msg) => console.log(msg));
+            fetchDealData(deal.id);
 
         } catch (error: any) {
             console.error('Error uploading file:', error);
@@ -305,6 +232,12 @@ export const DealDetail: React.FC = () => {
                         className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'files' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                     >
                         File Vault
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('analysis')}
+                        className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors flex items-center gap-1 ${activeTab === 'analysis' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                    >
+                        <Sparkles size={14} /> Analysis
                     </button>
                     <button
                         onClick={() => setActiveTab('chat')}
@@ -391,63 +324,11 @@ export const DealDetail: React.FC = () => {
                 )}
 
                 {activeTab === 'files' && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {FILE_CATEGORIES.map(category => {
-                            const categoryFiles = deal.files.filter(f => (f as any).categoryKey === category.key);
+                    <FilesTab dealId={deal.id} files={deal.files} categories={FILE_CATEGORIES} onUpload={handleFileUpload} fubPersonId={deal.fub_person_id} />
+                )}
 
-                            return (
-                                <div key={category.key} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col h-full hover:shadow-md transition-shadow">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                                            {category.label}
-                                            <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{categoryFiles.length}</span>
-                                        </h3>
-                                        <div className="relative">
-                                            <input
-                                                type="file"
-                                                id={`upload-${category.key}`}
-                                                className="hidden"
-                                                onChange={(e) => handleFileUpload(e, category.key)}
-                                            />
-                                            <label
-                                                htmlFor={`upload-${category.key}`}
-                                                className="cursor-pointer p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                title="Upload File"
-                                            >
-                                                <Plus size={18} />
-                                            </label>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex-1 space-y-2 overflow-y-auto max-h-[300px] pr-1 scrollbar-thin">
-                                        {categoryFiles.map((file, idx) => (
-                                            <div key={idx} className="group flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-100 transition-colors">
-                                                <div className="flex items-center gap-3 overflow-hidden">
-                                                    <div className="p-1.5 bg-white rounded border border-gray-200 text-blue-500">
-                                                        <FileText size={16} />
-                                                    </div>
-                                                    <span className="text-sm text-gray-700 truncate" title={file.name}>{file.name}</span>
-                                                </div>
-                                                <a
-                                                    href={file.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-blue-600 transition-all"
-                                                >
-                                                    <ExternalLink size={14} />
-                                                </a>
-                                            </div>
-                                        ))}
-                                        {categoryFiles.length === 0 && (
-                                            <div className="h-24 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-100 rounded-lg bg-gray-50/50">
-                                                <span className="text-xs">No files</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                {activeTab === 'analysis' && (
+                    <DealAnalyzer dealId={deal.id} />
                 )}
 
                 {activeTab === 'chat' && (
@@ -467,6 +348,211 @@ export const DealDetail: React.FC = () => {
     );
 };
 
+// Sub-component for Files tab with PDF analysis + FUB sync
+const FilesTab: React.FC<{
+    dealId: string;
+    files: FileItem[];
+    categories: typeof FILE_CATEGORIES;
+    onUpload: (event: React.ChangeEvent<HTMLInputElement>, categoryKey: string) => void;
+    fubPersonId?: string;
+}> = ({ dealId, files, categories, onUpload, fubPersonId }) => {
+    const [analyses, setAnalyses] = useState<Record<string, any>>({});
+    const [analyzing, setAnalyzing] = useState<string | null>(null);
+    const [fubSyncStatus, setFubSyncStatus] = useState<any>(null);
+    const [syncing, setSyncing] = useState(false);
+
+    useEffect(() => {
+        loadAnalyses();
+        if (fubPersonId) loadFubSyncStatus();
+    }, [dealId, fubPersonId]);
+
+    const loadAnalyses = async () => {
+        const data = await getPdfAnalysesByDeal(dealId);
+        const map: Record<string, any> = {};
+        (data || []).forEach((a: any) => { map[a.file_path] = a; });
+        setAnalyses(map);
+    };
+
+    const loadFubSyncStatus = async () => {
+        try {
+            const status = await getFubFileSyncStatus(dealId);
+            setFubSyncStatus(status);
+        } catch (e) {
+            console.warn('Failed to load FUB sync status:', e);
+        }
+    };
+
+    const handleFubSync = async () => {
+        setSyncing(true);
+        try {
+            await triggerFubFileSync(dealId);
+            await loadFubSyncStatus();
+        } catch (e) {
+            console.error('FUB sync failed:', e);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const handleAnalyze = async (file: FileItem) => {
+        const filePath = file.url.replace('file://', '');
+        if (!filePath || !file.name.toLowerCase().endsWith('.pdf')) {
+            alert('Only local PDF files can be analyzed.');
+            return;
+        }
+
+        setAnalyzing(filePath);
+        try {
+            await analyzePdf(dealId, filePath, file.name, file.categoryKey || 'other');
+            await loadAnalyses();
+        } catch (e: any) {
+            console.error('PDF analysis failed:', e);
+            alert(e.message || 'Analysis failed');
+        } finally {
+            setAnalyzing(null);
+        }
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* FUB Sync Status Banner */}
+            {fubPersonId && (
+                <div className="flex items-center justify-between bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+                    <div className="flex items-center gap-3">
+                        <Cloud size={16} className="text-blue-500" />
+                        <div>
+                            <span className="text-sm font-medium text-gray-700">FUB File Sync</span>
+                            {fubSyncStatus ? (
+                                <span className="ml-2">
+                                    {fubSyncStatus.last_status === 'synced' && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                            <CheckCircle size={12} /> Synced ({fubSyncStatus.local_file_count} local, {fubSyncStatus.fub_file_count} FUB)
+                                        </span>
+                                    )}
+                                    {fubSyncStatus.last_status === 'mismatch' && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                                            <AlertTriangle size={12} /> Mismatch ({fubSyncStatus.local_file_count} local, {fubSyncStatus.fub_file_count} FUB)
+                                        </span>
+                                    )}
+                                    {fubSyncStatus.last_status === 'error' && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                                            Error
+                                        </span>
+                                    )}
+                                    {fubSyncStatus.last_status === 'pending' && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                                            Pending
+                                        </span>
+                                    )}
+                                    {fubSyncStatus.last_status === 'syncing' && (
+                                        <span className="inline-flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                            <Loader2 size={12} className="animate-spin" /> Syncing...
+                                        </span>
+                                    )}
+                                </span>
+                            ) : (
+                                <span className="ml-2 text-xs text-gray-400">Not synced yet</span>
+                            )}
+                        </div>
+                    </div>
+                    <button
+                        onClick={handleFubSync}
+                        disabled={syncing}
+                        className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
+                    >
+                        {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                        Sync Now
+                    </button>
+                </div>
+            )}
+
+            {/* File Categories Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {categories.map(category => {
+                    const categoryFiles = files.filter(f => f.categoryKey === category.key);
+
+                    return (
+                        <div key={category.key} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-col h-full hover:shadow-md transition-shadow">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                                    {category.label}
+                                    <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">{categoryFiles.length}</span>
+                                </h3>
+                                <div className="relative">
+                                    <input type="file" id={`upload-${category.key}`} className="hidden" onChange={(e) => onUpload(e, category.key)} />
+                                    <label htmlFor={`upload-${category.key}`} className="cursor-pointer p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Upload File">
+                                        <Plus size={18} />
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 space-y-2 overflow-y-auto max-h-[400px] pr-1 scrollbar-thin">
+                                {categoryFiles.map((file) => {
+                                    const filePath = file.url.replace('file://', '');
+                                    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+                                    const analysis = analyses[filePath];
+                                    const isAnalyzing = analyzing === filePath;
+
+                                    return (
+                                        <div key={file.id} className="space-y-1">
+                                            <div className="group flex items-center justify-between p-2.5 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-100 transition-colors">
+                                                <div className="flex items-center gap-3 overflow-hidden">
+                                                    <div className="p-1.5 bg-white rounded border border-gray-200 text-blue-500">
+                                                        <FileText size={16} />
+                                                    </div>
+                                                    <span className="text-sm text-gray-700 truncate" title={file.name}>{file.name}</span>
+                                                    {/* Source badge */}
+                                                    {file.source === 'fub' && (
+                                                        <span title="Synced from FUB" className="flex-shrink-0">
+                                                            <Cloud size={12} className="text-blue-400" />
+                                                        </span>
+                                                    )}
+                                                    {file.source === 'local' && file.fub_attachment_id && (
+                                                        <span title="Linked to FUB" className="flex-shrink-0">
+                                                            <CheckCircle size={12} className="text-emerald-400" />
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex items-center gap-1">
+                                                    {isPdf && !analysis && (
+                                                        <button
+                                                            onClick={() => handleAnalyze(file)}
+                                                            disabled={isAnalyzing}
+                                                            className="p-1.5 text-blue-500 hover:bg-blue-50 rounded transition-colors disabled:opacity-50"
+                                                            title="Analyze PDF"
+                                                        >
+                                                            {isAnalyzing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                                        </button>
+                                                    )}
+                                                    <a href={file.url} target="_blank" rel="noopener noreferrer" className="opacity-0 group-hover:opacity-100 p-1.5 text-gray-400 hover:text-blue-600 transition-all">
+                                                        <ExternalLink size={14} />
+                                                    </a>
+                                                </div>
+                                            </div>
+                                            {analysis && (
+                                                <PdfAnalysisCard
+                                                    analysis={analysis}
+                                                    onReanalyze={() => handleAnalyze(file)}
+                                                    isReanalyzing={isAnalyzing}
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                                {categoryFiles.length === 0 && (
+                                    <div className="h-24 flex flex-col items-center justify-center text-gray-400 border-2 border-dashed border-gray-100 rounded-lg bg-gray-50/50">
+                                        <span className="text-xs">No files</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+
 // Sub-component for Tasks List to keep main component clean
 const DealTasksList = ({ dealAirtableId }: { dealAirtableId: string }) => {
     const [tasks, setTasks] = useState<any[]>([]);
@@ -475,16 +561,12 @@ const DealTasksList = ({ dealAirtableId }: { dealAirtableId: string }) => {
     useEffect(() => {
         if (!dealAirtableId) return;
         const fetchTasks = async () => {
-            const { data } = await supabase
-                .from('tasks_vault')
-                .select('*')
-                .eq('deal_airtable_id', dealAirtableId)
-                .neq('status', 'Cancelled') // Filter out Cancelled
-                .order('created_at', { ascending: false });
+            const data = await fetchTasksByDeal(dealAirtableId);
 
-            // Sort: In Progress -> To Do -> Done
+            // Filter out Cancelled, Sort: In Progress -> To Do -> Done
+            const filtered = (data || []).filter(t => t.status !== 'Cancelled');
             const statusOrder: Record<string, number> = { 'In Progress': 0, 'To Do': 1, 'Done': 2 };
-            const sorted = (data || []).sort((a, b) => {
+            const sorted = filtered.sort((a, b) => {
                 const sA = statusOrder[a.status] ?? 99;
                 const sB = statusOrder[b.status] ?? 99;
                 return sA - sB;
@@ -511,8 +593,8 @@ const DealTasksList = ({ dealAirtableId }: { dealAirtableId: string }) => {
         }
 
         try {
-            // 1. Update Supabase
-            await supabase.from('tasks_vault').update({ status: newStatus }).eq('id', task.id);
+            // 1. Update local SQLite
+            await updateTaskFields(task.id, { status: newStatus });
 
             // 2. Update Airtable (if airtable_id exists on task)
             if (task.airtable_id && !task.airtable_id.startsWith('temp')) {

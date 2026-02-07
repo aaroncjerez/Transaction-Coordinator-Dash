@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, CheckSquare, Settings } from 'lucide-react';
+import { LayoutDashboard, CheckSquare, Settings, Globe, CalendarCheck } from 'lucide-react';
 import clsx from 'clsx';
 
 const NavItem = ({ to, icon: Icon, label }: { to: string; icon: any; label: string }) => (
@@ -29,6 +29,8 @@ export const BottomNav: React.FC = () => {
         <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 pb-safe pt-2">
             <div className="flex justify-around items-center px-2 h-14">
                 <NavItem to="/" icon={LayoutDashboard} label="Deals" />
+                <NavItem to="/daily" icon={CalendarCheck} label="Daily" />
+                <NavItem to="/market" icon={Globe} label="Market" />
                 <NavItem to="/tasks" icon={CheckSquare} label="Tasks" />
                 <NavItem to="/settings" icon={Settings} label="Settings" />
             </div>

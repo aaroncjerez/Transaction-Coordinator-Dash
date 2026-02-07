@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Plus, Filter, MoreHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { fetchAllDeals } from '../lib/database';
 import { CreateDealModal } from '../components/CreateDealModal';
 
 // Mock Data Type
@@ -21,34 +21,25 @@ export const Deals: React.FC = () => {
 
     const fetchDeals = async () => {
         try {
-            const { data, error } = await supabase
-                .from('deal_vault')
-                .select('*')
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                console.error('Error fetching deals:', error);
-            } else {
-                // Map Supabase fields to Deal interface
-                const mappedDeals: Deal[] = (data || []).map((item: any) => ({
-                    id: item.id,
-                    airtable_id: item.airtable_id || '',
-                    deal_name: item.deal_name || item.deal_type || 'Unnamed Deal',
-                    last_name: item.last_name,
-                    deal_type: item.deal_type || 'New',
-                    stage: item.stage || 'New',
-                    county: item.county,
-                    state: item.state,
-                    notes: item.notes,
-                    purchase_price: item.purchase_price || 0,
-                    expected_sales_price: item.expected_sales_price || 0,
-                    contract_execution_date: item.contract_execution_date,
-                    expected_close_date: item.expected_close_date,
-                    close_date: item.close_date || 'TBD',
-                    phone_number: item.phone_number || 'No Phone'
-                }));
-                setDeals(mappedDeals);
-            }
+            const data = await fetchAllDeals();
+            const mappedDeals: Deal[] = data.map((item: any) => ({
+                id: item.id,
+                airtable_id: item.airtable_id || '',
+                deal_name: item.deal_name || item.deal_type || 'Unnamed Deal',
+                last_name: item.last_name,
+                deal_type: item.deal_type || 'New',
+                stage: item.stage || 'New',
+                county: item.county,
+                state: item.state,
+                notes: item.notes,
+                purchase_price: item.purchase_price || 0,
+                expected_sales_price: item.expected_sales_price || 0,
+                contract_execution_date: item.contract_execution_date,
+                expected_close_date: item.expected_close_date,
+                close_date: item.close_date || 'TBD',
+                phone_number: item.phone_number || 'No Phone'
+            }));
+            setDeals(mappedDeals);
         } catch (err) {
             console.error('Unexpected error:', err);
         } finally {
