@@ -96,10 +96,9 @@ export const StageChangeWarningSchema = z.object({
 // ===== Setting Schemas =====
 
 export const SettingKeySchema = z.enum([
-  'airtable_api_key',
-  'airtable_base_id',
-  'anthropic_api_key',
   'fub_api_key',
+  'fub_account_name',
+  'anthropic_api_key',
 ]);
 
 export type SettingKey = z.infer<typeof SettingKeySchema>;

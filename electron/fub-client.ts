@@ -278,6 +278,146 @@ export async function discoverAttachments(
   return Array.from(discovered.values());
 }
 
+// ==========================================
+// Person Sync Methods
+// ==========================================
+
+/**
+ * Fetch people from FUB by stage (paginated).
+ * GET /v1/people?stage={stage}&limit=100&offset={offset}
+ */
+export async function fetchPeopleByStage(
+  config: FubConfig,
+  stage: string,
+  limit = 100,
+  offset = 0
+): Promise<{ people: FubPerson[]; total: number; hasMore: boolean }> {
+  const url = `${FUB_API_BASE}/people?stage=${encodeURIComponent(stage)}&limit=${limit}&offset=${offset}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`FUB GET /people?stage=${stage} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const people: FubPerson[] = data.people || data.response || [];
+  const total = data._metadata?.total || people.length;
+  const nextOffset = data._metadata?.nextoffset;
+
+  return {
+    people,
+    total,
+    hasMore: !!nextOffset && people.length >= limit,
+  };
+}
+
+/**
+ * Fetch ALL people across multiple stages (handles pagination).
+ */
+export async function fetchPeopleByStages(
+  config: FubConfig,
+  stages: string[],
+  maxPagesPerStage = 10
+): Promise<FubPerson[]> {
+  const allPeople: FubPerson[] = [];
+  const seenIds = new Set<number>();
+
+  for (const stage of stages) {
+    let offset = 0;
+    for (let page = 0; page < maxPagesPerStage; page++) {
+      try {
+        const result = await fetchPeopleByStage(config, stage, 100, offset);
+        for (const person of result.people) {
+          if (!seenIds.has(person.id)) {
+            seenIds.add(person.id);
+            allPeople.push(person);
+          }
+        }
+        if (!result.hasMore) break;
+        offset += 100;
+      } catch (err) {
+        console.warn(`[FubClient] Error fetching people for stage "${stage}":`, err);
+        break;
+      }
+    }
+  }
+
+  return allPeople;
+}
+
+/**
+ * Update a person's stage in FUB.
+ * PUT /v1/people/{id}
+ */
+export async function updatePersonStage(
+  config: FubConfig,
+  personId: number,
+  stage: string
+): Promise<boolean> {
+  const url = `${FUB_API_BASE}/people/${personId}`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ stage }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(`[FubClient] updatePersonStage(${personId}, ${stage}) failed: ${response.status} ${text}`);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Create a note on a person's timeline in FUB.
+ * POST /v1/notes
+ */
+export async function createNote(
+  config: FubConfig,
+  personId: number,
+  subject: string,
+  body: string
+): Promise<FubNote | null> {
+  const url = `${FUB_API_BASE}/notes`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      personId,
+      subject,
+      body,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(`[FubClient] createNote(${personId}) failed: ${response.status} ${text}`);
+    return null;
+  }
+
+  const data = await response.json();
+  return data.response || data;
+}
+
+// ==========================================
+// File Sync Methods (existing)
+// ==========================================
+
 /**
  * Download an attachment file from FUB.
  *

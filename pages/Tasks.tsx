@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { fetchAllDeals, fetchAllTasks, insertTask, updateTaskFields } from '../lib/database';
-import { syncFromAirtable } from '../lib/sync';
 import { Task } from '../types';
 import { Plus, CheckCircle2, Clock, Loader2, Briefcase, ChevronRight, Search, Filter, Flag } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
 import { TaskDetailPanel } from '../components/TaskDetailPanel';
+import { getStageColor } from '../constants';
 
 type StatusFilter = 'all' | 'To Do' | 'In Progress' | 'Done';
 type PriorityFilter = 'all' | 'Urgent' | 'High' | 'Medium' | 'Low';
@@ -32,31 +32,17 @@ export const Tasks: React.FC = () => {
     const fetchData = async () => {
         try {
             setLoading(true);
-            let [dealsData, tasksData] = await Promise.all([
+            const [dealsData, tasksData] = await Promise.all([
                 fetchAllDeals(),
                 fetchAllTasks()
             ]);
-
-            // If no tasks in local DB, trigger Airtable sync as fallback
-            if (!tasksData || tasksData.length === 0) {
-                try {
-                    console.log('No local tasks found, syncing from Airtable...');
-                    await syncFromAirtable();
-                    [dealsData, tasksData] = await Promise.all([
-                        fetchAllDeals(),
-                        fetchAllTasks()
-                    ]);
-                } catch (syncErr) {
-                    console.warn('Airtable sync failed on Tasks page:', syncErr);
-                }
-            }
 
             setDeals(dealsData || []);
             setTasks(tasksData || []);
 
             const initialExpanded = new Set<string>();
             (dealsData || []).forEach(d => {
-                const hasPending = (tasksData || []).some(t => t.deal_airtable_id === d.airtable_id && t.status !== 'Done');
+                const hasPending = (tasksData || []).some(t => t.deal_id === d.id && t.status !== 'Done');
                 if (hasPending) initialExpanded.add(d.id);
             });
             setExpandedDeals(initialExpanded);
@@ -69,7 +55,7 @@ export const Tasks: React.FC = () => {
 
     useEffect(() => { fetchData(); }, []);
 
-    const handleCreateTask = async (e: React.FormEvent, dealAirtableId?: string) => {
+    const handleCreateTask = async (e: React.FormEvent, dealId?: string) => {
         e.preventDefault();
         if (!newTaskName.trim()) return;
 
@@ -77,9 +63,8 @@ export const Tasks: React.FC = () => {
             const payload: any = {
                 task_name: newTaskName,
                 status: 'To Do',
-                airtable_id: `temp-${Date.now()}`
             };
-            if (dealAirtableId) payload.deal_airtable_id = dealAirtableId;
+            if (dealId) payload.deal_id = dealId;
 
             await insertTask(payload);
             setNewTaskName('');
@@ -151,7 +136,7 @@ export const Tasks: React.FC = () => {
     const doneCount = tasks.filter(t => t.status === 'Done').length;
 
     const dealsWithTasks = deals.map(deal => {
-        const dealTasks = filterTasks(tasks.filter(t => t.deal_airtable_id === deal.airtable_id));
+        const dealTasks = filterTasks(tasks.filter(t => t.deal_id === deal.id));
         return { ...deal, tasks: dealTasks };
     }).sort((a, b) => {
         const isA_Active = !['Closed', 'Dead', 'Cancelled'].includes(a.stage);
@@ -161,24 +146,16 @@ export const Tasks: React.FC = () => {
         return 0;
     });
 
-    const unassignedTasks = filterTasks(tasks.filter(t => !t.deal_airtable_id || !deals.find(d => d.airtable_id === t.deal_airtable_id)));
+    const unassignedTasks = filterTasks(tasks.filter(t => !t.deal_id || !deals.find(d => d.id === t.deal_id)));
 
     return (
         <div className="flex-1 overflow-y-auto bg-gray-50 h-full p-8">
             <div className="max-w-5xl mx-auto space-y-6">
                 {/* Header */}
-                <div className="flex flex-col gap-1 mb-4">
-                    <div className="flex items-center gap-2 text-xs text-gray-400 font-medium mb-1">
-                        <span>Workspaces</span>
-                        <span>/</span>
-                        <span className="text-gray-600">Jerez Land</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Task Dashboard</h1>
-                        <div className="flex items-center gap-2 text-xs">
-                            <span className="bg-orange-50 text-orange-700 px-2 py-1 rounded-full font-medium">{pendingCount} pending</span>
-                            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{doneCount} done</span>
-                        </div>
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Tasks</h1>
+                        <p className="text-sm text-gray-500 mt-0.5">{pendingCount} pending · {doneCount} completed</p>
                     </div>
                 </div>
 
@@ -274,8 +251,10 @@ export const Tasks: React.FC = () => {
                         )}
 
                         {/* Deal Lists */}
-                        {dealsWithTasks.map(deal => (
-                            <div key={deal.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden transition-all">
+                        {dealsWithTasks.map(deal => {
+                            const sc = getStageColor(deal.stage);
+                            return (
+                            <div key={deal.id} className={cn("bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden transition-all border-l-4", sc.border)}>
                                 <div
                                     className="p-4 bg-white hover:bg-gray-50 transition-colors cursor-pointer flex items-center justify-between group"
                                     onClick={() => toggleDealExpand(deal.id)}
@@ -287,12 +266,7 @@ export const Tasks: React.FC = () => {
                                         <div>
                                             <h3 className="font-bold text-gray-900">{deal.deal_name || "Untitled Deal"}</h3>
                                             <div className="flex items-center gap-2 text-xs text-gray-500 mt-0.5">
-                                                <span className={cn(
-                                                    "px-2 py-0.5 rounded-full font-medium",
-                                                    deal.stage === 'Closed' ? "bg-green-100 text-green-700" :
-                                                        deal.stage === 'Under Contract' ? "bg-blue-100 text-blue-700" :
-                                                            "bg-gray-100 text-gray-700"
-                                                )}>
+                                                <span className={cn("px-2 py-0.5 rounded-full font-medium", sc.light, sc.lightText)}>
                                                     {deal.stage || 'Lead'}
                                                 </span>
                                                 <span>&middot;</span>
@@ -309,7 +283,7 @@ export const Tasks: React.FC = () => {
                                         <Button
                                             size="sm"
                                             variant="outline"
-                                            onClick={(e) => { e.stopPropagation(); setIsCreating(deal.id === isCreating ? null : deal.airtable_id); setExpandedDeals(prev => new Set(prev).add(deal.id)); }}
+                                            onClick={(e) => { e.stopPropagation(); setIsCreating(isCreating === deal.id ? null : deal.id); setExpandedDeals(prev => new Set(prev).add(deal.id)); }}
                                             className="opacity-0 group-hover:opacity-100 transition-opacity"
                                         >
                                             <Plus size={14} className="mr-1" /> Add Task
@@ -319,9 +293,9 @@ export const Tasks: React.FC = () => {
 
                                 {expandedDeals.has(deal.id) && (
                                     <div className="border-t border-gray-100 bg-gray-50/30">
-                                        {isCreating === deal.airtable_id && (
+                                        {isCreating === deal.id && (
                                             <div className="p-4 border-b border-gray-100 bg-white animate-in slide-in-from-top-1">
-                                                <form onSubmit={(e) => handleCreateTask(e, deal.airtable_id)} className="flex gap-2">
+                                                <form onSubmit={(e) => handleCreateTask(e, deal.id)} className="flex gap-2">
                                                     <input autoFocus className="flex-1 border border-gray-200 rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                                         value={newTaskName} onChange={e => setNewTaskName(e.target.value)} placeholder={`Add task for ${deal.deal_name}...`} />
                                                     <Button size="sm" type="submit">Add</Button>
@@ -344,7 +318,8 @@ export const Tasks: React.FC = () => {
                                     </div>
                                 )}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

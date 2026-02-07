@@ -424,6 +424,75 @@ const migrations: Migration[] = [
       console.log('[Migration v3] FUB file sync schema complete');
     },
   },
+  {
+    version: 4,
+    description: 'Add unique index on tasks.airtable_id for upsert support (partial — fixed in v5)',
+    up: (db) => {
+      // Originally created a partial index — fixed by v5
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_airtable_id
+          ON tasks(airtable_id) WHERE airtable_id IS NOT NULL;
+      `);
+      console.log('[Migration v4] tasks.airtable_id partial unique index created');
+    },
+  },
+  {
+    version: 5,
+    description: 'Fix tasks.airtable_id index: replace partial with full unique index for ON CONFLICT support',
+    up: (db) => {
+      // Partial indexes (WHERE ...) don't satisfy SQLite ON CONFLICT clauses.
+      // Drop and recreate as a non-partial unique index.
+      // SQLite treats NULLs as distinct in UNIQUE indexes, so multiple NULL airtable_ids are fine.
+      db.exec(`DROP INDEX IF EXISTS idx_tasks_airtable_id;`);
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_airtable_id
+          ON tasks(airtable_id);
+      `);
+      console.log('[Migration v5] tasks.airtable_id full unique index created');
+    },
+  },
+  {
+    version: 6,
+    description: 'Remove Airtable, add FUB person sync: unique index on fub_person_id, fub_person_sync table, drop sync_jobs',
+    up: (db) => {
+      // 1. Add unique index on deals.fub_person_id (for ON CONFLICT upsert)
+      // Partial index: WHERE fub_person_id IS NOT NULL — allows multiple NULLs
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_deals_fub_person_id
+          ON deals(fub_person_id) WHERE fub_person_id IS NOT NULL;
+      `);
+
+      // 2. Create fub_person_sync table to track per-person sync state
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fub_person_sync (
+          fub_person_id TEXT PRIMARY KEY,
+          deal_id TEXT REFERENCES deals(id) ON DELETE CASCADE,
+          fub_stage TEXT,
+          last_synced_at TEXT,
+          status TEXT DEFAULT 'pending',
+          error TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_fub_person_sync_status ON fub_person_sync(status);
+        CREATE INDEX IF NOT EXISTS idx_fub_person_sync_deal ON fub_person_sync(deal_id);
+      `);
+
+      // 3. Drop sync_jobs table (Airtable queue — no longer needed)
+      db.exec(`DROP TABLE IF EXISTS sync_jobs;`);
+      db.exec(`DROP INDEX IF EXISTS idx_sync_jobs_status;`);
+
+      // 4. Clean up Airtable settings
+      db.exec(`
+        DELETE FROM settings WHERE key IN ('airtable_api_key', 'airtable_base_id', 'airtable_deals_table', 'airtable_tasks_table');
+      `);
+
+      console.log('[Migration v6] FUB person sync schema complete, Airtable artifacts removed');
+    },
+  },
 ];
 
 /**

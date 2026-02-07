@@ -7,8 +7,7 @@ export interface ElectronAPI {
     upsertDeals: (deals: any[]) => Promise<{ success: boolean }>;
     updateDeal: (id: string, fields: Record<string, any>) => Promise<{ success: boolean }>;
     deleteDeal: (id: string) => Promise<{ success: boolean }>;
-    deleteDealsByAirtableIds: (ids: string[]) => Promise<{ success: boolean }>;
-    getExistingAirtableIds: () => Promise<string[]>;
+    purgeOldDeals: () => Promise<{ purged: number }>;
     checkStageChange: (dealId: string, newStage: string) => Promise<{
       canProceed: boolean;
       incompleteTasks?: { id: string; title: string; status: string }[];
@@ -20,7 +19,6 @@ export interface ElectronAPI {
     // tasks
     getTasks: (options?: { orderBy?: string; ascending?: boolean }) => Promise<any[]>;
     getTasksByDealId: (dealId: string) => Promise<any[]>;
-    getTasksByDealAirtableId: (dealAirtableId: string) => Promise<any[]>;
     getTaskById: (id: string) => Promise<any>;
     insertTask: (task: any) => Promise<any>;
     updateTask: (id: string, fields: Record<string, any>) => Promise<{ success: boolean }>;
@@ -28,8 +26,6 @@ export interface ElectronAPI {
     getTaskActivity: (taskId: string) => Promise<any[]>;
     logTaskActivity: (taskId: string, action: string, details?: string) => Promise<{ success: boolean }>;
     upsertTasks: (tasks: any[]) => Promise<{ success: boolean }>;
-    getExistingTaskAirtableIds: () => Promise<string[]>;
-    deleteTasksByAirtableIds: (ids: string[]) => Promise<{ success: boolean }>;
 
     // daily_leads
     getDailyLeads: (options?: { orderBy?: string; ascending?: boolean }) => Promise<any[]>;
@@ -37,15 +33,6 @@ export interface ElectronAPI {
 
     // market_analysis
     getMarketData: (options?: { orderBy?: string; ascending?: boolean; limit?: number }) => Promise<any[]>;
-  };
-
-  airtable: {
-    fetchDeals: () => Promise<any[]>;
-    fetchTasks: () => Promise<any[]>;
-    createRecord: (fields: Record<string, any>) => Promise<any>;
-    updateRecord: (recordId: string, fields: Record<string, any>) => Promise<any>;
-    deleteRecord: (recordId: string) => Promise<any>;
-    updateTask: (recordId: string, fields: Record<string, any>) => Promise<any>;
   };
 
   ai: {
@@ -89,20 +76,27 @@ export interface ElectronAPI {
     getAll: () => Promise<{ key: string; hasValue: boolean; updated_at?: string }[]>;
   };
 
-  sync: {
-    getQueueStatus: () => Promise<{
-      pending: number;
-      failed: number;
-      lastSync: string | null;
-    }>;
-  };
-
   fub: {
+    // Person sync
+    syncPeople: () => Promise<{ success: boolean; newDeals: number; updatedDeals: number; errors: number }>;
+    pushStage: (dealId: string, stage: string) => Promise<{ success: boolean }>;
+    postTaskNote: (dealId: string, taskId: string) => Promise<{ success: boolean }>;
+    getPersonSyncStatus: () => Promise<FubPersonSyncStatus>;
+    getPersonSyncRecords: () => Promise<any[]>;
+    onPersonSyncComplete: (callback: (data: any) => void) => void;
+    // File sync
     getFileSyncStatus: (dealId: string) => Promise<FubFileSyncState | null>;
     getAllFileSyncStatuses: () => Promise<FubFileSyncState[]>;
     triggerFileSync: (dealId?: string) => Promise<{ success: boolean; synced: number; errors: number }>;
     getDealsWithFubLinks: () => Promise<{ id: string; deal_name: string; fub_person_id: string }[]>;
   };
+}
+
+export interface FubPersonSyncStatus {
+  total: number;
+  synced: number;
+  errors: number;
+  lastSync: string | null;
 }
 
 export type FubSyncStatus = 'pending' | 'syncing' | 'synced' | 'error' | 'mismatch';

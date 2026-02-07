@@ -15,10 +15,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('db:deals:update', id, fields),
     deleteDeal: (id: string) =>
       ipcRenderer.invoke('db:deals:delete', id),
-    deleteDealsByAirtableIds: (ids: string[]) =>
-      ipcRenderer.invoke('db:deals:deleteByAirtableIds', ids),
-    getExistingAirtableIds: () =>
-      ipcRenderer.invoke('db:deals:getAirtableIds'),
+    purgeOldDeals: () =>
+      ipcRenderer.invoke('db:deals:purgeOld'),
     checkStageChange: (dealId: string, newStage: string) =>
       ipcRenderer.invoke('db:deals:checkStageChange', dealId, newStage),
 
@@ -27,8 +25,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('db:tasks:getAll', options),
     getTasksByDealId: (dealId: string) =>
       ipcRenderer.invoke('db:tasks:getByDealId', dealId),
-    getTasksByDealAirtableId: (dealAirtableId: string) =>
-      ipcRenderer.invoke('db:tasks:getByDealAirtableId', dealAirtableId),
     getTaskById: (id: string) =>
       ipcRenderer.invoke('db:tasks:getById', id),
     insertTask: (task: any) =>
@@ -43,10 +39,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('db:tasks:logActivity', taskId, action, details),
     upsertTasks: (tasks: any[]) =>
       ipcRenderer.invoke('db:tasks:upsert', tasks),
-    getExistingTaskAirtableIds: () =>
-      ipcRenderer.invoke('db:tasks:getAirtableIds'),
-    deleteTasksByAirtableIds: (ids: string[]) =>
-      ipcRenderer.invoke('db:tasks:deleteByAirtableIds', ids),
 
     // daily_leads
     getDailyLeads: (options?: { orderBy?: string; ascending?: boolean }) =>
@@ -57,19 +49,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // market_analysis
     getMarketData: (options?: { orderBy?: string; ascending?: boolean; limit?: number }) =>
       ipcRenderer.invoke('db:market:getAll', options),
-  },
-
-  airtable: {
-    fetchDeals: () => ipcRenderer.invoke('airtable:fetchDeals'),
-    fetchTasks: () => ipcRenderer.invoke('airtable:fetchTasks'),
-    createRecord: (fields: Record<string, any>) =>
-      ipcRenderer.invoke('airtable:createRecord', fields),
-    updateRecord: (recordId: string, fields: Record<string, any>) =>
-      ipcRenderer.invoke('airtable:updateRecord', recordId, fields),
-    deleteRecord: (recordId: string) =>
-      ipcRenderer.invoke('airtable:deleteRecord', recordId),
-    updateTask: (recordId: string, fields: Record<string, any>) =>
-      ipcRenderer.invoke('airtable:updateTask', recordId, fields),
   },
 
   ai: {
@@ -137,12 +116,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('settings:getAll'),
   },
 
-  sync: {
-    getQueueStatus: () =>
-      ipcRenderer.invoke('sync:getQueueStatus'),
-  },
-
   fub: {
+    // Person sync
+    syncPeople: () =>
+      ipcRenderer.invoke('fub:syncPeople'),
+    pushStage: (dealId: string, stage: string) =>
+      ipcRenderer.invoke('fub:pushStage', dealId, stage),
+    postTaskNote: (dealId: string, taskId: string) =>
+      ipcRenderer.invoke('fub:postTaskNote', dealId, taskId),
+    getPersonSyncStatus: () =>
+      ipcRenderer.invoke('fub:getPersonSyncStatus'),
+    getPersonSyncRecords: () =>
+      ipcRenderer.invoke('fub:getPersonSyncRecords'),
+    onPersonSyncComplete: (callback: (data: any) => void) => {
+      ipcRenderer.on('fub:person-sync-complete', (_event: any, data: any) => callback(data));
+    },
+    // File sync
     getFileSyncStatus: (dealId: string) =>
       ipcRenderer.invoke('fub:getFileSyncStatus', dealId),
     getAllFileSyncStatuses: () =>

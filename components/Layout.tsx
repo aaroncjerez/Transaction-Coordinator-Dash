@@ -1,6 +1,6 @@
 import React, { ReactNode } from 'react';
+import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
-import { NotificationCenter } from './NotificationCenter';
 
 interface LayoutProps {
   children: ReactNode;
@@ -8,21 +8,18 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="flex min-h-screen-ios bg-background text-foreground font-sans">
+    <div className="flex h-screen bg-background text-foreground font-sans">
+      {/* Desktop Sidebar — hidden on mobile */}
+      <Sidebar />
 
-      {/* Floating Notification Bell — top-right */}
-      <div className="fixed top-4 right-4 z-50">
-        <NotificationCenter />
-      </div>
-
-      {/* Main Content Area - Centered Full Width */}
-      <main className="flex-1 w-full p-4 md:p-8 pb-24 md:pb-8 overflow-y-auto min-h-screen-ios relative">
-        <div className="max-w-7xl mx-auto">
+      {/* Main Content — offset for sidebar on desktop */}
+      <main className="flex-1 md:ml-64 overflow-y-auto pb-20 md:pb-0">
+        <div className="max-w-[1600px] mx-auto p-4 md:p-6">
           {children}
         </div>
       </main>
 
-      {/* Mobile Bottom Nav - Visible only on Mobile */}
+      {/* Mobile Bottom Nav */}
       <BottomNav />
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Database, RefreshCw, CheckCircle, XCircle, Loader2, Cloud, AlertTriangle } from 'lucide-react';
-import { getSetting, setSetting, getAllSettings, getSyncQueueStatus, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync } from '../lib/database';
+import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync } from '../lib/database';
 import { Button } from '../components/ui/Button';
 
 interface ApiKeyConfig {
@@ -11,11 +11,9 @@ interface ApiKeyConfig {
 }
 
 const API_KEYS: ApiKeyConfig[] = [
-  { key: 'airtable_api_key', label: 'Airtable API Key', placeholder: 'pat...', envFallback: 'AIRTABLE_PAT' },
-  { key: 'airtable_base_id', label: 'Airtable Base ID', placeholder: 'app...', envFallback: 'AIRTABLE_BASE_ID' },
-  { key: 'anthropic_api_key', label: 'Anthropic API Key', placeholder: 'sk-ant-...', envFallback: 'ANTHROPIC_API_KEY' },
   { key: 'fub_api_key', label: 'Follow Up Boss API Key', placeholder: 'fub_...', envFallback: 'FUB_API_KEY' },
   { key: 'fub_account_name', label: 'FUB Account Name', placeholder: 'jerezland', envFallback: 'FUB_ACCOUNT_NAME' },
+  { key: 'anthropic_api_key', label: 'Anthropic API Key', placeholder: 'sk-ant-...', envFallback: 'ANTHROPIC_API_KEY' },
 ];
 
 export const Settings: React.FC = () => {
@@ -25,16 +23,17 @@ export const Settings: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<{ pending: number; failed: number; lastSync: string | null } | null>(null);
   const [fubSyncStatuses, setFubSyncStatuses] = useState<any[]>([]);
   const [fubLinkedDeals, setFubLinkedDeals] = useState<any[]>([]);
   const [fubSyncing, setFubSyncing] = useState(false);
+  const [fubPersonSync, setFubPersonSync] = useState<any>(null);
+  const [fubPersonSyncing, setFubPersonSyncing] = useState(false);
 
   useEffect(() => {
     loadSettings();
-    loadSyncStatus();
     loadFubStatus();
-    const interval = setInterval(() => { loadSyncStatus(); loadFubStatus(); }, 10000);
+    loadFubPersonSyncStatus();
+    const interval = setInterval(() => { loadFubStatus(); loadFubPersonSyncStatus(); }, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -51,12 +50,28 @@ export const Settings: React.FC = () => {
     }
   };
 
-  const loadSyncStatus = async () => {
+  const loadFubPersonSyncStatus = async () => {
     try {
-      const status = await getSyncQueueStatus();
-      setSyncStatus(status);
+      const status = await getFubPersonSyncStatus();
+      setFubPersonSync(status);
     } catch (e) {
-      console.error('Failed to load sync status:', e);
+      console.error('Failed to load FUB person sync status:', e);
+    }
+  };
+
+  const handleFubPersonSyncNow = async () => {
+    setFubPersonSyncing(true);
+    try {
+      const result = await triggerFubPersonSync();
+      await loadFubPersonSyncStatus();
+      setToast(`FUB person sync: ${result.newDeals} new, ${result.updatedDeals} updated`);
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      console.error('FUB person sync failed:', e);
+      setToast('FUB person sync failed');
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setFubPersonSyncing(false);
     }
   };
 
@@ -193,37 +208,43 @@ export const Settings: React.FC = () => {
           </div>
         </section>
 
-        {/* Sync Status Section */}
+        {/* FUB Person Sync Section */}
         <section>
           <div className="flex items-center gap-2 mb-4">
             <RefreshCw className="h-5 w-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Sync Status</h2>
+            <h2 className="text-lg font-semibold text-gray-900">FUB Person Sync</h2>
           </div>
 
           <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <p className="text-xs text-gray-500 font-medium">Pending Jobs</p>
-                <p className="text-lg font-bold text-gray-900">{syncStatus?.pending ?? '-'}</p>
+                <p className="text-xs text-gray-500 font-medium">Total Deals</p>
+                <p className="text-lg font-bold text-gray-900">{fubPersonSync?.totalDeals ?? '-'}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium">Failed Jobs</p>
-                <p className="text-lg font-bold text-gray-900">{syncStatus?.failed ?? '-'}</p>
+                <p className="text-xs text-gray-500 font-medium">Synced</p>
+                <p className="text-lg font-bold text-emerald-600">{fubPersonSync?.synced ?? '-'}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 font-medium">Last Sync</p>
-                <p className="text-sm font-medium text-gray-700">
-                  {syncStatus?.lastSync
-                    ? new Date(syncStatus.lastSync).toLocaleString()
-                    : 'Never'}
-                </p>
+                <p className="text-xs text-gray-500 font-medium">Errors</p>
+                <p className="text-lg font-bold text-gray-900">{fubPersonSync?.errors ?? '-'}</p>
               </div>
             </div>
 
-            <div className="pt-2 border-t border-gray-100">
+            <div className="pt-2 flex items-center justify-between border-t border-gray-100">
               <p className="text-xs text-gray-400">
-                Sync runner processes the queue every 30 seconds. Local SQLite is the source of truth.
+                Background sync polls FUB every 30 seconds. Deals auto-created from qualifying stages.
               </p>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleFubPersonSyncNow}
+                disabled={fubPersonSyncing}
+                isLoading={fubPersonSyncing}
+              >
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Sync Now
+              </Button>
             </div>
           </div>
         </section>

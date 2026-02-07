@@ -29,12 +29,8 @@ export async function upsertDeals(deals: any[]): Promise<void> {
   await api.db.upsertDeals(deals);
 }
 
-export async function getExistingAirtableIds(): Promise<string[]> {
-  return api.db.getExistingAirtableIds();
-}
-
-export async function deleteDealsByAirtableIds(ids: string[]): Promise<void> {
-  await api.db.deleteDealsByAirtableIds(ids);
+export async function purgeOldDeals(): Promise<{ purged: number }> {
+  return api.db.purgeOldDeals();
 }
 
 export async function checkStageChange(dealId: string, newStage: string): Promise<{
@@ -55,11 +51,6 @@ export async function fetchAllTasks(orderBy = 'created_at', ascending = false): 
 
 export async function fetchTasksByDealId(dealId: string): Promise<any[]> {
   return api.db.getTasksByDealId(dealId);
-}
-
-// Legacy: lookup by airtable_id (backward compat)
-export async function fetchTasksByDeal(dealAirtableId: string): Promise<any[]> {
-  return api.db.getTasksByDealAirtableId(dealAirtableId);
 }
 
 export async function fetchTaskById(id: string): Promise<any> {
@@ -88,14 +79,6 @@ export async function logTaskActivity(taskId: string, action: string, details?: 
 
 export async function upsertTasks(tasks: any[]): Promise<void> {
   await api.db.upsertTasks(tasks);
-}
-
-export async function getExistingTaskAirtableIds(): Promise<string[]> {
-  return api.db.getExistingTaskAirtableIds();
-}
-
-export async function deleteTasksByAirtableIds(ids: string[]): Promise<void> {
-  await api.db.deleteTasksByAirtableIds(ids);
 }
 
 // ---- daily_leads ----
@@ -182,14 +165,30 @@ export async function getAllSettings(): Promise<{ key: string; hasValue: boolean
   return api.settings.getAll();
 }
 
-// ---- sync ----
+// ---- FUB person sync ----
 
-export async function getSyncQueueStatus(): Promise<{
-  pending: number;
-  failed: number;
-  lastSync: string | null;
-}> {
-  return api.sync.getQueueStatus();
+export async function triggerFubPersonSync(): Promise<{ success: boolean; newDeals: number; updatedDeals: number; errors: number }> {
+  return api.fub.syncPeople();
+}
+
+export async function pushDealStageToFub(dealId: string, stage: string): Promise<{ success: boolean }> {
+  return api.fub.pushStage(dealId, stage);
+}
+
+export async function postTaskNoteToFub(dealId: string, taskId: string): Promise<{ success: boolean }> {
+  return api.fub.postTaskNote(dealId, taskId);
+}
+
+export async function getFubPersonSyncStatus(): Promise<any> {
+  return api.fub.getPersonSyncStatus();
+}
+
+export async function getFubPersonSyncRecords(): Promise<any[]> {
+  return api.fub.getPersonSyncRecords();
+}
+
+export function onFubPersonSyncComplete(callback: (data: any) => void): void {
+  api.fub.onPersonSyncComplete(callback);
 }
 
 // ---- FUB file sync ----
@@ -214,32 +213,6 @@ export async function getDealsWithFubLinks(): Promise<{ id: string; deal_name: s
 
 export async function askAI(query: string, dealId: string): Promise<{ answer: string }> {
   return api.ai.askQuestion(query, dealId);
-}
-
-// ---- Airtable (proxied through main process) ----
-
-export async function airtableFetchDeals(): Promise<any[]> {
-  return api.airtable.fetchDeals();
-}
-
-export async function airtableCreateRecord(fields: Record<string, any>): Promise<any> {
-  return api.airtable.createRecord(fields);
-}
-
-export async function airtableUpdateRecord(recordId: string, fields: Record<string, any>): Promise<any> {
-  return api.airtable.updateRecord(recordId, fields);
-}
-
-export async function airtableDeleteRecord(recordId: string): Promise<any> {
-  return api.airtable.deleteRecord(recordId);
-}
-
-export async function airtableUpdateTask(recordId: string, fields: Record<string, any>): Promise<any> {
-  return api.airtable.updateTask(recordId, fields);
-}
-
-export async function airtableFetchTasks(): Promise<any[]> {
-  return api.airtable.fetchTasks();
 }
 
 // ---- PDF Analysis ----

@@ -180,7 +180,7 @@ export function registerIpcHandlers(): void {
     values.push(id);
     db.prepare(`UPDATE deals SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
 
-    // If stage changed, seed tasks via rule engine
+    // If stage changed, seed tasks via rule engine + push to FUB
     if (fields.stage && currentDeal && fields.stage !== currentDeal.stage) {
       console.log(`[Stage Change] ${currentDeal.deal_name}: ${currentDeal.stage} → ${fields.stage}`);
       const dealType = fields.deal_type || currentDeal.deal_type || 'Standard Flip';
@@ -188,6 +188,13 @@ export function registerIpcHandlers(): void {
       if (seededTasks.length > 0) {
         console.log(`[Stage Change] Seeded ${seededTasks.length} new tasks for stage ${fields.stage}`);
       }
+
+      // Push stage change to FUB (async, don't block)
+      import('./fub-person-sync.js').then(({ pushStageToFub }) => {
+        pushStageToFub(id, fields.stage).catch(err =>
+          console.warn('[Stage Change] Failed to push to FUB:', err)
+        );
+      }).catch(() => {});
     }
 
     return { success: true };
@@ -218,16 +225,14 @@ export function registerIpcHandlers(): void {
     return { success: true };
   });
 
-  ipcMain.handle('db:deals:deleteByAirtableIds', (_event, ids: string[]) => {
-    if (ids.length === 0) return { success: true };
-    const placeholders = ids.map(() => '?').join(',');
-    db.prepare(`DELETE FROM deals WHERE airtable_id IN (${placeholders})`).run(...ids);
-    return { success: true };
-  });
-
-  ipcMain.handle('db:deals:getAirtableIds', () => {
-    const rows = db.prepare("SELECT airtable_id FROM deals WHERE airtable_id IS NOT NULL").all() as any[];
-    return rows.map(r => r.airtable_id);
+  ipcMain.handle('db:deals:purgeOld', () => {
+    const count = (db.prepare('SELECT COUNT(*) as c FROM deals WHERE fub_person_id IS NULL').get() as any).c;
+    db.prepare('DELETE FROM deals WHERE fub_person_id IS NULL').run();
+    // Clean orphaned sync records
+    db.prepare('DELETE FROM fub_file_sync WHERE deal_id NOT IN (SELECT id FROM deals)').run();
+    db.prepare('DELETE FROM fub_person_sync WHERE deal_id NOT IN (SELECT id FROM deals)').run();
+    console.log(`[PurgeOld] Deleted ${count} old deals (no fub_person_id)`);
+    return { purged: count };
   });
 
   // ===== TASKS =====
@@ -242,15 +247,6 @@ export function registerIpcHandlers(): void {
     return db.prepare(
       "SELECT * FROM tasks WHERE deal_id = ? AND status != 'Skipped' ORDER BY task_order ASC, created_at ASC"
     ).all(dealId);
-  });
-
-  // Legacy: support lookup by airtable_id for backward compat during transition
-  ipcMain.handle('db:tasks:getByDealAirtableId', (_event, dealAirtableId: string) => {
-    const deal = db.prepare('SELECT id FROM deals WHERE airtable_id = ?').get(dealAirtableId) as any;
-    if (!deal) return [];
-    return db.prepare(
-      "SELECT * FROM tasks WHERE deal_id = ? AND status != 'Skipped' ORDER BY task_order ASC, created_at ASC"
-    ).all(deal.id);
   });
 
   ipcMain.handle('db:tasks:insert', (_event, task: any) => {
@@ -314,32 +310,22 @@ export function registerIpcHandlers(): void {
           continue;
         }
 
+        // Ensure all values are SQLite-bindable (no objects/arrays)
+        const safeStr = (v: any) => (v == null ? null : typeof v === 'object' ? JSON.stringify(v) : String(v));
         upsert.run({
           id: task.id || generateUUID(),
           deal_id: dealId,
           title: task.title || task.task_name || '',
           status: task.status || 'To Do',
-          notes: task.notes || '',
-          assignee: task.assignee || null,
-          task_order: task.task_order || null,
+          notes: safeStr(task.notes) || '',
+          assignee: safeStr(task.assignee),
+          task_order: typeof task.task_order === 'number' ? task.task_order : null,
           airtable_id: task.airtable_id || null,
         });
       }
     });
 
     insertMany(tasks);
-    return { success: true };
-  });
-
-  ipcMain.handle('db:tasks:getAirtableIds', () => {
-    const rows = db.prepare("SELECT airtable_id FROM tasks WHERE airtable_id IS NOT NULL AND airtable_id NOT LIKE 'temp-%'").all() as any[];
-    return rows.map(r => r.airtable_id);
-  });
-
-  ipcMain.handle('db:tasks:deleteByAirtableIds', (_event, ids: string[]) => {
-    if (ids.length === 0) return { success: true };
-    const placeholders = ids.map(() => '?').join(',');
-    db.prepare(`DELETE FROM tasks WHERE airtable_id IN (${placeholders})`).run(...ids);
     return { success: true };
   });
 
@@ -400,6 +386,15 @@ export function registerIpcHandlers(): void {
           JSON.stringify({ task_id: id, field: key, old: oldTask[key], new: value })
         );
       }
+    }
+
+    // If task was completed, post note to FUB (async, don't block)
+    if (fields.status === 'Done' && oldTask?.status !== 'Done' && oldTask?.deal_id) {
+      import('./fub-person-sync.js').then(({ postTaskNoteToFub }) => {
+        postTaskNoteToFub(oldTask.deal_id, id).catch(err =>
+          console.warn('[Task Complete] Failed to post FUB note:', err)
+        );
+      }).catch(() => {});
     }
 
     return { success: true };
@@ -627,8 +622,6 @@ export function registerIpcHandlers(): void {
 
     // Update process.env for immediate use
     const envKeyMap: Record<string, string> = {
-      'airtable_api_key': 'AIRTABLE_PAT',
-      'airtable_base_id': 'AIRTABLE_BASE_ID',
       'anthropic_api_key': 'ANTHROPIC_API_KEY',
       'fub_api_key': 'FUB_API_KEY',
     };
@@ -642,19 +635,6 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('settings:getAll', () => {
     const rows = db.prepare('SELECT key, updated_at FROM settings').all() as any[];
     return rows.map(r => ({ key: r.key, hasValue: true, updated_at: r.updated_at }));
-  });
-
-  // ===== SYNC JOBS =====
-
-  ipcMain.handle('sync:getQueueStatus', () => {
-    const pending = db.prepare("SELECT COUNT(*) as count FROM sync_jobs WHERE status = 'pending'").get() as any;
-    const failed = db.prepare("SELECT COUNT(*) as count FROM sync_jobs WHERE status = 'failed'").get() as any;
-    const lastCompleted = db.prepare("SELECT completed_at FROM sync_jobs WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1").get() as any;
-    return {
-      pending: pending?.count || 0,
-      failed: failed?.count || 0,
-      lastSync: lastCompleted?.completed_at || null,
-    };
   });
 
   // ===== FUB FILE SYNC =====
@@ -687,107 +667,40 @@ export function registerIpcHandlers(): void {
     return rows;
   });
 
-  // ===== AIRTABLE =====
+  // ===== FUB PERSON SYNC =====
 
-  const getAirtableConfig = () => {
-    // Check settings table first, then env vars
-    const patSetting = db.prepare("SELECT value FROM settings WHERE key = 'airtable_api_key'").get() as any;
-    const baseSetting = db.prepare("SELECT value FROM settings WHERE key = 'airtable_base_id'").get() as any;
-
-    const pat = patSetting?.value || process.env.AIRTABLE_PAT || process.env.VITE_AIRTABLE_PAT;
-    const baseId = baseSetting?.value || process.env.AIRTABLE_BASE_ID || process.env.VITE_AIRTABLE_BASE_ID;
-    if (!pat || !baseId) throw new Error('Missing Airtable configuration');
-    return { pat, baseId };
-  };
-
-  ipcMain.handle('airtable:fetchDeals', async () => {
-    const { pat, baseId } = getAirtableConfig();
-    let allRecords: any[] = [];
-    let offset = '';
-
-    do {
-      const url = `https://api.airtable.com/v0/${baseId}/Deals${offset ? `?offset=${offset}` : ''}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
-      if (!res.ok) throw new Error(`Airtable fetch failed: ${res.statusText}`);
-      const data = await res.json();
-      allRecords = [...allRecords, ...data.records];
-      offset = data.offset || '';
-    } while (offset);
-
-    return allRecords;
+  ipcMain.handle('fub:syncPeople', async () => {
+    const { triggerFubPersonSync } = await import('./fub-person-sync.js');
+    return triggerFubPersonSync();
   });
 
-  ipcMain.handle('airtable:createRecord', async (_event, fields: Record<string, any>) => {
-    const { pat, baseId } = getAirtableConfig();
-    const url = `https://api.airtable.com/v0/${baseId}/Deals`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields }),
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`Airtable create failed: ${txt}`);
-    }
-    return await res.json();
+  ipcMain.handle('fub:pushStage', async (_event, dealId: string, stage: string) => {
+    const { pushStageToFub } = await import('./fub-person-sync.js');
+    const success = await pushStageToFub(dealId, stage as any);
+    return { success };
   });
 
-  ipcMain.handle('airtable:updateRecord', async (_event, recordId: string, fields: Record<string, any>) => {
-    const { pat, baseId } = getAirtableConfig();
-    const url = `https://api.airtable.com/v0/${baseId}/Deals/${recordId}`;
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields }),
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`Airtable update failed: ${txt}`);
-    }
-    return await res.json();
+  ipcMain.handle('fub:postTaskNote', async (_event, dealId: string, taskId: string) => {
+    const { postTaskNoteToFub } = await import('./fub-person-sync.js');
+    const success = await postTaskNoteToFub(dealId, taskId);
+    return { success };
   });
 
-  ipcMain.handle('airtable:deleteRecord', async (_event, recordId: string) => {
-    const { pat, baseId } = getAirtableConfig();
-    const url = `https://api.airtable.com/v0/${baseId}/Deals/${recordId}`;
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${pat}` },
-    });
-    if (!res.ok) throw new Error(`Airtable delete failed: ${res.statusText}`);
-    return await res.json();
+  ipcMain.handle('fub:getPersonSyncStatus', () => {
+    const total = db.prepare('SELECT COUNT(*) as count FROM fub_person_sync').get() as any;
+    const synced = db.prepare("SELECT COUNT(*) as count FROM fub_person_sync WHERE status = 'synced'").get() as any;
+    const errored = db.prepare("SELECT COUNT(*) as count FROM fub_person_sync WHERE status = 'error'").get() as any;
+    const lastSync = db.prepare("SELECT MAX(last_synced_at) as last FROM fub_person_sync").get() as any;
+    return {
+      total: total?.count || 0,
+      synced: synced?.count || 0,
+      errors: errored?.count || 0,
+      lastSync: lastSync?.last || null,
+    };
   });
 
-  ipcMain.handle('airtable:fetchTasks', async () => {
-    const { pat, baseId } = getAirtableConfig();
-    let allRecords: any[] = [];
-    let offset = '';
-
-    do {
-      const url = `https://api.airtable.com/v0/${baseId}/Tasks${offset ? `?offset=${offset}` : ''}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${pat}` } });
-      if (!res.ok) throw new Error(`Airtable tasks fetch failed: ${res.statusText}`);
-      const data = await res.json();
-      allRecords = [...allRecords, ...data.records];
-      offset = data.offset || '';
-    } while (offset);
-
-    return allRecords;
-  });
-
-  ipcMain.handle('airtable:updateTask', async (_event, recordId: string, fields: Record<string, any>) => {
-    const { pat, baseId } = getAirtableConfig();
-    const url = `https://api.airtable.com/v0/${baseId}/Tasks/${recordId}`;
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields }),
-    });
-    if (!res.ok) {
-      console.warn(`Airtable task update failed: ${res.statusText}`);
-      return null;
-    }
-    return await res.json();
+  ipcMain.handle('fub:getPersonSyncRecords', () => {
+    return db.prepare('SELECT * FROM fub_person_sync ORDER BY updated_at DESC').all();
   });
 
   // ===== AI (Claude / Anthropic) =====

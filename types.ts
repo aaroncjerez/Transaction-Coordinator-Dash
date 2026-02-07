@@ -39,7 +39,18 @@ export type AuditEventType =
   | 'fub_file_sync_error'
   | 'fub_file_sync_mismatch';
 
-export type SyncJobStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+export type FubPersonSyncStatusType = 'pending' | 'syncing' | 'synced' | 'error';
+
+export interface FubPersonSyncState {
+  fub_person_id: string;
+  deal_id?: string;
+  fub_stage?: string;
+  last_synced_at?: string;
+  status: FubPersonSyncStatusType;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+}
 
 // ===== Entity Interfaces =====
 
@@ -163,20 +174,6 @@ export interface AuditEntry {
   created_at?: string;
 }
 
-export interface SyncJob {
-  id: number;
-  entity_type: 'deal' | 'task';
-  entity_id: string;
-  action: 'create' | 'update' | 'delete';
-  payload?: string;
-  status: SyncJobStatus;
-  attempts: number;
-  max_attempts: number;
-  error?: string;
-  created_at?: string;
-  completed_at?: string;
-}
-
 export interface AppSetting {
   key: string;
   value: string;
@@ -188,43 +185,10 @@ export interface AppSetting {
 export interface DealAnalysis {
   id: number;
   deal_id: string;
-  airtable_id?: string;
   analysis: any;
   risk_score: number;
   recommendations: string[];
   analyzed_at?: string;
-}
-
-// ===== Daily Leads (kept from old schema) =====
-
-export interface DailyLead {
-  id: number;
-  fub_id?: number;
-  name?: string;
-  stage?: string;
-  score: number;
-  summary?: string;
-  rationale?: string;
-  recommended_follow_up?: string;
-  action_required: boolean;
-  is_completed: boolean;
-}
-
-// ===== Market Analysis (kept from old schema) =====
-
-export interface MarketAnalysis {
-  id: number;
-  state?: string;
-  county?: string;
-  zip_code?: string;
-  acreage_range?: string;
-  sold_1yr: number;
-  sold_3mo: number;
-  active_listings: number;
-  absorption_rate: number;
-  price_arbitrage_index: number;
-  median_active_ppa: number;
-  median_sold_ppa: number;
 }
 
 // ===== UI Helper Types =====
@@ -237,59 +201,4 @@ export interface SortConfig {
 export interface FilterConfig {
   status?: string | 'all';
   search: string;
-}
-
-// ===== Legacy types (kept for backward compat during migration) =====
-
-export type UserStatus = 'active' | 'inactive' | 'pending';
-export type UserRole = 'admin' | 'editor' | 'viewer';
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  status: UserStatus;
-  lastActive: string;
-  projects: number;
-}
-
-export interface Metric {
-  label: string;
-  value: string;
-  trend: number;
-  trendDirection: 'up' | 'down' | 'neutral';
-}
-
-export interface ChartDataPoint {
-  date: string;
-  revenue: number;
-  visitors: number;
-  activeUsers: number;
-}
-
-export interface ApiResponse<T> {
-  data: T;
-  error?: string;
-}
-
-export interface Customer {
-  id: string;
-  name: string;
-  company: string;
-  email: string;
-  status: 'active' | 'churned' | 'lead';
-  spent: string;
-  lastOrder: string;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-  status: 'in_progress' | 'completed' | 'paused' | 'planning';
-  dueDate: string;
-  budget: string;
-  completion: number;
-  members: number;
 }

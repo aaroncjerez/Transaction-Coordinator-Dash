@@ -1,17 +1,27 @@
-import React from 'react';
-import { LayoutDashboard, CheckSquare, BarChart3, Settings, Activity } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LayoutGrid, CheckSquare, Archive, Settings, Landmark } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
+import { NotificationCenter } from './NotificationCenter';
+import { getFubPersonSyncStatus } from '../lib/database';
+
+const NAV_ITEMS = [
+  { to: '/', icon: LayoutGrid, label: 'Pipeline' },
+  { to: '/tasks', icon: CheckSquare, label: 'Tasks' },
+  { to: '/archive', icon: Archive, label: 'Archive' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
+];
 
 const NavItem = ({ to, icon: Icon, label }: { to: string; icon: any; label: string }) => (
   <NavLink
     to={to}
+    end={to === '/'}
     className={({ isActive }) =>
       clsx(
-        "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all mb-1 text-sm font-medium",
+        'flex items-center gap-3 px-4 py-2.5 text-sm font-medium transition-all border-l-[3px]',
         isActive
-          ? "bg-blue-50 text-blue-600"
-          : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+          ? 'border-blue-400 bg-white/10 text-white'
+          : 'border-transparent text-slate-400 hover:text-white hover:bg-white/5'
       )
     }
   >
@@ -21,42 +31,62 @@ const NavItem = ({ to, icon: Icon, label }: { to: string; icon: any; label: stri
 );
 
 export const Sidebar: React.FC = () => {
+  const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkSync = async () => {
+      try {
+        const status = await getFubPersonSyncStatus();
+        if (status?.lastSync) {
+          const ago = Date.now() - new Date(status.lastSync).getTime();
+          const mins = Math.floor(ago / 60000);
+          setSyncStatus(mins < 1 ? 'Just now' : `${mins}m ago`);
+        }
+      } catch {
+        // Ignore
+      }
+    };
+    checkSync();
+    const interval = setInterval(checkSync, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col h-full">
-      <div className="p-6 flex items-center gap-3">
-        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">
-          T
+    <aside className="hidden md:flex w-64 bg-sidebar flex-col h-screen fixed left-0 top-0 z-40">
+      {/* Logo */}
+      <div className="px-5 py-5 flex items-center gap-3">
+        <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">
+          <Landmark className="h-5 w-5 text-white" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-gray-900 leading-tight">
-            Tenko
-          </h1>
-          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Workspace</p>
+          <h1 className="text-base font-bold text-white leading-tight">TC Dash</h1>
+          <p className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Jerez Land</p>
         </div>
       </div>
 
-      <nav className="flex-1 px-4 py-2">
-        <div className="mb-6">
-          <p className="px-3 text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wide">Main</p>
-          <NavItem to="/" icon={LayoutDashboard} label="Dashboard" />
-          <NavItem to="/projects" icon={CheckSquare} label="Projects" />
-          <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
-        </div>
-
-        <div>
-          <p className="px-3 text-xs font-semibold text-gray-400 mb-2 uppercase tracking-wide">Support</p>
-          <NavItem to="/activity" icon={Activity} label="Activity" />
-          <NavItem to="/settings" icon={Settings} label="Settings" />
-        </div>
+      {/* Nav Links */}
+      <nav className="flex-1 mt-2">
+        {NAV_ITEMS.map(item => (
+          <NavItem key={item.to} {...item} />
+        ))}
       </nav>
 
-      <div className="p-4 border-t border-gray-50">
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-8 h-8 rounded-full bg-gray-200"></div>
-          <div className="text-sm">
-            <p className="font-medium text-gray-700">Aaron C.</p>
-            <p className="text-xs text-gray-400">Admin</p>
-          </div>
+      {/* Bottom Section */}
+      <div className="px-4 py-4 border-t border-white/10 space-y-3">
+        {/* FUB sync indicator */}
+        <div className="flex items-center gap-2 px-1">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-green-500" />
+          </span>
+          <span className="text-xs text-slate-500">
+            FUB Sync {syncStatus ? `· ${syncStatus}` : ''}
+          </span>
+        </div>
+
+        {/* Notification bell */}
+        <div className="flex items-center gap-2 px-1">
+          <NotificationCenter />
         </div>
       </div>
     </aside>

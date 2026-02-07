@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 import { initDatabase } from './database.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { startAlertScheduler } from './alert-scheduler.js';
-import { startSyncRunner } from './sync-runner.js';
+import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,8 +61,8 @@ app.whenReady().then(() => {
   // Start deadline alert scheduler (checks every 15 min)
   startAlertScheduler();
 
-  // Start background sync runner (processes queue every 30s)
-  startSyncRunner();
+  // Start FUB person sync runner (polls every 30s)
+  startFubPersonSync();
 
   // Start FUB file sync runner (checks every 5 min)
   startFubFileSync();
