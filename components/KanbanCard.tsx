@@ -61,9 +61,10 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
   }, [isFocused]);
 
   const sc = getStageColor(deal.stage);
-  const daysInStage = deal.updated_at
-    ? Math.floor((Date.now() - new Date(deal.updated_at).getTime()) / 86400000)
-    : 0;
+  const closeDate = deal.close_date && deal.close_date !== 'TBD' ? deal.close_date : null;
+  const daysSinceClose = closeDate
+    ? Math.floor((Date.now() - new Date(closeDate).getTime()) / 86400000)
+    : null;
   const profit = formatProfit(deal.purchase_price, deal.expected_sales_price);
   const deadlineBadge = nearestDeadline ? getDeadlineBadge(nearestDeadline) : null;
   const syncDot = getSyncDot(syncStatus, !!deal.fub_person_id);
@@ -99,10 +100,12 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
         <span className="text-micro font-medium text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">
           {deal.deal_type}
         </span>
-        <span className={cn('text-micro font-semibold px-1.5 py-0.5 rounded', sc.light, sc.lightText)}>
-          <Clock className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />
-          {daysInStage}d
-        </span>
+        {daysSinceClose !== null && (
+          <span className={cn('text-micro font-semibold px-1.5 py-0.5 rounded', sc.light, sc.lightText)}>
+            <Clock className="inline h-2.5 w-2.5 mr-0.5 -mt-px" />
+            {daysSinceClose}d
+          </span>
+        )}
       </div>
 
       {/* Row 4: Next task */}
