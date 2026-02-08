@@ -16,6 +16,13 @@ interface KanbanColumnProps {
   onCardClick: (dealId: string) => void;
   onNewDeal?: (stage: string) => void;
   focusedDealId?: string | null;
+  compact?: boolean;
+  dimmedDealIds?: Set<string>;
+  onCompleteTask?: (taskId: string) => void;
+  onAdvanceStage?: (dealId: string) => void;
+  isSelectMode?: boolean;
+  selectedDealIds?: Set<string>;
+  onToggleSelect?: (dealId: string) => void;
 }
 
 const getNextTask = (tasks: Task[]): Task | undefined =>
@@ -41,10 +48,18 @@ interface DraggableCardWrapperProps {
   syncStatus: FubSyncStatus | null;
   onClick: () => void;
   isFocused?: boolean;
+  compact?: boolean;
+  isDimmed?: boolean;
+  onCompleteTask?: (taskId: string) => void;
+  onAdvanceStage?: (dealId: string) => void;
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (dealId: string) => void;
 }
 
 const DraggableCardWrapper: React.FC<DraggableCardWrapperProps> = ({
-  deal, nextTask, nearestDeadline, syncStatus, onClick, isFocused,
+  deal, nextTask, nearestDeadline, syncStatus, onClick, isFocused, compact, isDimmed,
+  onCompleteTask, onAdvanceStage, isSelectMode, isSelected, onToggleSelect,
 }) => {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
@@ -68,6 +83,13 @@ const DraggableCardWrapper: React.FC<DraggableCardWrapperProps> = ({
         syncStatus={syncStatus}
         onClick={onClick}
         isFocused={isFocused}
+        compact={compact}
+        isDimmed={isDimmed}
+        onCompleteTask={onCompleteTask}
+        onAdvanceStage={onAdvanceStage}
+        isSelectMode={isSelectMode}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
       />
     </div>
   );
@@ -84,6 +106,13 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   onCardClick,
   onNewDeal,
   focusedDealId,
+  compact,
+  dimmedDealIds,
+  onCompleteTask,
+  onAdvanceStage,
+  isSelectMode,
+  selectedDealIds,
+  onToggleSelect,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const sc = getStageColor(stage);
@@ -178,6 +207,13 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
                   syncStatus={syncStatusByDeal[deal.id] ?? null}
                   onClick={() => onCardClick(deal.id)}
                   isFocused={focusedDealId === deal.id}
+                  compact={compact}
+                  isDimmed={dimmedDealIds?.has(deal.id)}
+                  onCompleteTask={onCompleteTask}
+                  onAdvanceStage={onAdvanceStage}
+                  isSelectMode={isSelectMode}
+                  isSelected={selectedDealIds?.has(deal.id)}
+                  onToggleSelect={onToggleSelect}
                 />
               );
             })

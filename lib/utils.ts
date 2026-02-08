@@ -5,6 +5,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// ---- Shared label classes for visual consistency ----
+export const labelClasses = {
+  /** Section header: e.g. "Financials", "Dates" */
+  section: 'text-sm font-semibold text-gray-900',
+  /** Field label above an input */
+  field: 'text-caption font-medium text-gray-500',
+  /** Micro label for metadata / secondary info */
+  micro: 'text-micro text-gray-400 font-medium uppercase tracking-wide',
+} as const;
+
 export function formatDate(dateString: string) {
   return new Date(dateString).toLocaleDateString('en-US', {
     month: 'short',

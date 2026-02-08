@@ -102,6 +102,15 @@ export interface Deal {
   drone_photo_link?: string;
   reference_number?: string;
   misc_deal_expenses?: string;
+  // Fee tracking (v13)
+  transactional_funding_fee?: number;
+  realtor_fee_percent?: number;
+  realtor_fee_amount?: number;
+  improvement_costs?: number;
+  misc_fees?: number;
+  // Jerez Land share (v14)
+  jl_share_percent?: number;
+  jl_share_amount?: number;
 }
 
 export interface Task {

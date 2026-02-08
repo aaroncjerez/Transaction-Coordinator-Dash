@@ -1,18 +1,17 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { X, ExternalLink, CheckCircle2, Loader2 } from 'lucide-react';
-import { Deal } from '../types';
-import { fetchDealById } from '../lib/database';
+import { Deadline } from '../types';
+import { DealViewData, mapDealData } from '../lib/deal-utils';
+import { fetchDealById, getDeadlinesByDeal } from '../lib/database';
 import { getStageColor } from '../constants';
 import { cn } from '../lib/utils';
 import { DealOverview } from './deal/DealOverview';
 import { DealTasks } from './deal/DealTasks';
-import { DealDeadlines } from './deal/DealDeadlines';
-import { DealFiles } from './deal/DealFiles';
+import { DealFilesAndActivity } from './deal/DealFilesAndActivity';
 import { DealChat } from './DealChat';
-import { DealActivity } from './deal/DealActivity';
 import { SkeletonDrawer } from './ui/Skeleton';
 
-type DrawerTab = 'overview' | 'tasks' | 'deadlines' | 'files' | 'activity' | 'chat';
+type DrawerTab = 'summary' | 'tasks' | 'files-activity' | 'chat';
 
 interface DealDrawerProps {
   dealId: string | null;
@@ -20,107 +19,56 @@ interface DealDrawerProps {
   onDealUpdate?: () => void;
 }
 
-interface DealData {
-  id: string;
-  deal_name: string;
-  deal_type?: string;
-  stage: string;
-  county: string;
-  state: string;
-  purchase_price: number;
-  expected_sales_price: number;
-  contract_date: string;
-  close_date: string;
-  contract_end_date?: string;
-  phone_number: string;
-  email?: string;
-  notes: string;
-  fub_person_id?: string;
-  // Parcel
-  parcel_number?: string;
-  parcel_zip?: string;
-  parcel_link?: string;
-  lot_acreage?: string;
-  drone_photo_link?: string;
-  // Financials (extra)
-  seller_bottom_price?: number;
-  double_close_offer?: number;
-  realtor_price_opinion?: number;
-  misc_deal_expenses?: string;
-  // Due Diligence
-  mortgage_on_property?: string;
-  hoa_poa_on_property?: string;
-  title_search?: string;
-  title_exam?: string;
-  survey?: string;
-  soil_test?: string;
-  // Title Company
-  title_company_name?: string;
-  title_company_phone?: string;
-  title_company_email?: string;
-  // Team
-  funder_name?: string;
-  realtor_name?: string;
-  reference_number?: string;
+/** Returns current drawer size tier based on viewport width */
+function useDrawerSize(): 'default' | 'wide' | 'xl' {
+  const [size, setSize] = useState<'default' | 'wide' | 'xl'>(() => {
+    if (typeof window === 'undefined') return 'default';
+    if (window.innerWidth >= 1536) return 'xl';
+    if (window.innerWidth >= 1280) return 'wide';
+    return 'default';
+  });
+
+  useEffect(() => {
+    const calc = () => {
+      if (window.innerWidth >= 1536) setSize('xl');
+      else if (window.innerWidth >= 1280) setSize('wide');
+      else setSize('default');
+    };
+    window.addEventListener('resize', calc);
+    return () => window.removeEventListener('resize', calc);
+  }, []);
+
+  return size;
 }
 
+const drawerWidthClass: Record<string, string> = {
+  default: 'w-drawer',
+  wide: 'w-drawer-wide',
+  xl: 'w-drawer-xl',
+};
+
 export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealUpdate }) => {
-  const [deal, setDeal] = useState<DealData | null>(null);
+  const [deal, setDeal] = useState<DealViewData | null>(null);
+  const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<DrawerTab>('overview');
+  const [activeTab, setActiveTab] = useState<DrawerTab>('summary');
   const [fubSyncStatus, setFubSyncStatus] = useState<'idle' | 'synced' | 'pending' | null>(null);
+  const drawerSize = useDrawerSize();
+  const isTwoCol = drawerSize === 'xl';
 
   const fetchDeal = useCallback(async (id: string) => {
     setLoading(true);
     try {
-      const data = await fetchDealById(id);
+      const [data, dlData] = await Promise.all([
+        fetchDealById(id),
+        getDeadlinesByDeal(id),
+      ]);
+      setDeadlines((dlData || []) as Deadline[]);
       if (!data) {
         setDeal(null);
         return;
       }
-      setDeal({
-        id: data.id,
-        deal_name: data.deal_name || 'Unnamed Deal',
-        deal_type: data.deal_type || 'Unclassified',
-        stage: data.stage || 'Purchase Agreement Signed',
-        county: data.county || '',
-        state: data.state || '',
-        purchase_price: data.purchase_price || 0,
-        expected_sales_price: data.expected_sales_price || 0,
-        contract_date: data.contract_execution_date || 'TBD',
-        close_date: data.close_date || 'TBD',
-        contract_end_date: data.contract_end_date || undefined,
-        phone_number: data.phone_number || '',
-        email: data.email || undefined,
-        notes: data.notes || '',
-        fub_person_id: data.fub_person_id || undefined,
-        // Parcel
-        parcel_number: data.parcel_number || undefined,
-        parcel_zip: data.parcel_zip || undefined,
-        parcel_link: data.parcel_link || undefined,
-        lot_acreage: data.lot_acreage || undefined,
-        drone_photo_link: data.drone_photo_link || undefined,
-        // Financials (extra)
-        seller_bottom_price: data.seller_bottom_price || undefined,
-        double_close_offer: data.double_close_offer || undefined,
-        realtor_price_opinion: data.realtor_price_opinion || undefined,
-        misc_deal_expenses: data.misc_deal_expenses || undefined,
-        // Due Diligence
-        mortgage_on_property: data.mortgage_on_property || undefined,
-        hoa_poa_on_property: data.hoa_poa_on_property || undefined,
-        title_search: data.title_search || undefined,
-        title_exam: data.title_exam || undefined,
-        survey: data.survey || undefined,
-        soil_test: data.soil_test || undefined,
-        // Title Company
-        title_company_name: data.title_company_name || undefined,
-        title_company_phone: data.title_company_phone || undefined,
-        title_company_email: data.title_company_email || undefined,
-        // Team
-        funder_name: data.funder_name || undefined,
-        realtor_name: data.realtor_name || undefined,
-        reference_number: data.reference_number || undefined,
-      });
+      setDeal(mapDealData(data));
     } catch (err) {
       console.error('Failed to fetch deal:', err);
       setDeal(null);
@@ -132,7 +80,7 @@ export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealU
   useEffect(() => {
     if (dealId) {
       fetchDeal(dealId);
-      setActiveTab('overview');
+      setActiveTab('summary');
     }
   }, [dealId, fetchDeal]);
 
@@ -176,14 +124,21 @@ export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealU
 
   const stageColor = deal ? getStageColor(deal.stage) : null;
 
-  const tabs: { id: DrawerTab; label: string }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'deadlines', label: 'Deadlines' },
-    { id: 'files', label: 'Files' },
-    { id: 'activity', label: 'Activity' },
-    { id: 'chat', label: 'Chat' },
-  ];
+  // In two-column mode, Summary + Tasks are shown inline; tabs only cover remaining views
+  const tabs: { id: DrawerTab; label: string }[] = isTwoCol
+    ? [
+        { id: 'files-activity', label: 'Files & Activity' },
+        { id: 'chat', label: 'Chat' },
+      ]
+    : [
+        { id: 'summary', label: 'Summary' },
+        { id: 'tasks', label: 'Tasks' },
+        { id: 'files-activity', label: 'Files & Activity' },
+        { id: 'chat', label: 'Chat' },
+      ];
+
+  // In two-col mode, default to files-activity tab (since summary & tasks are always visible)
+  const effectiveTab = isTwoCol && (activeTab === 'summary' || activeTab === 'tasks') ? null : activeTab;
 
   return (
     <>
@@ -195,7 +150,10 @@ export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealU
 
       {/* Drawer Panel */}
       <div
-        className="fixed top-0 right-0 h-full w-drawer max-w-[90vw] bg-white shadow-lg z-50 flex flex-col animate-slide-in-right"
+        className={cn(
+          'fixed top-0 right-0 h-full max-w-[90vw] bg-white shadow-lg z-50 flex flex-col animate-slide-in-right transition-[width] duration-200',
+          drawerWidthClass[drawerSize],
+        )}
         role="dialog"
         aria-label="Deal details"
         aria-modal="true"
@@ -268,17 +226,17 @@ export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealU
                 )}
               </div>
 
-              {/* Tabs */}
+              {/* Tabs — shown for non-inlined views */}
               <div className="flex gap-1 mt-3 -mb-3" role="tablist" aria-label="Deal sections">
                 {tabs.map(tab => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     role="tab"
-                    aria-selected={activeTab === tab.id}
+                    aria-selected={effectiveTab === tab.id}
                     className={cn(
                       'px-3 py-2 text-caption font-medium border-b-2 transition-colors',
-                      activeTab === tab.id
+                      effectiveTab === tab.id
                         ? 'border-primary text-primary'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
                     )}
@@ -289,27 +247,50 @@ export const DealDrawer: React.FC<DealDrawerProps> = ({ dealId, onClose, onDealU
               </div>
             </div>
 
-            {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
-              {activeTab === 'overview' && (
-                <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} />
-              )}
-              {activeTab === 'tasks' && stageColor && (
-                <DealTasks dealId={deal.id} stageHex={stageColor.hex} />
-              )}
-              {activeTab === 'deadlines' && (
-                <DealDeadlines dealId={deal.id} />
-              )}
-              {activeTab === 'files' && (
-                <DealFiles dealId={deal.id} fubPersonId={deal.fub_person_id} />
-              )}
-              {activeTab === 'activity' && (
-                <DealActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
-              )}
-              {activeTab === 'chat' && (
-                <DealChat dealId={deal.id} dealName={deal.deal_name} />
-              )}
-            </div>
+            {/* Content */}
+            {isTwoCol ? (
+              /* ═══ Two-column layout (≥1536px) ═══ */
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {/* Top: Summary + Tasks side-by-side */}
+                <div className="flex-1 flex overflow-hidden min-h-0">
+                  {/* Left column — Overview */}
+                  <div className="w-[58%] overflow-y-auto scrollbar-thin px-5 py-4 border-r border-gray-100">
+                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} deadlines={deadlines} />
+                  </div>
+                  {/* Right column — Tasks */}
+                  <div className="w-[42%] overflow-y-auto scrollbar-thin px-4 py-4">
+                    {stageColor && <DealTasks dealId={deal.id} stageHex={stageColor.hex} />}
+                  </div>
+                </div>
+                {/* Bottom: tabbed content for Files & Activity / Chat (when a tab is selected) */}
+                {effectiveTab && (
+                  <div className="border-t border-gray-200 max-h-[40%] overflow-y-auto scrollbar-thin px-5 py-4">
+                    {effectiveTab === 'files-activity' && (
+                      <DealFilesAndActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
+                    )}
+                    {effectiveTab === 'chat' && (
+                      <DealChat dealId={deal.id} dealName={deal.deal_name} />
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* ═══ Single-column layout (default / wide) ═══ */
+              <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
+                {activeTab === 'summary' && (
+                  <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} deadlines={deadlines} />
+                )}
+                {activeTab === 'tasks' && stageColor && (
+                  <DealTasks dealId={deal.id} stageHex={stageColor.hex} />
+                )}
+                {activeTab === 'files-activity' && (
+                  <DealFilesAndActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
+                )}
+                {activeTab === 'chat' && (
+                  <DealChat dealId={deal.id} dealName={deal.deal_name} />
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

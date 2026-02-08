@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   DndContext,
   DragOverlay,
@@ -9,7 +10,7 @@ import {
   DragStartEvent,
   DragEndEvent,
 } from '@dnd-kit/core';
-import { RefreshCw, Plus, Filter, X } from 'lucide-react';
+import { RefreshCw, Plus, Filter, X, Search, LayoutGrid, List, CheckSquare, XSquare } from 'lucide-react';
 import { Deal, Task, Deadline, FubSyncStatus, DealType } from '../types';
 import { PIPELINE_STAGES, DEAL_TYPES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
@@ -21,8 +22,11 @@ import {
   triggerFubPersonSync,
   onFubPersonSyncComplete,
   updateDealFields,
+  updateTaskWithLog,
   checkStageChange,
   insertDeal,
+  getSetting,
+  setSetting,
 } from '../lib/database';
 import { TopBar } from '../components/TopBar';
 import { KanbanColumn } from '../components/KanbanColumn';
@@ -30,8 +34,12 @@ import { KanbanCard } from '../components/KanbanCard';
 import { SkeletonColumn } from '../components/ui/Skeleton';
 import { Button } from '../components/ui/Button';
 import { DealDrawer } from '../components/DealDrawer';
+import { PipelineSummaryBar } from '../components/PipelineSummaryBar';
+import { OnboardingEmptyState } from '../components/ui/EmptyState';
 import { useOpenCommandPalette } from '../components/Layout';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { useToast } from '../components/ui/Toast';
+import { usePreferences } from '../contexts/PreferencesContext';
 
 // ---- Stage Change Confirmation Dialog ----
 
@@ -94,23 +102,145 @@ const StageChangeDialog: React.FC<StageDialogProps> = ({
 type DeadlineFilter = 'all' | 'overdue' | 'upcoming' | 'none';
 type SyncFilter = 'all' | 'synced' | 'error' | 'unlinked';
 
+interface FilterPreset {
+  name: string;
+  dealType: DealType | 'all';
+  deadline: DeadlineFilter;
+  sync: SyncFilter;
+}
+
+const FILTER_PRESETS_KEY = 'pipeline_filter_presets';
+
 // ---- Pipeline Page ----
 
 export const Pipeline: React.FC = () => {
+  const navigate = useNavigate();
   const openCommandPalette = useOpenCommandPalette();
+  const { showToast } = useToast();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [syncStatuses, setSyncStatuses] = useState<Record<string, FubSyncStatus | null>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Filters
   const [dealTypeFilter, setDealTypeFilter] = useState<DealType | 'all'>('all');
   const [deadlineFilter, setDeadlineFilter] = useState<DeadlineFilter>('all');
   const [syncFilter, setSyncFilter] = useState<SyncFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const { prefs, updatePref } = usePreferences();
+  const isCompact = prefs.cardDensity === 'compact';
+  const setIsCompact = (compact: boolean) => updatePref('cardDensity', compact ? 'compact' : 'expanded');
+
+  // Filter Presets
+  const [filterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
+  const [showSavePreset, setShowSavePreset] = useState(false);
+  const [presetName, setPresetName] = useState('');
+
+  useEffect(() => {
+    getSetting(FILTER_PRESETS_KEY).then(raw => {
+      if (raw) {
+        try { setFilterPresets(JSON.parse(raw)); } catch {}
+      }
+    });
+  }, []);
+
+  const savePreset = async () => {
+    if (!presetName.trim()) return;
+    const preset: FilterPreset = {
+      name: presetName.trim(),
+      dealType: dealTypeFilter,
+      deadline: deadlineFilter,
+      sync: syncFilter,
+    };
+    const next = [...filterPresets, preset];
+    setFilterPresets(next);
+    await setSetting(FILTER_PRESETS_KEY, JSON.stringify(next));
+    setPresetName('');
+    setShowSavePreset(false);
+    showToast({ message: `Filter "${preset.name}" saved`, type: 'success' });
+  };
+
+  const applyPreset = (preset: FilterPreset) => {
+    setDealTypeFilter(preset.dealType);
+    setDeadlineFilter(preset.deadline);
+    setSyncFilter(preset.sync);
+    setShowFilters(true);
+  };
+
+  const deletePreset = async (index: number) => {
+    const next = filterPresets.filter((_, i) => i !== index);
+    setFilterPresets(next);
+    await setSetting(FILTER_PRESETS_KEY, JSON.stringify(next));
+  };
+
+  // Batch select mode
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedDealIds, setSelectedDealIds] = useState<Set<string>>(new Set());
+
+  const handleToggleSelect = (dealId: string) => {
+    setSelectedDealIds(prev => {
+      const next = new Set(prev);
+      if (next.has(dealId)) next.delete(dealId);
+      else next.add(dealId);
+      return next;
+    });
+  };
+
+  const handleExitSelectMode = () => {
+    setIsSelectMode(false);
+    setSelectedDealIds(new Set());
+  };
+
+  const handleBatchStageChange = async (targetStage: string) => {
+    if (selectedDealIds.size === 0) return;
+    let successCount = 0;
+    for (const dealId of selectedDealIds) {
+      try {
+        await updateDealFields(dealId, { stage: targetStage });
+        successCount++;
+      } catch (err) {
+        console.error(`Batch stage change failed for ${dealId}:`, err);
+      }
+    }
+    showToast({ message: `${successCount} deal${successCount !== 1 ? 's' : ''} moved to ${targetStage}`, type: 'success' });
+    handleExitSelectMode();
+    await fetchData();
+  };
+
+  const handleBatchTypeChange = async (targetType: string) => {
+    if (selectedDealIds.size === 0) return;
+    let successCount = 0;
+    for (const dealId of selectedDealIds) {
+      try {
+        await updateDealFields(dealId, { deal_type: targetType });
+        successCount++;
+      } catch (err) {
+        console.error(`Batch type change failed for ${dealId}:`, err);
+      }
+    }
+    showToast({ message: `${successCount} deal${successCount !== 1 ? 's' : ''} set to ${targetType}`, type: 'success' });
+    handleExitSelectMode();
+    await fetchData();
+  };
+
+  const handleBatchCancel = async () => {
+    if (selectedDealIds.size === 0) return;
+    let successCount = 0;
+    for (const dealId of selectedDealIds) {
+      try {
+        await updateDealFields(dealId, { stage: 'Cancelled' });
+        successCount++;
+      } catch (err) {
+        console.error(`Batch cancel failed for ${dealId}:`, err);
+      }
+    }
+    showToast({ message: `${successCount} deal${successCount !== 1 ? 's' : ''} cancelled`, type: 'success' });
+    handleExitSelectMode();
+    await fetchData();
+  };
 
   // Drag state
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
@@ -166,13 +296,6 @@ export const Pipeline: React.FC = () => {
     fetchData();
     onFubPersonSyncComplete(() => fetchData());
   }, [fetchData]);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3000);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   // ---- Derived Data ----
 
@@ -232,6 +355,21 @@ export const Pipeline: React.FC = () => {
       return true;
     });
   }, [deals, dealTypeFilter, deadlineFilter, syncFilter, deadlinesByDeal, syncStatuses]);
+
+  // Compute dimmed deal IDs from search query (dim = visible but faded)
+  const dimmedDealIds = useMemo(() => {
+    if (!searchQuery.trim()) return new Set<string>();
+    const q = searchQuery.toLowerCase();
+    const dimmed = new Set<string>();
+    filteredDeals.forEach(d => {
+      const match =
+        d.deal_name?.toLowerCase().includes(q) ||
+        d.county?.toLowerCase().includes(q) ||
+        d.state?.toLowerCase().includes(q);
+      if (!match) dimmed.add(d.id);
+    });
+    return dimmed;
+  }, [filteredDeals, searchQuery]);
 
   // Group filtered deals by stage
   const dealsByStage = useMemo(() => {
@@ -299,7 +437,7 @@ export const Pipeline: React.FC = () => {
       await executeStageChange(dealId, newStage);
     } catch (err) {
       console.error('Stage change check failed:', err);
-      setToast({ message: 'Failed to move deal', type: 'error' });
+      showToast({ message: 'Failed to move deal', type: 'error' });
     }
   };
 
@@ -316,10 +454,10 @@ export const Pipeline: React.FC = () => {
       if (result.fubPush?.queued) {
         fubNote = result.fubPush.success ? ' · FUB ✓' : ' · FUB pending';
       }
-      setToast({ message: `${dealName} → ${newStage}${fubNote}`, type: 'success' });
+      showToast({ message: `${dealName} → ${newStage}${fubNote}`, type: 'success' });
     } catch (err) {
       console.error('Stage change failed:', err);
-      setToast({ message: 'Failed to update stage', type: 'error' });
+      showToast({ message: 'Failed to update stage', type: 'error' });
     }
   };
 
@@ -337,13 +475,13 @@ export const Pipeline: React.FC = () => {
       const result = await triggerFubPersonSync();
       await fetchData();
       if (result.newDeals > 0 || result.updatedDeals > 0) {
-        setToast({ message: `Synced: ${result.newDeals} new, ${result.updatedDeals} updated`, type: 'success' });
+        showToast({ message: `Synced: ${result.newDeals} new, ${result.updatedDeals} updated`, type: 'success' });
       } else {
-        setToast({ message: 'No changes from FUB', type: 'success' });
+        showToast({ message: 'No changes from FUB', type: 'success' });
       }
     } catch {
       await fetchData();
-      setToast({ message: 'FUB sync failed', type: 'error' });
+      showToast({ message: 'FUB sync failed', type: 'error' });
     } finally {
       setIsSyncing(false);
     }
@@ -363,10 +501,49 @@ export const Pipeline: React.FC = () => {
       if (newDeal?.id) {
         setSelectedDealId(newDeal.id);
       }
-      setToast({ message: 'Deal created', type: 'success' });
+      showToast({ message: 'Deal created', type: 'success' });
     } catch (err) {
       console.error('Create deal failed:', err);
-      setToast({ message: 'Failed to create deal', type: 'error' });
+      showToast({ message: 'Failed to create deal', type: 'error' });
+    }
+  };
+
+  // ---- Quick Actions ----
+
+  const handleQuickCompleteTask = async (taskId: string) => {
+    try {
+      await updateTaskWithLog(taskId, { status: 'Done' });
+      await fetchData();
+      showToast({ message: 'Task completed', type: 'success' });
+    } catch (err) {
+      console.error('Quick task complete failed:', err);
+      showToast({ message: 'Failed to complete task', type: 'error' });
+    }
+  };
+
+  const handleQuickAdvanceStage = async (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+    const currentIdx = PIPELINE_STAGES.indexOf(deal.stage as any);
+    if (currentIdx < 0 || currentIdx >= PIPELINE_STAGES.length - 1) return;
+    const nextStage = PIPELINE_STAGES[currentIdx + 1];
+
+    try {
+      const result = await checkStageChange(dealId, nextStage);
+      if (!result.canProceed && result.incompleteTasks && result.incompleteTasks.length > 0) {
+        setStageDialog({
+          dealId,
+          dealName: deal.deal_name,
+          fromStage: deal.stage,
+          toStage: nextStage,
+          incompleteTasks: result.incompleteTasks,
+        });
+        return;
+      }
+      await executeStageChange(dealId, nextStage);
+    } catch (err) {
+      console.error('Quick advance failed:', err);
+      showToast({ message: 'Failed to advance stage', type: 'error' });
     }
   };
 
@@ -412,19 +589,6 @@ export const Pipeline: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Toast */}
-      {toast && (
-        <div className={cn(
-          'fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-md border text-sm font-medium z-50 animate-fade-in',
-          toast.type === 'success' ? 'bg-white border-emerald-200 text-emerald-700' : 'bg-white border-red-200 text-red-700'
-        )}>
-          <div className="flex items-center gap-2">
-            <div className={cn('w-2 h-2 rounded-full', toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500')} />
-            {toast.message}
-          </div>
-        </div>
-      )}
-
       {/* Stage Change Dialog */}
       <StageChangeDialog
         isOpen={!!stageDialog}
@@ -443,6 +607,43 @@ export const Pipeline: React.FC = () => {
         onSearchClick={openCommandPalette}
         actions={
           <div className="flex items-center gap-2">
+            {/* Select mode toggle */}
+            <button
+              onClick={() => isSelectMode ? handleExitSelectMode() : setIsSelectMode(true)}
+              className={cn(
+                'p-1.5 rounded transition-colors',
+                isSelectMode
+                  ? 'bg-primary text-white'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              )}
+              title={isSelectMode ? 'Exit select mode' : 'Select multiple deals'}
+            >
+              {isSelectMode ? <XSquare size={14} /> : <CheckSquare size={14} />}
+            </button>
+
+            {/* Compact / Expanded toggle */}
+            <div className="flex items-center bg-subtle rounded-md p-0.5">
+              <button
+                onClick={() => setIsCompact(false)}
+                className={cn(
+                  'p-1.5 rounded transition-colors',
+                  !isCompact ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-400 hover:text-gray-600'
+                )}
+                title="Expanded cards"
+              >
+                <LayoutGrid size={14} />
+              </button>
+              <button
+                onClick={() => setIsCompact(true)}
+                className={cn(
+                  'p-1.5 rounded transition-colors',
+                  isCompact ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-400 hover:text-gray-600'
+                )}
+                title="Compact cards"
+              >
+                <List size={14} />
+              </button>
+            </div>
             <Button
               variant={showFilters ? 'primary' : 'outline'}
               size="sm"
@@ -467,9 +668,31 @@ export const Pipeline: React.FC = () => {
         }
       />
 
-      {/* Filter Bar (collapsible) */}
+      {/* Summary Bar */}
+      <PipelineSummaryBar
+        deals={deals}
+        tasks={tasks}
+        deadlines={deadlines}
+        onFilterOverdue={() => { setDeadlineFilter('overdue'); setShowFilters(true); }}
+        onFilterStale={() => { /* stale filter visual only — no dedicated filter yet */ }}
+      />
+
+      {/* Search + Filter Bar */}
       {showFilters && (
         <div className="px-5 py-3 border-b border-gray-200 bg-white flex items-center gap-4 flex-wrap animate-fade-in">
+          {/* Inline search */}
+          <div className="relative min-w-[160px] max-w-[220px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search deals..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1 text-caption bg-subtle border border-gray-200 rounded-md focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+            />
+          </div>
+
+          <div className="w-px h-6 bg-gray-200" />
           {/* Deal Type */}
           <div className="flex items-center gap-1.5">
             <span className="text-micro text-gray-400 font-medium uppercase tracking-wide">Type</span>
@@ -501,7 +724,7 @@ export const Pipeline: React.FC = () => {
             <FilterChip label="Unlinked" isActive={syncFilter === 'unlinked'} onClick={() => setSyncFilter('unlinked')} />
           </div>
 
-          {/* Clear all filters */}
+          {/* Clear all filters + Save */}
           {hasActiveFilters && (
             <>
               <div className="w-px h-6 bg-gray-200" />
@@ -516,8 +739,70 @@ export const Pipeline: React.FC = () => {
                 <X size={12} />
                 Clear
               </button>
+              {!showSavePreset ? (
+                <button
+                  onClick={() => setShowSavePreset(true)}
+                  className="text-caption text-primary hover:text-primary/80 font-medium transition-colors"
+                >
+                  Save filter
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 animate-fade-in">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Preset name..."
+                    value={presetName}
+                    onChange={e => setPresetName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') savePreset();
+                      if (e.key === 'Escape') { setShowSavePreset(false); setPresetName(''); }
+                    }}
+                    className="w-28 px-2 py-0.5 text-caption bg-white border border-gray-200 rounded-md focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                  />
+                  <button
+                    onClick={savePreset}
+                    disabled={!presetName.trim()}
+                    className="text-caption text-primary hover:text-primary/80 font-medium transition-colors disabled:opacity-40"
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
             </>
           )}
+        </div>
+      )}
+
+      {/* Saved Filter Presets */}
+      {filterPresets.length > 0 && (
+        <div className="px-5 py-2 border-b border-gray-200 bg-white flex items-center gap-2 flex-wrap">
+          <span className="text-micro text-gray-400 font-medium uppercase tracking-wide mr-1">Saved:</span>
+          {filterPresets.map((preset, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1 group"
+            >
+              <button
+                onClick={() => applyPreset(preset)}
+                className={cn(
+                  'text-caption font-medium px-2.5 py-1 rounded-md border transition-colors',
+                  dealTypeFilter === preset.dealType && deadlineFilter === preset.deadline && syncFilter === preset.sync
+                    ? 'bg-primary-light text-primary border-primary/30'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:text-gray-900'
+                )}
+              >
+                {preset.name}
+              </button>
+              <button
+                onClick={() => deletePreset(i)}
+                className="hidden group-hover:inline-flex text-gray-400 hover:text-red-500 transition-colors p-0.5"
+                title="Delete preset"
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
         </div>
       )}
 
@@ -529,6 +814,11 @@ export const Pipeline: React.FC = () => {
               <SkeletonColumn key={s} />
             ))}
           </div>
+        ) : !isLoading && deals.filter(d => d.stage !== 'Cancelled').length === 0 ? (
+          <OnboardingEmptyState
+            onGoToSettings={() => navigate('/settings')}
+            onSyncNow={handleSync}
+          />
         ) : (
           <DndContext
             sensors={sensors}
@@ -548,6 +838,13 @@ export const Pipeline: React.FC = () => {
                   onCardClick={(dealId) => setSelectedDealId(dealId)}
                   onNewDeal={(s) => handleNewDeal(s)}
                   focusedDealId={focusedDealId}
+                  compact={isCompact}
+                  dimmedDealIds={dimmedDealIds}
+                  onCompleteTask={handleQuickCompleteTask}
+                  onAdvanceStage={handleQuickAdvanceStage}
+                  isSelectMode={isSelectMode}
+                  selectedDealIds={selectedDealIds}
+                  onToggleSelect={handleToggleSelect}
                 />
               ))}
             </div>
@@ -576,6 +873,53 @@ export const Pipeline: React.FC = () => {
         onClose={() => setSelectedDealId(null)}
         onDealUpdate={fetchData}
       />
+
+      {/* Batch Action Bar */}
+      {isSelectMode && selectedDealIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+          <div className="bg-gray-900 text-white rounded-xl shadow-lg px-5 py-3 flex items-center gap-4">
+            <span className="text-caption font-semibold">
+              {selectedDealIds.size} selected
+            </span>
+            <div className="w-px h-5 bg-gray-700" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-micro text-gray-400 mr-1">Move to:</span>
+              <select
+                className="bg-gray-800 text-white text-caption rounded-md px-2 py-1 border border-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-primary/50"
+                defaultValue=""
+                onChange={e => { if (e.target.value) handleBatchStageChange(e.target.value); e.target.value = ''; }}
+              >
+                <option value="" disabled>Stage...</option>
+                {PIPELINE_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-micro text-gray-400 mr-1">Type:</span>
+              <select
+                className="bg-gray-800 text-white text-caption rounded-md px-2 py-1 border border-gray-700 cursor-pointer outline-none focus:ring-2 focus:ring-primary/50"
+                defaultValue=""
+                onChange={e => { if (e.target.value) handleBatchTypeChange(e.target.value); e.target.value = ''; }}
+              >
+                <option value="" disabled>Type...</option>
+                {DEAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="w-px h-5 bg-gray-700" />
+            <button
+              onClick={handleBatchCancel}
+              className="text-caption font-medium text-red-400 hover:text-red-300 transition-colors"
+            >
+              Cancel Deals
+            </button>
+            <button
+              onClick={handleExitSelectMode}
+              className="text-caption font-medium text-gray-400 hover:text-white transition-colors ml-1"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -82,7 +82,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
             {/* Status + Priority Row */}
             <div className="flex gap-3">
               <div className="flex-1">
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Status</label>
+                <label className="text-caption font-medium text-gray-500 mb-1 block">Status</label>
                 <select
                   value={task.status || 'To Do'}
                   onChange={e => handleFieldChange('status', e.target.value)}
@@ -92,7 +92,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
                 </select>
               </div>
               <div className="flex-1">
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Priority</label>
+                <label className="text-caption font-medium text-gray-500 mb-1 block">Priority</label>
                 <select
                   value={task.priority || 'Medium'}
                   onChange={e => handleFieldChange('priority', e.target.value)}
@@ -108,7 +108,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
 
             {/* Due Date */}
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+              <label className="text-caption font-medium text-gray-500 mb-1 flex items-center gap-1">
                 <Clock size={12} /> Due Date
               </label>
               <input
@@ -121,7 +121,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
 
             {/* Assignee */}
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+              <label className="text-caption font-medium text-gray-500 mb-1 flex items-center gap-1">
                 <User size={12} /> Assignee
               </label>
               <input
@@ -136,7 +136,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
 
             {/* Description */}
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 flex items-center gap-1">
+              <label className="text-caption font-medium text-gray-500 mb-1 flex items-center gap-1">
                 <FileText size={12} /> Description
               </label>
               <textarea
@@ -151,7 +151,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
 
             {/* Notes */}
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Notes</label>
+              <label className="text-caption font-medium text-gray-500 mb-1 block">Notes</label>
               <textarea
                 value={task.notes || ''}
                 onChange={e => setTask({ ...task, notes: e.target.value })}
@@ -165,7 +165,7 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
             {/* Linked Deal */}
             {task.deal && (
               <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Linked Deal</label>
+                <label className="text-caption font-medium text-gray-500 mb-1 block">Linked Deal</label>
                 <p className="text-sm font-semibold text-gray-900">{task.deal.deal_name}</p>
                 <p className="text-xs text-gray-500">{task.deal.stage} &middot; {task.deal.county}, {task.deal.state}</p>
               </div>

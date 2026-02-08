@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle } from 'lucide-react';
+import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders } from 'lucide-react';
 import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync } from '../lib/database';
 import { Button } from '../components/ui/Button';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
+import { useToast } from '../components/ui/Toast';
+import { usePreferences } from '../contexts/PreferencesContext';
 import { cn } from '../lib/utils';
 
 interface ApiKeyConfig {
@@ -21,12 +23,13 @@ const API_KEYS: ApiKeyConfig[] = [
 
 export const Settings: React.FC = () => {
   const openCommandPalette = useOpenCommandPalette();
+  const { showToast } = useToast();
+  const { prefs, updatePref } = usePreferences();
   const [keyValues, setKeyValues] = useState<Record<string, string>>({});
   const [keyStatuses, setKeyStatuses] = useState<Record<string, boolean>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [fubSyncStatuses, setFubSyncStatuses] = useState<any[]>([]);
   const [fubLinkedDeals, setFubLinkedDeals] = useState<any[]>([]);
   const [fubSyncing, setFubSyncing] = useState(false);
@@ -68,12 +71,10 @@ export const Settings: React.FC = () => {
     try {
       const result = await triggerFubPersonSync();
       await loadFubPersonSyncStatus();
-      setToast(`FUB person sync: ${result.newDeals} new, ${result.updatedDeals} updated`);
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: `FUB person sync: ${result.newDeals} new, ${result.updatedDeals} updated`, type: 'success' });
     } catch (e) {
       console.error('FUB person sync failed:', e);
-      setToast('FUB person sync failed');
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: 'FUB person sync failed', type: 'error' });
     } finally {
       setFubPersonSyncing(false);
     }
@@ -97,12 +98,10 @@ export const Settings: React.FC = () => {
     try {
       await triggerFubFileSync();
       await loadFubStatus();
-      setToast('FUB file sync triggered');
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: 'FUB file sync triggered', type: 'success' });
     } catch (e) {
       console.error('FUB sync failed:', e);
-      setToast('FUB sync failed');
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: 'FUB sync failed', type: 'error' });
     } finally {
       setFubSyncing(false);
     }
@@ -116,12 +115,10 @@ export const Settings: React.FC = () => {
       setKeyStatuses(prev => ({ ...prev, [settingKey]: true }));
       setEditingKey(null);
       setInputValue('');
-      setToast('API key saved successfully');
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: 'API key saved successfully', type: 'success' });
     } catch (e) {
       console.error('Failed to save setting:', e);
-      setToast('Failed to save API key');
-      setTimeout(() => setToast(null), 3000);
+      showToast({ message: 'Failed to save API key', type: 'error' });
     } finally {
       setSaving(false);
     }
@@ -154,16 +151,6 @@ export const Settings: React.FC = () => {
         subtitle="API keys, sync, and preferences"
         onSearchClick={openCommandPalette}
       />
-
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-md border bg-white border-emerald-200 text-emerald-700 text-sm font-medium z-50 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-            {toast}
-          </div>
-        </div>
-      )}
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -315,6 +302,87 @@ export const Settings: React.FC = () => {
                   <RefreshCw size={12} className="mr-1.5" />
                   Sync All Now
                 </Button>
+              </div>
+            </div>
+          </Section>
+
+          {/* User Preferences */}
+          <Section icon={<Sliders size={16} />} title="Preferences">
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-4">
+              {/* Card Density */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Card Density</p>
+                  <p className="text-micro text-gray-400">Default Kanban card size on Pipeline</p>
+                </div>
+                <select
+                  value={prefs.cardDensity}
+                  onChange={e => updatePref('cardDensity', e.target.value as 'compact' | 'expanded')}
+                  className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-subtle focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none cursor-pointer"
+                >
+                  <option value="expanded">Expanded</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </div>
+
+              {/* Task View Mode */}
+              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Task View Mode</p>
+                  <p className="text-micro text-gray-400">Default grouping on Tasks page</p>
+                </div>
+                <select
+                  value={prefs.taskViewMode}
+                  onChange={e => updatePref('taskViewMode', e.target.value as 'byDeal' | 'all')}
+                  className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-subtle focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none cursor-pointer"
+                >
+                  <option value="byDeal">Group by Deal</option>
+                  <option value="all">All Tasks</option>
+                </select>
+              </div>
+
+              {/* Deadline Alert Lead Days */}
+              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Deadline Alert Lead Time</p>
+                  <p className="text-micro text-gray-400">Days before deadline to show alerts</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={prefs.deadlineAlertLeadDays}
+                    onChange={e => {
+                      const v = Math.max(1, Math.min(30, parseInt(e.target.value) || 7));
+                      updatePref('deadlineAlertLeadDays', v);
+                    }}
+                    className="w-16 text-sm text-center border border-gray-200 rounded-md px-2 py-1.5 bg-subtle focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                  />
+                  <span className="text-caption text-gray-500">days</span>
+                </div>
+              </div>
+
+              {/* Stale Deal Threshold */}
+              <div className="flex items-center justify-between border-t border-gray-100 pt-4">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Stale Deal Threshold</p>
+                  <p className="text-micro text-gray-400">Days inactive before deal is flagged</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={90}
+                    value={prefs.staleDealThresholdDays}
+                    onChange={e => {
+                      const v = Math.max(1, Math.min(90, parseInt(e.target.value) || 14));
+                      updatePref('staleDealThresholdDays', v);
+                    }}
+                    className="w-16 text-sm text-center border border-gray-200 rounded-md px-2 py-1.5 bg-subtle focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                  />
+                  <span className="text-caption text-gray-500">days</span>
+                </div>
               </div>
             </div>
           </Section>

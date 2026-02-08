@@ -661,6 +661,33 @@ const migrations: Migration[] = [
       console.log('[Migration v12] FUB activities table created');
     },
   },
+  {
+    version: 13,
+    description: 'Add deal fee columns for profit tracking',
+    up(db: Database.Database) {
+      db.exec(`
+        ALTER TABLE deals ADD COLUMN transactional_funding_fee REAL DEFAULT 0;
+        ALTER TABLE deals ADD COLUMN realtor_fee_percent REAL DEFAULT 0;
+        ALTER TABLE deals ADD COLUMN realtor_fee_amount REAL DEFAULT 0;
+        ALTER TABLE deals ADD COLUMN improvement_costs REAL DEFAULT 0;
+        ALTER TABLE deals ADD COLUMN misc_fees REAL DEFAULT 0;
+      `);
+
+      console.log('[Migration v13] Deal fee columns added (transactional_funding_fee, realtor_fee_percent, realtor_fee_amount, improvement_costs, misc_fees)');
+    },
+  },
+  {
+    version: 14,
+    description: 'Add Jerez Land share columns',
+    up(db: Database.Database) {
+      db.exec(`
+        ALTER TABLE deals ADD COLUMN jl_share_percent REAL DEFAULT 0;
+        ALTER TABLE deals ADD COLUMN jl_share_amount REAL DEFAULT 0;
+      `);
+
+      console.log('[Migration v14] Jerez Land share columns added (jl_share_percent, jl_share_amount)');
+    },
+  },
 ];
 
 /**

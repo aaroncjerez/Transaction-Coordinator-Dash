@@ -46,6 +46,14 @@ function createWindow(): void {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 
+  // Forward renderer console messages to main process stdout (for debugging)
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levelName = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
+    if (level >= 2 || message.includes('Error') || message.includes('error')) {
+      console.log(`[Renderer:${levelName}] ${message} (${sourceId}:${line})`);
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });

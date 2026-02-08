@@ -113,7 +113,7 @@ export const DealDeadlines: React.FC<DealDeadlinesProps> = ({ dealId }) => {
               <span className={cn('text-sm font-medium', urgency === 'acknowledged' && 'line-through')}>
                 {d.label}
               </span>
-              <span className="text-micro text-gray-400 ml-2">
+              <span className="text-caption text-gray-400 ml-2">
                 {new Date(d.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                 {urgency !== 'acknowledged' && (
                   <span className="ml-1">

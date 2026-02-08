@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, ArrowRight, LayoutDashboard, CheckSquare, Archive, Settings,
+  Search, ArrowRight, Home, LayoutDashboard, CheckSquare, BarChart3, Archive, Settings,
   Plus, RefreshCw, Folder,
 } from 'lucide-react';
 import { Deal } from '../types';
@@ -54,14 +54,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
 
     // Navigation commands
     cmds.push({
+      id: 'nav-dashboard', label: 'Dashboard', section: 'navigation',
+      icon: <Home size={14} />, onSelect: () => navigateAndClose('/'),
+      keywords: 'dashboard home today overview',
+    });
+    cmds.push({
       id: 'nav-pipeline', label: 'Pipeline', section: 'navigation',
-      icon: <LayoutDashboard size={14} />, onSelect: () => navigateAndClose('/'),
-      keywords: 'pipeline kanban board home deals',
+      icon: <LayoutDashboard size={14} />, onSelect: () => navigateAndClose('/pipeline'),
+      keywords: 'pipeline kanban board deals',
     });
     cmds.push({
       id: 'nav-tasks', label: 'Tasks', section: 'navigation',
       icon: <CheckSquare size={14} />, onSelect: () => navigateAndClose('/tasks'),
       keywords: 'tasks todo checklist',
+    });
+    cmds.push({
+      id: 'nav-analytics', label: 'Analytics', section: 'navigation',
+      icon: <BarChart3 size={14} />, onSelect: () => navigateAndClose('/analytics'),
+      keywords: 'analytics charts stats reports funnel',
     });
     cmds.push({
       id: 'nav-archive', label: 'Archive', section: 'navigation',
@@ -77,7 +87,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     // Action commands
     cmds.push({
       id: 'action-new-deal', label: 'New Deal', section: 'actions',
-      icon: <Plus size={14} />, onSelect: () => navigateAndClose('/'),
+      icon: <Plus size={14} />, onSelect: () => navigateAndClose('/pipeline'),
       keywords: 'create new deal add',
     });
 
@@ -277,6 +287,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
             <span className="flex items-center gap-1">
               <kbd className="bg-subtle border border-gray-200 rounded px-1 py-0.5">esc</kbd>
               close
+            </span>
+            <span className="ml-auto flex items-center gap-1">
+              <kbd className="bg-subtle border border-gray-200 rounded px-1 py-0.5">?</kbd>
+              shortcuts
             </span>
           </div>
         </div>

@@ -61,6 +61,8 @@ export default {
       width: {
         sidebar: '14rem',
         drawer: '30rem',
+        'drawer-wide': '40rem',
+        'drawer-xl': '52rem',
       },
       borderRadius: {
         card: '8px',
