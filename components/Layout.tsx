@@ -1,26 +1,36 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, createContext, useContext } from 'react';
 import { Sidebar } from './Sidebar';
-import { BottomNav } from './BottomNav';
+import { CommandPalette } from './CommandPalette';
+import { useCommandPalette } from '../hooks/useCommandPalette';
+
+// Context to share command palette open function
+const CommandPaletteContext = createContext<{ openCommandPalette: () => void }>({
+  openCommandPalette: () => {},
+});
+
+export const useOpenCommandPalette = () => useContext(CommandPaletteContext).openCommandPalette;
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
+  const { isOpen, open, close } = useCommandPalette();
+
   return (
-    <div className="flex h-screen bg-background text-foreground font-sans">
-      {/* Desktop Sidebar — hidden on mobile */}
-      <Sidebar />
+    <CommandPaletteContext.Provider value={{ openCommandPalette: open }}>
+      <div className="flex h-screen bg-background text-foreground font-sans">
+        {/* Desktop Sidebar */}
+        <Sidebar />
 
-      {/* Main Content — offset for sidebar on desktop */}
-      <main className="flex-1 md:ml-64 overflow-y-auto pb-20 md:pb-0">
-        <div className="max-w-[1600px] mx-auto p-4 md:p-6">
+        {/* Main Content — offset for sidebar, TopBar rendered per-page */}
+        <main className="flex-1 md:ml-56 flex flex-col overflow-hidden">
           {children}
-        </div>
-      </main>
+        </main>
 
-      {/* Mobile Bottom Nav */}
-      <BottomNav />
-    </div>
+        {/* Global Command Palette */}
+        <CommandPalette isOpen={isOpen} onClose={close} />
+      </div>
+    </CommandPaletteContext.Provider>
   );
 };

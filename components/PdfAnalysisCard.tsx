@@ -48,6 +48,7 @@ export const PdfAnalysisCard: React.FC<PdfAnalysisCardProps> = ({ analysis, onRe
               disabled={isReanalyzing}
               className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
               title="Re-analyze"
+              aria-label="Re-analyze PDF"
             >
               {isReanalyzing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             </button>

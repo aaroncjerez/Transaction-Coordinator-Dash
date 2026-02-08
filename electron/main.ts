@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 // Load environment variables from .env in the project root
 const envPath = path.join(__dirname, '..', '.env');
-const envResult = dotenv.config({ path: envPath });
+const envResult = dotenv.config({ path: envPath, override: true });
 if (envResult.error) {
   // Fallback: try from cwd
   dotenv.config({ path: path.join(process.cwd(), '.env') });

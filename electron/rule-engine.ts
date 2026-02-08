@@ -143,11 +143,12 @@ export function seedTasksUpToStage(
   currentStage: string
 ): SeededTask[] {
   const stageOrder = [
-    'Offer accepted',
+    'Purchase Agreement Signed',
     'Due Diligence',
     'Send to escrow',
     'Purchase escrow',
     'Purchased',
+    'Listed For Sale',
     'Sale escrow',
     'Sold',
     'Cancelled',

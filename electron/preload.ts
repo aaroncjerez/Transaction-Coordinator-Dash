@@ -131,6 +131,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onPersonSyncComplete: (callback: (data: any) => void) => {
       ipcRenderer.on('fub:person-sync-complete', (_event: any, data: any) => callback(data));
     },
+    // Activities
+    getActivities: (dealId: string, activityType?: string) =>
+      ipcRenderer.invoke('fub:getActivities', dealId, activityType),
+    syncActivities: (dealId: string) =>
+      ipcRenderer.invoke('fub:syncActivities', dealId),
     // File sync
     getFileSyncStatus: (dealId: string) =>
       ipcRenderer.invoke('fub:getFileSyncStatus', dealId),

@@ -8,57 +8,62 @@ export interface StageColor {
   border: string;    // Border class ('border-blue-500')
   light: string;     // Light bg for badges/pills ('bg-blue-50')
   lightText: string;  // Text on light bg ('text-blue-700')
-  gradient: string;  // Gradient for column headers
+  topBorder: string; // Thin top border for column headers ('border-t-blue-500')
   hex: string;       // Raw hex for charts/inline styles
 }
 
 export const STAGE_COLORS: Record<DealStage, StageColor> = {
-  'Offer accepted': {
+  'Purchase Agreement Signed': {
     bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-500',
     light: 'bg-blue-50', lightText: 'text-blue-700',
-    gradient: 'from-blue-500 to-blue-600', hex: '#3b82f6',
+    topBorder: 'border-t-blue-500', hex: '#3b82f6',
   },
   'Due Diligence': {
     bg: 'bg-indigo-500', text: 'text-white', border: 'border-indigo-500',
     light: 'bg-indigo-50', lightText: 'text-indigo-700',
-    gradient: 'from-indigo-500 to-indigo-600', hex: '#6366f1',
+    topBorder: 'border-t-indigo-500', hex: '#6366f1',
   },
   'Send to escrow': {
     bg: 'bg-purple-500', text: 'text-white', border: 'border-purple-500',
     light: 'bg-purple-50', lightText: 'text-purple-700',
-    gradient: 'from-purple-500 to-purple-600', hex: '#a855f7',
+    topBorder: 'border-t-purple-500', hex: '#a855f7',
   },
   'Purchase escrow': {
     bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-500',
     light: 'bg-orange-50', lightText: 'text-orange-700',
-    gradient: 'from-orange-500 to-orange-600', hex: '#f97316',
+    topBorder: 'border-t-orange-500', hex: '#f97316',
   },
   'Purchased': {
     bg: 'bg-amber-500', text: 'text-white', border: 'border-amber-500',
     light: 'bg-amber-50', lightText: 'text-amber-700',
-    gradient: 'from-amber-500 to-amber-600', hex: '#f59e0b',
+    topBorder: 'border-t-amber-500', hex: '#f59e0b',
+  },
+  'Listed For Sale': {
+    bg: 'bg-cyan-500', text: 'text-white', border: 'border-cyan-500',
+    light: 'bg-cyan-50', lightText: 'text-cyan-700',
+    topBorder: 'border-t-cyan-500', hex: '#06b6d4',
   },
   'Sale escrow': {
     bg: 'bg-teal-500', text: 'text-white', border: 'border-teal-500',
     light: 'bg-teal-50', lightText: 'text-teal-700',
-    gradient: 'from-teal-500 to-teal-600', hex: '#14b8a6',
+    topBorder: 'border-t-teal-500', hex: '#14b8a6',
   },
   'Sold': {
     bg: 'bg-emerald-500', text: 'text-white', border: 'border-emerald-500',
     light: 'bg-emerald-50', lightText: 'text-emerald-700',
-    gradient: 'from-emerald-500 to-emerald-600', hex: '#10b981',
+    topBorder: 'border-t-emerald-500', hex: '#10b981',
   },
   'Cancelled': {
     bg: 'bg-gray-500', text: 'text-white', border: 'border-gray-500',
     light: 'bg-gray-50', lightText: 'text-gray-700',
-    gradient: 'from-gray-500 to-gray-600', hex: '#6b7280',
+    topBorder: 'border-t-gray-500', hex: '#6b7280',
   },
 };
 
 const FALLBACK_STAGE_COLOR: StageColor = {
   bg: 'bg-slate-500', text: 'text-white', border: 'border-slate-500',
   light: 'bg-slate-50', lightText: 'text-slate-700',
-  gradient: 'from-slate-500 to-slate-600', hex: '#64748b',
+  topBorder: 'border-t-slate-500', hex: '#64748b',
 };
 
 export function getStageColor(stage: string): StageColor {
@@ -67,11 +72,12 @@ export function getStageColor(stage: string): StageColor {
 
 /** Pipeline stages — all except Cancelled (shown in Archive) */
 export const PIPELINE_STAGES: DealStage[] = [
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
 ];
@@ -79,11 +85,12 @@ export const PIPELINE_STAGES: DealStage[] = [
 // ---- Core Stage & Type Lists ----
 
 export const DEAL_STAGES: DealStage[] = [
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
   'Cancelled',
@@ -112,14 +119,15 @@ export const FILE_CATEGORIES = [
 export const TASK_STATUSES = ['To Do', 'In Progress', 'Done', 'Skipped'] as const;
 
 export const STAGE_ORDER: Record<DealStage, number> = {
-  'Offer accepted': 0,
+  'Purchase Agreement Signed': 0,
   'Due Diligence': 1,
   'Send to escrow': 2,
   'Purchase escrow': 3,
   'Purchased': 4,
-  'Sale escrow': 5,
-  'Sold': 6,
-  'Cancelled': 7,
+  'Listed For Sale': 5,
+  'Sale escrow': 6,
+  'Sold': 7,
+  'Cancelled': 8,
 };
 
 /**
@@ -128,12 +136,11 @@ export const STAGE_ORDER: Record<DealStage, number> = {
  * This map handles any old stage names still in use.
  */
 export const LEGACY_FUB_STAGE_MAP: Record<string, DealStage> = {
-  'Purchase Agreement Signed': 'Offer accepted',
+  'Offer accepted': 'Purchase Agreement Signed',
   'Renegotiation': 'Due Diligence',
   'Send To Escrow': 'Send to escrow',
   'Purchase Pending': 'Purchase escrow',
   'Closing': 'Purchase escrow',
-  'Listed For Sale': 'Sale escrow',
   'Sale Pending': 'Sale escrow',
   'Dead': 'Cancelled',
 };
@@ -145,20 +152,20 @@ export const LEGACY_FUB_STAGE_MAP: Record<string, DealStage> = {
  */
 export const QUALIFYING_FUB_STAGES: string[] = [
   // Primary stages (same as app stages)
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
   'Cancelled',
   // Legacy FUB stage names (backwards compat)
-  'Purchase Agreement Signed',
+  'Offer accepted',
   'Renegotiation',
   'Purchase Pending',
   'Closing',
-  'Listed For Sale',
   'Sale Pending',
   'Dead',
 ];

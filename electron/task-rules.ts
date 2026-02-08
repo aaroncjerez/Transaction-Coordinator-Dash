@@ -28,7 +28,7 @@ export const TASK_RULESET: TaskRuleset = {
   schema: '[order, title, description, url]',
   tasks_by_type_and_stage: {
     'Standard Flip': {
-      'Offer accepted': [
+      'Purchase Agreement Signed': [
         [1, 'Complete initial due diligence review', 'Run quick validation before deeper DD', null],
         [2, 'Get realtor price opinion', 'Ask realtor for estimated resale value', null],
       ],
@@ -64,6 +64,7 @@ export const TASK_RULESET: TaskRuleset = {
         [3, 'List on MLS', 'Agent lists property', null],
         [4, 'Weekly follow-up with realtor', 'Request listing activity updates', null],
       ],
+      'Listed For Sale': [],
       'Sold': [
         [1, 'Save final HUD and closing documents', 'Store HUD + CD + closing file', null],
         [2, 'Save recorded deed', 'Store recorded deed safely', null],
@@ -71,7 +72,7 @@ export const TASK_RULESET: TaskRuleset = {
       ],
     },
     'Double Close': {
-      'Offer accepted': [
+      'Purchase Agreement Signed': [
         [1, 'Complete initial due diligence review', 'Quick verify double close viability', null],
         [2, 'Get realtor price opinion (if needed)', 'Ask realtor value', null],
       ],
@@ -104,6 +105,7 @@ export const TASK_RULESET: TaskRuleset = {
         [4, 'Get drone photos', 'Order drone media', null],
         [5, 'Weekly follow-up with realtor', 'Request updates', null],
       ],
+      'Listed For Sale': [],
       'Sold': [
         [1, 'Save final HUDs and closing documents', 'Store files', null],
         [2, 'Save recorded deed (if you took title)', 'Store deed', null],
@@ -111,7 +113,7 @@ export const TASK_RULESET: TaskRuleset = {
       ],
     },
     'Subdivide': {
-      'Offer accepted': [
+      'Purchase Agreement Signed': [
         [1, 'Complete initial due diligence review', 'Quick feasibility check for subdivide', null],
         [2, 'Get realtor price opinion (parent + children)', 'Ask realtor to estimate values', null],
       ],
@@ -148,6 +150,7 @@ export const TASK_RULESET: TaskRuleset = {
         [3, 'List each lot on MLS', 'Create separate listings', null],
         [4, 'Weekly follow-up with realtor', 'Request updates', null],
       ],
+      'Listed For Sale': [],
       'Sold': [
         [1, 'Save final HUD and closing documents', 'Store closing file', null],
         [2, 'Save recorded deed + final survey/plat', 'Store deed + plat map', null],

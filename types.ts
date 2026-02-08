@@ -3,11 +3,12 @@
 export type DealType = 'Standard Flip' | 'Double Close' | 'Subdivide';
 
 export type DealStage =
-  | 'Offer accepted'
+  | 'Purchase Agreement Signed'
   | 'Due Diligence'
   | 'Send to escrow'
   | 'Purchase escrow'
   | 'Purchased'
+  | 'Listed For Sale'
   | 'Sale escrow'
   | 'Sold'
   | 'Cancelled';
@@ -74,9 +75,33 @@ export interface Deal {
   close_date?: string;
   days_to_close?: string;
   phone_number?: string;
+  email?: string;
   assigned_to?: any;
   due_diligence_link?: string;
   fub_person_id?: string;
+  // FUB custom fields
+  contract_end_date?: string;
+  parcel_number?: string;
+  parcel_zip?: string;
+  parcel_link?: string;
+  lot_acreage?: string;
+  seller_bottom_price?: number;
+  double_close_offer?: number;
+  realtor_price_opinion?: number;
+  mortgage_on_property?: string;
+  hoa_poa_on_property?: string;
+  title_search?: string;
+  title_exam?: string;
+  survey?: string;
+  soil_test?: string;
+  title_company_name?: string;
+  title_company_phone?: string;
+  title_company_email?: string;
+  funder_name?: string;
+  realtor_name?: string;
+  drone_photo_link?: string;
+  reference_number?: string;
+  misc_deal_expenses?: string;
 }
 
 export interface Task {

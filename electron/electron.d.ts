@@ -5,7 +5,7 @@ export interface ElectronAPI {
     getDealById: (id: string) => Promise<any>;
     insertDeal: (deal: any) => Promise<any>;
     upsertDeals: (deals: any[]) => Promise<{ success: boolean }>;
-    updateDeal: (id: string, fields: Record<string, any>) => Promise<{ success: boolean }>;
+    updateDeal: (id: string, fields: Record<string, any>) => Promise<{ success: boolean; fubPush?: { queued: boolean; success?: boolean; error?: string } }>;
     deleteDeal: (id: string) => Promise<{ success: boolean }>;
     purgeOldDeals: () => Promise<{ purged: number }>;
     checkStageChange: (dealId: string, newStage: string) => Promise<{
@@ -84,12 +84,35 @@ export interface ElectronAPI {
     getPersonSyncStatus: () => Promise<FubPersonSyncStatus>;
     getPersonSyncRecords: () => Promise<any[]>;
     onPersonSyncComplete: (callback: (data: any) => void) => void;
+    // Activities
+    getActivities: (dealId: string, activityType?: string) => Promise<FubActivity[]>;
+    syncActivities: (dealId: string) => Promise<{ success: boolean; synced?: number; error?: string; notes?: number; calls?: number; texts?: number; emails?: number }>;
     // File sync
     getFileSyncStatus: (dealId: string) => Promise<FubFileSyncState | null>;
     getAllFileSyncStatuses: () => Promise<FubFileSyncState[]>;
     triggerFileSync: (dealId?: string) => Promise<{ success: boolean; synced: number; errors: number }>;
     getDealsWithFubLinks: () => Promise<{ id: string; deal_name: string; fub_person_id: string }[]>;
   };
+}
+
+export interface FubActivity {
+  id: number;
+  deal_id: string;
+  fub_person_id: string;
+  fub_id: number;
+  activity_type: 'note' | 'call' | 'text' | 'email';
+  direction?: 'inbound' | 'outbound' | null;
+  subject?: string | null;
+  body?: string | null;
+  from_number?: string | null;
+  to_number?: string | null;
+  duration?: number | null;
+  outcome?: string | null;
+  status?: string | null;
+  created_by?: string | null;
+  activity_date: string;
+  raw_json?: string | null;
+  created_at?: string;
 }
 
 export interface FubPersonSyncStatus {

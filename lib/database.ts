@@ -17,8 +17,8 @@ export async function insertDeal(deal: any): Promise<any> {
   return api.db.insertDeal(deal);
 }
 
-export async function updateDealFields(id: string, fields: Record<string, any>): Promise<void> {
-  await api.db.updateDeal(id, fields);
+export async function updateDealFields(id: string, fields: Record<string, any>): Promise<{ success: boolean; fubPush?: { queued: boolean; success?: boolean; error?: string } }> {
+  return api.db.updateDeal(id, fields);
 }
 
 export async function deleteDealById(id: string): Promise<void> {
@@ -207,6 +207,16 @@ export async function triggerFubFileSync(dealId?: string): Promise<{ success: bo
 
 export async function getDealsWithFubLinks(): Promise<{ id: string; deal_name: string; fub_person_id: string }[]> {
   return api.fub.getDealsWithFubLinks();
+}
+
+// ---- FUB activities ----
+
+export async function getFubActivities(dealId: string, activityType?: string): Promise<any[]> {
+  return api.fub.getActivities(dealId, activityType);
+}
+
+export async function syncFubActivities(dealId: string): Promise<{ success: boolean; synced?: number; error?: string; notes?: number; calls?: number; texts?: number; emails?: number }> {
+  return api.fub.syncActivities(dealId);
 }
 
 // ---- AI ----

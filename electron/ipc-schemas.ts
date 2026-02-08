@@ -5,11 +5,12 @@ import { z } from 'zod';
 export const DealTypeSchema = z.enum(['Standard Flip', 'Double Close', 'Subdivide']);
 
 export const DealStageSchema = z.enum([
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
   'Cancelled',
@@ -27,7 +28,7 @@ export const FileCategorySchema = z.enum([
 export const CreateDealSchema = z.object({
   deal_name: z.string().min(1),
   deal_type: DealTypeSchema.default('Standard Flip'),
-  stage: DealStageSchema.default('Offer accepted'),
+  stage: DealStageSchema.default('Purchase Agreement Signed'),
   county: z.string().default(''),
   state: z.string().default(''),
   purchase_price: z.number().default(0),

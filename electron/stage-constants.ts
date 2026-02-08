@@ -5,21 +5,23 @@
  */
 
 export type DealStage =
-  | 'Offer accepted'
+  | 'Purchase Agreement Signed'
   | 'Due Diligence'
   | 'Send to escrow'
   | 'Purchase escrow'
   | 'Purchased'
+  | 'Listed For Sale'
   | 'Sale escrow'
   | 'Sold'
   | 'Cancelled';
 
 export const DEAL_STAGES: DealStage[] = [
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
   'Cancelled',
@@ -29,14 +31,15 @@ export const DEAL_STAGES: DealStage[] = [
 export const DEAL_STAGES_SET = new Set<string>(DEAL_STAGES);
 
 export const STAGE_ORDER: Record<DealStage, number> = {
-  'Offer accepted': 0,
+  'Purchase Agreement Signed': 0,
   'Due Diligence': 1,
   'Send to escrow': 2,
   'Purchase escrow': 3,
   'Purchased': 4,
-  'Sale escrow': 5,
-  'Sold': 6,
-  'Cancelled': 7,
+  'Listed For Sale': 5,
+  'Sale escrow': 6,
+  'Sold': 7,
+  'Cancelled': 8,
 };
 
 /**
@@ -45,15 +48,36 @@ export const STAGE_ORDER: Record<DealStage, number> = {
  * This map handles any old stage names still in use.
  */
 export const LEGACY_FUB_STAGE_MAP: Record<string, DealStage> = {
-  'Purchase Agreement Signed': 'Offer accepted',
+  'Offer accepted': 'Purchase Agreement Signed',
   'Renegotiation': 'Due Diligence',
   'Send To Escrow': 'Send to escrow',
   'Purchase Pending': 'Purchase escrow',
   'Closing': 'Purchase escrow',
-  'Listed For Sale': 'Sale escrow',
   'Sale Pending': 'Sale escrow',
+  'Closed': 'Sold',
   'Dead': 'Cancelled',
 };
+
+/**
+ * Reverse mapping: app stage → FUB stage name.
+ * Used when PUSHING stage changes TO FUB. FUB silently ignores stage names
+ * it doesn't recognize (returns 200 but doesn't change anything), so we must
+ * send the exact FUB stage name.
+ *
+ * Only stages that differ from app names need entries here.
+ * If an app stage isn't in this map, it's sent as-is (e.g. "Purchased", "Sold").
+ */
+// With app stage names now added to FUB, no translation needed for outgoing pushes.
+// toFubStageName() falls back to the app stage name when the map is empty.
+export const APP_TO_FUB_STAGE: Partial<Record<DealStage, string>> = {};
+
+/**
+ * Convert an app stage name to the FUB stage name for API pushes.
+ * Falls back to the app stage if no mapping exists.
+ */
+export function toFubStageName(appStage: string): string {
+  return APP_TO_FUB_STAGE[appStage as DealStage] || appStage;
+}
 
 /**
  * FUB stages to poll for person sync.
@@ -62,21 +86,22 @@ export const LEGACY_FUB_STAGE_MAP: Record<string, DealStage> = {
  */
 export const QUALIFYING_FUB_STAGES: string[] = [
   // Primary stages (same as app stages)
-  'Offer accepted',
+  'Purchase Agreement Signed',
   'Due Diligence',
   'Send to escrow',
   'Purchase escrow',
   'Purchased',
+  'Listed For Sale',
   'Sale escrow',
   'Sold',
   'Cancelled',
   // Legacy FUB stage names (backwards compat)
-  'Purchase Agreement Signed',
+  'Offer accepted',
   'Renegotiation',
   'Purchase Pending',
   'Closing',
-  'Listed For Sale',
   'Sale Pending',
+  'Closed',
   'Dead',
 ];
 

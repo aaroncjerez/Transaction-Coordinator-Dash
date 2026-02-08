@@ -24,6 +24,7 @@ import {
 } from './fub-client.js';
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const DELAY_BETWEEN_DEALS_MS = 1500;    // 1.5s between API bursts per deal (avoid 429s)
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 function generateUUID(): string {
@@ -109,13 +110,27 @@ async function runSync(targetDealId?: string): Promise<{ success: boolean; synce
   let totalSynced = 0;
   let totalErrors = 0;
 
-  for (const deal of deals) {
+  for (let i = 0; i < deals.length; i++) {
+    const deal = deals[i];
+
+    // Rate limit: pause between deals to avoid FUB 429 Too Many Requests
+    if (i > 0) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_DEALS_MS));
+    }
+
     try {
       const result = await syncDealFiles(db, config, deal);
       totalSynced += result.newFiles;
     } catch (err) {
       totalErrors++;
       const errorMsg = err instanceof Error ? err.message : String(err);
+
+      // If rate-limited, stop processing remaining deals — retry next cycle
+      if (errorMsg.includes('429')) {
+        console.warn(`[FubFileSync] Rate-limited at deal ${i + 1}/${deals.length} — stopping this cycle`);
+        break;
+      }
+
       console.error(`[FubFileSync] Error syncing deal ${deal.id} (${deal.deal_name}):`, errorMsg);
 
       // Update fub_file_sync with error status

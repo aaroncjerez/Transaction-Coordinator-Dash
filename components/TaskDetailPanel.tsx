@@ -57,11 +57,11 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="fixed inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white shadow-2xl overflow-y-auto animate-in slide-in-from-right">
+      <div className="relative w-full max-w-md bg-white shadow-2xl overflow-y-auto animate-in slide-in-from-right" role="dialog" aria-label="Task details" aria-modal="true">
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <h2 className="text-lg font-semibold text-gray-900">Task Details</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md">
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md" aria-label="Close task details">
             <X size={20} className="text-gray-500" />
           </button>
         </div>
@@ -73,9 +73,9 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
             {/* Task Name */}
             <input
               type="text"
-              value={task.task_name || ''}
-              onChange={e => setTask({ ...task, task_name: e.target.value })}
-              onBlur={e => handleFieldChange('task_name', e.target.value)}
+              value={task.title || ''}
+              onChange={e => setTask({ ...task, title: e.target.value })}
+              onBlur={e => handleFieldChange('title', e.target.value)}
               className="w-full text-xl font-bold text-gray-900 bg-transparent border-0 focus:ring-0 p-0 outline-none"
             />
 

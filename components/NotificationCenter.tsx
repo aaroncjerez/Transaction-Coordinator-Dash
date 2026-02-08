@@ -97,6 +97,7 @@ export const NotificationCenter: React.FC = () => {
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
         title="Deadline Alerts"
+        aria-label="Deadline Alerts"
       >
         <Bell className="h-5 w-5 text-gray-600" />
         {unacknowledgedCount > 0 && (

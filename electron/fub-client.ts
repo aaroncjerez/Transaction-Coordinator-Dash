@@ -19,6 +19,29 @@ import type Database from 'better-sqlite3';
 
 const FUB_API_BASE = 'https://api.followupboss.com/v1';
 
+/**
+ * Fetch with automatic 429 retry (up to 3 attempts with exponential backoff).
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3
+): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, options);
+    if (response.status !== 429 || attempt === maxRetries) return response;
+
+    // Parse Retry-After header, default to exponential backoff
+    const retryAfter = response.headers.get('Retry-After');
+    const waitSec = retryAfter ? parseInt(retryAfter, 10) : Math.pow(2, attempt + 1);
+    const waitMs = Math.min((isNaN(waitSec) ? 2 : waitSec) * 1000, 30_000);
+    console.log(`[FubClient] 429 rate limit — retrying in ${waitMs / 1000}s (attempt ${attempt + 1}/${maxRetries})`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+  // Unreachable, but TypeScript needs it
+  throw new Error('fetchWithRetry exhausted retries');
+}
+
 export interface FubConfig {
   apiKey: string;
   account: string; // subdomain, e.g. "jerezland"
@@ -28,8 +51,42 @@ export interface FubPerson {
   id: number;
   firstName?: string;
   lastName?: string;
+  stage?: string;
+  price?: number;
   emails?: Array<{ value: string; type?: string }>;
   phones?: Array<{ value: string; type?: string }>;
+  addresses?: Array<{ value?: string; type?: string }>;
+  // FUB custom fields (camelCase with 'custom' prefix)
+  customDealType?: string | null;
+  customDealID?: string | null;
+  customCashOffer?: string | null;
+  customDoubleCloseOffer?: string | null;
+  customContractExecutionDate?: string | null;
+  customContractEndDate?: string | null;
+  customClosingDate?: string | null;
+  customParcelCounty?: string | null;
+  customParcelState?: string | null;
+  customParcelNumber?: string | null;
+  customParcelZip?: string | null;
+  customParcelLink?: string | null;
+  customLotAcreage?: string | null;
+  customSellerSBottomPrice?: string | null;
+  customRealtorPriceOpinion?: string | null;
+  customMortgageOnProperty?: string | null;
+  customHOAPOAOnProperty?: string | null;
+  customTitleSearch?: string | null;
+  customTitleExam?: string | null;
+  customSurvey?: string | null;
+  customSoilTest?: string | null;
+  customTitleCompanyName?: string | null;
+  customTitleCompanyPhone?: string | null;
+  customTitleCompanyEmail?: string | null;
+  customFunderName?: string | null;
+  customRealtorName?: string | null;
+  customDronePhotoLink?: string | null;
+  customReferenceNumber?: string | null;
+  customMiscellaneousDealExpenses?: string | null;
+  customPurchasePrice?: string | null;
   [key: string]: any;
 }
 
@@ -50,6 +107,51 @@ export interface FubNote {
   subject?: string;
   created?: string;
   attachments?: Array<{ id: number; uri?: string; name?: string }>;
+  [key: string]: any;
+}
+
+export interface FubCall {
+  id: number;
+  personId: number;
+  isIncoming?: boolean;
+  duration?: number;
+  outcome?: string | null;
+  phone?: string;
+  fromNumber?: string;
+  toNumber?: string;
+  note?: string | null;
+  recordingUrl?: string | null;
+  userName?: string;
+  startedAt?: string;
+  created?: string;
+  [key: string]: any;
+}
+
+export interface FubTextMessage {
+  id: number;
+  personId: number;
+  isIncoming?: boolean;
+  message?: string;
+  fromNumber?: string;
+  toNumber?: string;
+  status?: string;
+  deliveryStatus?: string;
+  userName?: string;
+  sent?: string;
+  created?: string;
+  media?: Array<{ url?: string; contentType?: string }>;
+  [key: string]: any;
+}
+
+export interface FubEmail {
+  id: number;
+  personId: number;
+  subject?: string;
+  body?: string;
+  isIncoming?: boolean;
+  from?: string;
+  to?: string;
+  created?: string;
   [key: string]: any;
 }
 
@@ -92,7 +194,7 @@ export async function fetchPerson(
   config: FubConfig,
   personId: string | number
 ): Promise<FubPerson | null> {
-  const response = await fetch(`${FUB_API_BASE}/people/${personId}`, {
+  const response = await fetchWithRetry(`${FUB_API_BASE}/people/${personId}`, {
     headers: {
       Authorization: authHeader(config.apiKey),
       Accept: 'application/json',
@@ -124,7 +226,7 @@ export async function fetchPersonEvents(
 
   for (let page = 0; page < maxPages; page++) {
     const url = `${FUB_API_BASE}/events?personId=${personId}&limit=${limit}&offset=${offset}`;
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         Authorization: authHeader(config.apiKey),
         Accept: 'application/json',
@@ -165,7 +267,7 @@ export async function fetchPersonNotes(
 
   for (let page = 0; page < maxPages; page++) {
     const url = `${FUB_API_BASE}/notes?personId=${personId}&limit=${limit}&offset=${offset}`;
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         Authorization: authHeader(config.apiKey),
         Accept: 'application/json',
@@ -292,8 +394,8 @@ export async function fetchPeopleByStage(
   limit = 100,
   offset = 0
 ): Promise<{ people: FubPerson[]; total: number; hasMore: boolean }> {
-  const url = `${FUB_API_BASE}/people?stage=${encodeURIComponent(stage)}&limit=${limit}&offset=${offset}`;
-  const response = await fetch(url, {
+  const url = `${FUB_API_BASE}/people?stage=${encodeURIComponent(stage)}&limit=${limit}&offset=${offset}&fields=allFields`;
+  const response = await fetchWithRetry(url, {
     headers: {
       Authorization: authHeader(config.apiKey),
       Accept: 'application/json',
@@ -359,20 +461,33 @@ export async function updatePersonStage(
   personId: number,
   stage: string
 ): Promise<boolean> {
+  return updatePerson(config, personId, { stage });
+}
+
+/**
+ * Update a person's fields in FUB.
+ * PUT /v1/people/{id}
+ * Accepts any partial person payload (stage, custom fields, etc.).
+ */
+export async function updatePerson(
+  config: FubConfig,
+  personId: number,
+  fields: Record<string, any>
+): Promise<boolean> {
   const url = `${FUB_API_BASE}/people/${personId}`;
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'PUT',
     headers: {
       Authorization: authHeader(config.apiKey),
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ stage }),
+    body: JSON.stringify(fields),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    console.error(`[FubClient] updatePersonStage(${personId}, ${stage}) failed: ${response.status} ${text}`);
+    console.error(`[FubClient] updatePerson(${personId}) failed: ${response.status} ${text}`);
     return false;
   }
 
@@ -390,7 +505,7 @@ export async function createNote(
   body: string
 ): Promise<FubNote | null> {
   const url = `${FUB_API_BASE}/notes`;
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
       Authorization: authHeader(config.apiKey),
@@ -415,6 +530,115 @@ export async function createNote(
 }
 
 // ==========================================
+// Activity Fetch Methods (calls, texts, emails)
+// ==========================================
+
+/**
+ * Fetch calls for a person (paginated).
+ * GET /v1/calls?personId={id}&limit=100&offset={offset}
+ */
+export async function fetchPersonCalls(
+  config: FubConfig,
+  personId: string | number,
+  maxPages = 5
+): Promise<FubCall[]> {
+  const allCalls: FubCall[] = [];
+  let offset = 0;
+  const limit = 100;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = `${FUB_API_BASE}/calls?personId=${personId}&limit=${limit}&offset=${offset}`;
+    const response = await fetchWithRetry(url, {
+      headers: { Authorization: authHeader(config.apiKey), Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) break;
+      throw new Error(`FUB GET /calls failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const calls: FubCall[] = data.calls || data.response || [];
+    if (calls.length === 0) break;
+    allCalls.push(...calls);
+    if (calls.length < limit || !data._metadata?.nextoffset) break;
+    offset = data._metadata.nextoffset;
+  }
+
+  return allCalls;
+}
+
+/**
+ * Fetch text messages for a person (paginated).
+ * GET /v1/textMessages?personId={id}&limit=100&offset={offset}
+ */
+export async function fetchPersonTexts(
+  config: FubConfig,
+  personId: string | number,
+  maxPages = 5
+): Promise<FubTextMessage[]> {
+  const allTexts: FubTextMessage[] = [];
+  let offset = 0;
+  const limit = 100;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = `${FUB_API_BASE}/textMessages?personId=${personId}&limit=${limit}&offset=${offset}`;
+    const response = await fetchWithRetry(url, {
+      headers: { Authorization: authHeader(config.apiKey), Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) break;
+      throw new Error(`FUB GET /textMessages failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const texts: FubTextMessage[] = data.textmessages || data.textMessages || data.response || [];
+    if (texts.length === 0) break;
+    allTexts.push(...texts);
+    if (texts.length < limit || !data._metadata?.nextoffset) break;
+    offset = data._metadata.nextoffset;
+  }
+
+  return allTexts;
+}
+
+/**
+ * Fetch emails for a person (paginated).
+ * GET /v1/emails?personId={id}&limit=100&offset={offset}
+ */
+export async function fetchPersonEmails(
+  config: FubConfig,
+  personId: string | number,
+  maxPages = 5
+): Promise<FubEmail[]> {
+  const allEmails: FubEmail[] = [];
+  let offset = 0;
+  const limit = 100;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = `${FUB_API_BASE}/emails?personId=${personId}&limit=${limit}&offset=${offset}`;
+    const response = await fetchWithRetry(url, {
+      headers: { Authorization: authHeader(config.apiKey), Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) break;
+      throw new Error(`FUB GET /emails failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const emails: FubEmail[] = data.emails || data.response || [];
+    if (emails.length === 0) break;
+    allEmails.push(...emails);
+    if (emails.length < limit || !data._metadata?.nextoffset) break;
+    offset = data._metadata.nextoffset;
+  }
+
+  return allEmails;
+}
+
+// ==========================================
 // File Sync Methods (existing)
 // ==========================================
 
@@ -432,7 +656,7 @@ export async function downloadAttachment(
 ): Promise<{ buffer: Buffer; fileName: string } | null> {
   const url = `https://${config.account}.followupboss.com/api/v1/personAttachments/${attachmentId}?redirect=true`;
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     headers: {
       Authorization: authHeader(config.apiKey),
     },

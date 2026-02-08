@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Database, RefreshCw, CheckCircle, XCircle, Loader2, Cloud, AlertTriangle } from 'lucide-react';
+import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle } from 'lucide-react';
 import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync } from '../lib/database';
 import { Button } from '../components/ui/Button';
+import { TopBar } from '../components/TopBar';
+import { useOpenCommandPalette } from '../components/Layout';
+import { cn } from '../lib/utils';
 
 interface ApiKeyConfig {
   key: string;
@@ -17,6 +20,7 @@ const API_KEYS: ApiKeyConfig[] = [
 ];
 
 export const Settings: React.FC = () => {
+  const openCommandPalette = useOpenCommandPalette();
   const [keyValues, setKeyValues] = useState<Record<string, string>>({});
   const [keyStatuses, setKeyStatuses] = useState<Record<string, boolean>>({});
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -123,230 +127,211 @@ export const Settings: React.FC = () => {
     }
   };
 
-  return (
-    <div className="flex-1 overflow-y-auto bg-gray-50/50 h-full">
-      <header className="sticky top-0 z-20 bg-background/80 backdrop-blur-md px-6 py-4 border-b border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">Configure API keys, sync settings, and app preferences</p>
-      </header>
+  // ---- Section wrapper ----
+  const Section: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
+    <section>
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className="text-gray-500">{icon}</span>
+        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
 
+  // ---- Stat box ----
+  const StatBox: React.FC<{ label: string; value: string | number; color?: string }> = ({ label, value, color }) => (
+    <div>
+      <p className="text-micro text-gray-500 font-medium">{label}</p>
+      <p className={cn('text-lg font-bold', color || 'text-gray-900')}>{value}</p>
+    </div>
+  );
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* TopBar */}
+      <TopBar
+        title="Settings"
+        subtitle="API keys, sync, and preferences"
+        onSearchClick={openCommandPalette}
+      />
+
+      {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg border bg-white border-emerald-100 text-emerald-700 text-sm font-medium z-50">
-          {toast}
+        <div className="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-md border bg-white border-emerald-200 text-emerald-700 text-sm font-medium z-50 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+            {toast}
+          </div>
         </div>
       )}
 
-      <main className="p-6 max-w-3xl mx-auto space-y-8">
-        {/* API Keys Section */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Key className="h-5 w-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">API Keys</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">
-            API keys are stored locally in SQLite. They override .env file values.
-          </p>
-
-          <div className="space-y-3">
-            {API_KEYS.map(config => (
-              <div key={config.key} className="bg-white rounded-lg border border-gray-200 p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {keyStatuses[config.key] ? (
-                      <CheckCircle className="h-4 w-4 text-emerald-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-gray-300" />
-                    )}
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{config.label}</p>
-                      <p className="text-xs text-gray-400">
-                        {keyStatuses[config.key] ? 'Configured' : `Not set (fallback: ${config.envFallback})`}
-                      </p>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="max-w-3xl mx-auto px-5 py-6 space-y-8">
+          {/* API Keys Section */}
+          <Section icon={<Key size={16} />} title="API Keys">
+            <p className="text-caption text-gray-500 mb-3">
+              API keys are stored locally in SQLite. They override .env file values.
+            </p>
+            <div className="space-y-2">
+              {API_KEYS.map(config => (
+                <div key={config.key} className="bg-white rounded-card border border-gray-200 shadow-xs p-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      {keyStatuses[config.key] ? (
+                        <CheckCircle size={14} className="text-emerald-500" />
+                      ) : (
+                        <XCircle size={14} className="text-gray-300" />
+                      )}
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{config.label}</p>
+                        <p className="text-micro text-gray-400">
+                          {keyStatuses[config.key] ? 'Configured' : `Not set (fallback: ${config.envFallback})`}
+                        </p>
+                      </div>
                     </div>
+
+                    {editingKey !== config.key && (
+                      <button
+                        onClick={() => { setEditingKey(config.key); setInputValue(''); }}
+                        className="text-caption text-primary hover:text-primary/80 font-medium transition-colors"
+                      >
+                        {keyStatuses[config.key] ? 'Update' : 'Set'}
+                      </button>
+                    )}
                   </div>
 
-                  {editingKey !== config.key && (
-                    <button
-                      onClick={() => { setEditingKey(config.key); setInputValue(''); }}
-                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      {keyStatuses[config.key] ? 'Update' : 'Set'}
-                    </button>
+                  {editingKey === config.key && (
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        type="password"
+                        autoFocus
+                        className="flex-1 px-3 py-1.5 border border-gray-200 rounded-md text-sm bg-subtle focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+                        placeholder={config.placeholder}
+                        value={inputValue}
+                        onChange={e => setInputValue(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Escape') { setEditingKey(null); setInputValue(''); } }}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => handleSave(config.key)}
+                        disabled={!inputValue.trim() || saving}
+                        isLoading={saving}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setEditingKey(null); setInputValue(''); }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   )}
                 </div>
+              ))}
+            </div>
+          </Section>
 
-                {editingKey === config.key && (
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      type="password"
-                      autoFocus
-                      className="flex-1 px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                      placeholder={config.placeholder}
-                      value={inputValue}
-                      onChange={e => setInputValue(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Escape') { setEditingKey(null); setInputValue(''); } }}
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => handleSave(config.key)}
-                      disabled={!inputValue.trim() || saving}
-                      isLoading={saving}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => { setEditingKey(null); setInputValue(''); }}
-                    >
-                      Cancel
-                    </Button>
+          {/* FUB Person Sync Section */}
+          <Section icon={<RefreshCw size={16} />} title="FUB Person Sync">
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-3">
+              <div className="grid grid-cols-3 gap-4">
+                <StatBox label="Total Deals" value={fubPersonSync?.totalDeals ?? '\u2014'} />
+                <StatBox label="Synced" value={fubPersonSync?.synced ?? '\u2014'} color="text-emerald-600" />
+                <StatBox label="Errors" value={fubPersonSync?.errors ?? '\u2014'} />
+              </div>
+
+              <div className="pt-3 flex items-center justify-between border-t border-gray-100">
+                <p className="text-micro text-gray-400">
+                  Background sync polls FUB every 30 seconds. Deals auto-created from qualifying stages.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleFubPersonSyncNow}
+                  disabled={fubPersonSyncing}
+                  isLoading={fubPersonSyncing}
+                >
+                  <RefreshCw size={12} className="mr-1.5" />
+                  Sync Now
+                </Button>
+              </div>
+            </div>
+          </Section>
+
+          {/* FUB File Sync Section */}
+          <Section icon={<Cloud size={16} />} title="FUB File Sync">
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-4">
+              <div className="grid grid-cols-4 gap-4">
+                <StatBox label="Linked Deals" value={fubLinkedDeals.length} />
+                <StatBox label="Synced" value={fubSyncStatuses.filter(s => s.last_status === 'synced').length} color="text-emerald-600" />
+                <StatBox label="Pending" value={fubSyncStatuses.filter(s => s.last_status === 'pending' || s.last_status === 'syncing').length} />
+                <StatBox label="Mismatched" value={fubSyncStatuses.filter(s => s.last_status === 'mismatch' || s.last_status === 'error').length} color="text-amber-600" />
+              </div>
+
+              {fubSyncStatuses.length > 0 && (
+                <div className="pt-3 border-t border-gray-100">
+                  <p className="text-micro text-gray-500 font-medium mb-1">Last Sync</p>
+                  <p className="text-caption text-gray-700">
+                    {(() => {
+                      const lastSynced = fubSyncStatuses
+                        .filter(s => s.last_synced_at)
+                        .sort((a: any, b: any) => (b.last_synced_at || '').localeCompare(a.last_synced_at || ''))[0];
+                      return lastSynced?.last_synced_at
+                        ? new Date(lastSynced.last_synced_at).toLocaleString()
+                        : 'Never';
+                    })()}
+                  </p>
+                </div>
+              )}
+
+              {fubSyncStatuses.some(s => s.last_status === 'error') && (
+                <div className="flex items-start gap-2 bg-red-50 rounded-md p-3 border border-red-200">
+                  <AlertTriangle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
+                  <div className="text-micro text-red-700">
+                    {fubSyncStatuses.filter(s => s.last_status === 'error').length} deal(s) have sync errors.
+                    {fubSyncStatuses.find(s => s.last_status === 'error')?.last_error && (
+                      <span className="block mt-1 text-red-500">
+                        Latest: {fubSyncStatuses.find(s => s.last_status === 'error')?.last_error}
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* FUB Person Sync Section */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <RefreshCw className="h-5 w-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">FUB Person Sync</h2>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Total Deals</p>
-                <p className="text-lg font-bold text-gray-900">{fubPersonSync?.totalDeals ?? '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Synced</p>
-                <p className="text-lg font-bold text-emerald-600">{fubPersonSync?.synced ?? '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Errors</p>
-                <p className="text-lg font-bold text-gray-900">{fubPersonSync?.errors ?? '-'}</p>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-between border-t border-gray-100">
-              <p className="text-xs text-gray-400">
-                Background sync polls FUB every 30 seconds. Deals auto-created from qualifying stages.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleFubPersonSyncNow}
-                disabled={fubPersonSyncing}
-                isLoading={fubPersonSyncing}
-              >
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Sync Now
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        {/* FUB File Sync Section */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Cloud className="h-5 w-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">FUB File Sync</h2>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-            <div className="grid grid-cols-4 gap-4">
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Linked Deals</p>
-                <p className="text-lg font-bold text-gray-900">{fubLinkedDeals.length}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Synced</p>
-                <p className="text-lg font-bold text-emerald-600">
-                  {fubSyncStatuses.filter(s => s.last_status === 'synced').length}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Pending</p>
-                <p className="text-lg font-bold text-gray-900">
-                  {fubSyncStatuses.filter(s => s.last_status === 'pending' || s.last_status === 'syncing').length}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium">Mismatched</p>
-                <p className="text-lg font-bold text-amber-600">
-                  {fubSyncStatuses.filter(s => s.last_status === 'mismatch' || s.last_status === 'error').length}
-                </p>
-              </div>
-            </div>
-
-            {fubSyncStatuses.length > 0 && (
-              <div className="pt-3 border-t border-gray-100">
-                <p className="text-xs text-gray-500 font-medium mb-2">Last Sync</p>
-                <p className="text-sm text-gray-700">
-                  {(() => {
-                    const lastSynced = fubSyncStatuses
-                      .filter(s => s.last_synced_at)
-                      .sort((a: any, b: any) => (b.last_synced_at || '').localeCompare(a.last_synced_at || ''))[0];
-                    return lastSynced?.last_synced_at
-                      ? new Date(lastSynced.last_synced_at).toLocaleString()
-                      : 'Never';
-                  })()}
-                </p>
-              </div>
-            )}
-
-            {fubSyncStatuses.some(s => s.last_status === 'error') && (
-              <div className="flex items-start gap-2 bg-red-50 rounded-md p-3 border border-red-100">
-                <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
-                <div className="text-xs text-red-700">
-                  {fubSyncStatuses.filter(s => s.last_status === 'error').length} deal(s) have sync errors.
-                  {fubSyncStatuses.find(s => s.last_status === 'error')?.last_error && (
-                    <span className="block mt-1 text-red-500">
-                      Latest: {fubSyncStatuses.find(s => s.last_status === 'error')?.last_error}
-                    </span>
-                  )}
                 </div>
+              )}
+
+              <div className="pt-3 flex items-center justify-between border-t border-gray-100">
+                <p className="text-micro text-gray-400">
+                  Background sync runs every 5 minutes for deals linked to FUB.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleFubSyncAll}
+                  disabled={fubSyncing || fubLinkedDeals.length === 0}
+                  isLoading={fubSyncing}
+                >
+                  <RefreshCw size={12} className="mr-1.5" />
+                  Sync All Now
+                </Button>
               </div>
-            )}
-
-            <div className="pt-2 flex items-center justify-between border-t border-gray-100">
-              <p className="text-xs text-gray-400">
-                Background sync runs every 5 minutes for deals linked to FUB.
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleFubSyncAll}
-                disabled={fubSyncing || fubLinkedDeals.length === 0}
-                isLoading={fubSyncing}
-              >
-                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                Sync All Now
-              </Button>
             </div>
-          </div>
-        </section>
+          </Section>
 
-        {/* Database Info */}
-        <section>
-          <div className="flex items-center gap-2 mb-4">
-            <Database className="h-5 w-5 text-gray-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Database</h2>
-          </div>
-
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-sm text-gray-600">
-              SQLite database with versioned migrations. Data is stored locally in the app's user data directory.
-            </p>
-            <p className="text-xs text-gray-400 mt-2">
-              Location: ~/Library/Application Support/&lt;app-name&gt;/tc-dash.db
-            </p>
-          </div>
-        </section>
-      </main>
+          {/* Database Info */}
+          <Section icon={<Database size={16} />} title="Database">
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4">
+              <p className="text-caption text-gray-600">
+                SQLite database with versioned migrations. Data is stored locally in the app's user data directory.
+              </p>
+              <p className="text-micro text-gray-400 mt-2">
+                Location: ~/Library/Application Support/&lt;app-name&gt;/tc-dash.db
+              </p>
+            </div>
+          </Section>
+        </div>
+      </div>
     </div>
   );
 };

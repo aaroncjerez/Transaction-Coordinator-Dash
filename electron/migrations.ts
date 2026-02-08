@@ -39,7 +39,7 @@ const migrations: Migration[] = [
           deal_name TEXT,
           last_name TEXT,
           deal_type TEXT DEFAULT 'Standard Flip',
-          stage TEXT DEFAULT 'Offer accepted',
+          stage TEXT DEFAULT 'Purchase Agreement Signed',
           previous_stage TEXT,
           county TEXT,
           state TEXT,
@@ -195,7 +195,7 @@ const migrations: Migration[] = [
                 deal_name: deal.deal_name || '',
                 last_name: deal.last_name || '',
                 deal_type: dealType,
-                stage: deal.stage || 'Offer accepted',
+                stage: deal.stage || 'Purchase Agreement Signed',
                 county: deal.county || '',
                 state: deal.state || '',
                 notes: deal.notes || '',
@@ -491,6 +491,174 @@ const migrations: Migration[] = [
       `);
 
       console.log('[Migration v6] FUB person sync schema complete, Airtable artifacts removed');
+    },
+  },
+  {
+    version: 7,
+    description: 'Rename stage: Offer accepted → Purchase Agreement Signed',
+    up: (db) => {
+      db.exec(`UPDATE deals SET stage = 'Purchase Agreement Signed' WHERE stage = 'Purchase Agreement Signed';`);
+      db.exec(`UPDATE deals SET previous_stage = 'Purchase Agreement Signed' WHERE previous_stage = 'Purchase Agreement Signed';`);
+      console.log('[Migration v7] Stage rename: Offer accepted → Purchase Agreement Signed');
+    },
+  },
+  {
+    version: 8,
+    description: 'Fix stage rename: update Offer accepted → Purchase Agreement Signed in deals + deduplicate tasks',
+    up: (db) => {
+      // v7 had a no-op bug (WHERE clause matched new name, not old).
+      // Fix: actually rename any remaining "Offer accepted" stages.
+      const dealsUpdated = db.prepare(
+        `UPDATE deals SET stage = 'Purchase Agreement Signed' WHERE stage = 'Offer accepted'`
+      ).run();
+      const prevUpdated = db.prepare(
+        `UPDATE deals SET previous_stage = 'Purchase Agreement Signed' WHERE previous_stage = 'Offer accepted'`
+      ).run();
+      console.log(`[Migration v8] Fixed stage rename: ${dealsUpdated.changes} deals, ${prevUpdated.changes} previous_stage`);
+
+      // Deduplicate tasks: For each deal, if a task with the old "Offer accepted" rule key
+      // has a matching title in a "Purchase Agreement Signed" rule key, delete the old one.
+      // Keep the newer "Purchase Agreement Signed" version.
+      const dupeOldTasks = db.prepare(`
+        SELECT old_task.id
+        FROM tasks old_task
+        INNER JOIN tasks new_task ON old_task.deal_id = new_task.deal_id AND old_task.title = new_task.title
+        WHERE old_task.source_rule_key LIKE '%::Offer accepted::%'
+          AND new_task.source_rule_key LIKE '%::Purchase Agreement Signed::%'
+      `).all() as any[];
+
+      if (dupeOldTasks.length > 0) {
+        const deleteStmt = db.prepare('DELETE FROM tasks WHERE id = ?');
+        for (const row of dupeOldTasks) {
+          deleteStmt.run(row.id);
+        }
+        console.log(`[Migration v8] Removed ${dupeOldTasks.length} duplicate tasks with old 'Offer accepted' rule keys`);
+      }
+
+      // Update remaining "Offer accepted" rule keys (tasks that don't have a newer duplicate)
+      const remaining = db.prepare(`
+        UPDATE tasks
+        SET source_rule_key = REPLACE(source_rule_key, '::Offer accepted::', '::Purchase Agreement Signed::')
+        WHERE source_rule_key LIKE '%::Offer accepted::%'
+      `).run();
+      if (remaining.changes > 0) {
+        console.log(`[Migration v8] Renamed ${remaining.changes} task rule keys from 'Offer accepted' to 'Purchase Agreement Signed'`);
+      }
+    },
+  },
+  {
+    version: 9,
+    description: 'FUB write outbox for reliable app-to-FUB pushes',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fub_outbox (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+          action TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          status TEXT DEFAULT 'pending',
+          attempts INTEGER DEFAULT 0,
+          max_attempts INTEGER DEFAULT 5,
+          last_error TEXT,
+          next_retry_at TEXT DEFAULT (datetime('now')),
+          created_at TEXT DEFAULT (datetime('now')),
+          completed_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fub_outbox_status ON fub_outbox(status);
+        CREATE INDEX IF NOT EXISTS idx_fub_outbox_next_retry ON fub_outbox(next_retry_at);
+      `);
+
+      console.log('[Migration v9] FUB outbox table created');
+    },
+  },
+  {
+    version: 10,
+    description: 'Add Listed For Sale as distinct stage (was collapsed into Sale escrow)',
+    up: (db) => {
+      // Deals that came from FUB with stage "Listed For Sale" were previously
+      // mapped to "Sale escrow" via LEGACY_FUB_STAGE_MAP. Now that "Listed For Sale"
+      // is a real app stage, the person sync will naturally re-assign them on next cycle.
+      // No data migration needed — just bump schema version.
+      console.log('[Migration v10] Listed For Sale stage added — existing deals will re-sync from FUB');
+    },
+  },
+  {
+    version: 11,
+    description: 'Add FUB custom field columns to deals table for bidirectional sync',
+    up: (db) => {
+      // Add new columns for FUB custom fields that don't have local columns yet.
+      // Using try/catch per column so migration is idempotent.
+      const newColumns = [
+        `ALTER TABLE deals ADD COLUMN email TEXT`,
+        `ALTER TABLE deals ADD COLUMN contract_end_date TEXT`,
+        `ALTER TABLE deals ADD COLUMN parcel_number TEXT`,
+        `ALTER TABLE deals ADD COLUMN parcel_zip TEXT`,
+        `ALTER TABLE deals ADD COLUMN lot_acreage TEXT`,
+        `ALTER TABLE deals ADD COLUMN seller_bottom_price REAL`,
+        `ALTER TABLE deals ADD COLUMN double_close_offer REAL`,
+        `ALTER TABLE deals ADD COLUMN realtor_price_opinion REAL`,
+        `ALTER TABLE deals ADD COLUMN mortgage_on_property TEXT`,
+        `ALTER TABLE deals ADD COLUMN hoa_poa_on_property TEXT`,
+        `ALTER TABLE deals ADD COLUMN title_search TEXT`,
+        `ALTER TABLE deals ADD COLUMN title_exam TEXT`,
+        `ALTER TABLE deals ADD COLUMN survey TEXT`,
+        `ALTER TABLE deals ADD COLUMN soil_test TEXT`,
+        `ALTER TABLE deals ADD COLUMN title_company_name TEXT`,
+        `ALTER TABLE deals ADD COLUMN title_company_phone TEXT`,
+        `ALTER TABLE deals ADD COLUMN title_company_email TEXT`,
+        `ALTER TABLE deals ADD COLUMN funder_name TEXT`,
+        `ALTER TABLE deals ADD COLUMN realtor_name TEXT`,
+        `ALTER TABLE deals ADD COLUMN drone_photo_link TEXT`,
+        `ALTER TABLE deals ADD COLUMN reference_number TEXT`,
+        `ALTER TABLE deals ADD COLUMN misc_deal_expenses TEXT`,
+        `ALTER TABLE deals ADD COLUMN parcel_link TEXT`,
+      ];
+
+      for (const sql of newColumns) {
+        try { db.exec(sql); } catch { /* Column already exists */ }
+      }
+
+      // Migrate existing due_diligence_link values to parcel_link for consistency
+      // (due_diligence_link was used for parcel links from FUB)
+      db.exec(`UPDATE deals SET parcel_link = due_diligence_link WHERE due_diligence_link IS NOT NULL AND due_diligence_link != '' AND parcel_link IS NULL`);
+
+      console.log('[Migration v11] FUB custom field columns added to deals table');
+    },
+  },
+  {
+    version: 12,
+    description: 'FUB activities table for notes, calls, texts, and emails',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fub_activities (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+          fub_person_id TEXT NOT NULL,
+          fub_id INTEGER NOT NULL,
+          activity_type TEXT NOT NULL,
+          direction TEXT,
+          subject TEXT,
+          body TEXT,
+          from_number TEXT,
+          to_number TEXT,
+          duration INTEGER,
+          outcome TEXT,
+          status TEXT,
+          created_by TEXT,
+          activity_date TEXT NOT NULL,
+          raw_json TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(fub_person_id, activity_type, fub_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fub_activities_deal ON fub_activities(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_fub_activities_person ON fub_activities(fub_person_id);
+        CREATE INDEX IF NOT EXISTS idx_fub_activities_type ON fub_activities(activity_type);
+        CREATE INDEX IF NOT EXISTS idx_fub_activities_date ON fub_activities(activity_date);
+      `);
+
+      console.log('[Migration v12] FUB activities table created');
     },
   },
 ];

@@ -3,9 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { Archive as ArchiveIcon, Search, DollarSign, Calendar } from 'lucide-react';
 import { Deal } from '../types';
 import { fetchAllDeals } from '../lib/database';
+import { TopBar } from '../components/TopBar';
+import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonRow } from '../components/ui/Skeleton';
+import { useOpenCommandPalette } from '../components/Layout';
+import { cn } from '../lib/utils';
 
 export const Archive: React.FC = () => {
   const navigate = useNavigate();
+  const openCommandPalette = useOpenCommandPalette();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -31,86 +37,92 @@ export const Archive: React.FC = () => {
   }, [deals, search]);
 
   const formatPrice = (price: number) => {
-    if (!price) return '—';
+    if (!price) return '\u2014';
     return `$${price.toLocaleString()}`;
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
-            <ArchiveIcon className="h-5 w-5 text-gray-500" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Archive</h1>
-            <p className="text-sm text-gray-500">{deals.length} cancelled deal{deals.length !== 1 ? 's' : ''}</p>
-          </div>
+    <div className="h-full flex flex-col">
+      {/* TopBar */}
+      <TopBar
+        title="Archive"
+        subtitle={`${deals.length} cancelled deal${deals.length !== 1 ? 's' : ''}`}
+        onSearchClick={openCommandPalette}
+      />
+
+      {/* Filter Bar */}
+      <div className="px-5 py-3 border-b border-gray-200 bg-white">
+        <div className="relative max-w-sm">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search cancelled deals..."
+            className="w-full pl-9 pr-3 py-1.5 text-caption bg-subtle border border-gray-200 rounded-md focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none"
+          />
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search cancelled deals..."
-          className="w-full sm:w-80 pl-10 pr-4 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
-        />
-      </div>
-
-      {/* Cards */}
-      {isLoading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-20 bg-gray-100 rounded-lg animate-pulse" />
-          ))}
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-16">
-          <ArchiveIcon className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-          <p className="text-sm text-gray-400">{search ? 'No matching deals' : 'No cancelled deals'}</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map(deal => (
-            <button
-              key={deal.id}
-              onClick={() => navigate(`/deals/${deal.id}`)}
-              className="w-full text-left bg-white rounded-lg border border-gray-200 p-4 hover:border-gray-300 hover:shadow-sm transition-all group"
-            >
-              <div className="flex items-center justify-between">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-blue-600">
-                    {deal.deal_name}
-                  </h3>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-xs text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">{deal.deal_type}</span>
-                    {deal.county && (
-                      <span className="text-xs text-gray-400">{deal.county}, {deal.state}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-gray-500 flex-shrink-0 ml-4">
-                  <span className="flex items-center gap-1">
-                    <DollarSign className="h-3 w-3" />
-                    {formatPrice(deal.purchase_price)}
-                  </span>
-                  {deal.updated_at && (
-                    <span className="flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      {new Date(deal.updated_at).toLocaleDateString()}
-                    </span>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div className="max-w-3xl mx-auto px-5 py-5">
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => (
+                <SkeletonRow key={i} />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={<ArchiveIcon size={24} />}
+              title={search ? 'No matching deals' : 'No cancelled deals'}
+              description={search ? `Nothing matches "${search}"` : 'Cancelled deals will appear here'}
+              className="py-16"
+            />
+          ) : (
+            <div className="space-y-2">
+              {filtered.map(deal => (
+                <button
+                  key={deal.id}
+                  onClick={() => navigate(`/deals/${deal.id}`)}
+                  className={cn(
+                    'w-full text-left bg-white rounded-card border border-gray-200 p-3.5 shadow-xs',
+                    'hover:shadow-sm hover:border-gray-300 transition-all group',
+                    'focus-visible:outline-none focus-visible:shadow-focus'
                   )}
-                </div>
-              </div>
-            </button>
-          ))}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-semibold text-gray-900 truncate group-hover:text-primary transition-colors">
+                        {deal.deal_name}
+                      </h3>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-micro font-medium text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">{deal.deal_type}</span>
+                        {deal.county && (
+                          <span className="text-micro text-gray-400">{deal.county}, {deal.state}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-micro text-gray-500 flex-shrink-0 ml-4">
+                      <span className="flex items-center gap-1">
+                        <DollarSign size={11} />
+                        {formatPrice(deal.purchase_price)}
+                      </span>
+                      {deal.updated_at && (
+                        <span className="flex items-center gap-1">
+                          <Calendar size={11} />
+                          {new Date(deal.updated_at).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };

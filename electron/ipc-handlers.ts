@@ -31,6 +31,75 @@ function serializeJsonField(value: any): string {
   return JSON.stringify(value ?? []);
 }
 
+/**
+ * Map local deal field changes to FUB API field names for pushing.
+ * Only includes fields that actually changed (comparing to currentDeal).
+ * Stage is handled separately by push_stage; skip it here.
+ */
+function localFieldsToFub(
+  changedFields: Record<string, any>,
+  currentDeal: Record<string, any>
+): Record<string, any> {
+  const fub: Record<string, any> = {};
+
+  // Local column → FUB field name mapping
+  const fieldMap: Record<string, string> = {
+    deal_type: 'customDealType',
+    purchase_price: 'customPurchasePrice',
+    expected_sales_price: 'price',
+    county: 'customParcelCounty',
+    state: 'customParcelState',
+    contract_execution_date: 'customContractExecutionDate',
+    contract_end_date: 'customContractEndDate',
+    expected_close_date: 'customClosingDate',
+    parcel_number: 'customParcelNumber',
+    parcel_zip: 'customParcelZip',
+    parcel_link: 'customParcelLink',
+    lot_acreage: 'customLotAcreage',
+    seller_bottom_price: 'customSellerSBottomPrice',
+    double_close_offer: 'customDoubleCloseOffer',
+    realtor_price_opinion: 'customRealtorPriceOpinion',
+    mortgage_on_property: 'customMortgageOnProperty',
+    hoa_poa_on_property: 'customHOAPOAOnProperty',
+    title_search: 'customTitleSearch',
+    title_exam: 'customTitleExam',
+    survey: 'customSurvey',
+    soil_test: 'customSoilTest',
+    title_company_name: 'customTitleCompanyName',
+    title_company_phone: 'customTitleCompanyPhone',
+    title_company_email: 'customTitleCompanyEmail',
+    funder_name: 'customFunderName',
+    realtor_name: 'customRealtorName',
+    drone_photo_link: 'customDronePhotoLink',
+    reference_number: 'customReferenceNumber',
+    misc_deal_expenses: 'customMiscellaneousDealExpenses',
+  };
+
+  // Deal type needs reverse mapping
+  const dealTypeMap: Record<string, string> = {
+    'Standard Flip': 'Cash Flip',
+    'Double Close': 'Double Close',
+    'Subdivide': 'Subdivide',
+  };
+
+  for (const [localKey, fubKey] of Object.entries(fieldMap)) {
+    if (!(localKey in changedFields)) continue;
+    // Skip if value didn't actually change
+    if (changedFields[localKey] === currentDeal[localKey]) continue;
+
+    let val = changedFields[localKey];
+
+    // Special: deal_type needs reverse mapping to FUB choice
+    if (localKey === 'deal_type') {
+      val = dealTypeMap[val] || val;
+    }
+
+    fub[fubKey] = val;
+  }
+
+  return fub;
+}
+
 export function registerIpcHandlers(): void {
   const db = getDb();
 
@@ -123,31 +192,50 @@ export function registerIpcHandlers(): void {
       INSERT INTO deals (
         id, airtable_id, deal_name, last_name, deal_type, stage, county, state, notes,
         purchase_price, expected_sales_price, contract_execution_date, expected_close_date,
-        phone_number, assigned_to, due_diligence_link
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        phone_number, email, assigned_to, due_diligence_link,
+        contract_end_date, parcel_number, parcel_zip, parcel_link, lot_acreage,
+        seller_bottom_price, double_close_offer, realtor_price_opinion,
+        mortgage_on_property, hoa_poa_on_property,
+        title_search, title_exam, survey, soil_test,
+        title_company_name, title_company_phone, title_company_email,
+        funder_name, realtor_name, drone_photo_link,
+        reference_number, misc_deal_expenses
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, deal.airtable_id || null, deal.deal_name || '', deal.last_name || '',
-      dealType, deal.stage || 'Offer accepted', deal.county || '', deal.state || '',
+      dealType, deal.stage || 'Purchase Agreement Signed', deal.county || '', deal.state || '',
       deal.notes || '', deal.purchase_price || 0, deal.expected_sales_price || 0,
       deal.contract_execution_date || null, deal.expected_close_date || null,
-      deal.phone_number || null, serializeJsonField(deal.assigned_to),
-      deal.due_diligence_link || ''
+      deal.phone_number || null, deal.email || null, serializeJsonField(deal.assigned_to),
+      deal.due_diligence_link || '',
+      deal.contract_end_date || null, deal.parcel_number || null,
+      deal.parcel_zip || null, deal.parcel_link || null, deal.lot_acreage || null,
+      deal.seller_bottom_price || null, deal.double_close_offer || null,
+      deal.realtor_price_opinion || null,
+      deal.mortgage_on_property || null, deal.hoa_poa_on_property || null,
+      deal.title_search || null, deal.title_exam || null,
+      deal.survey || null, deal.soil_test || null,
+      deal.title_company_name || null, deal.title_company_phone || null,
+      deal.title_company_email || null,
+      deal.funder_name || null, deal.realtor_name || null,
+      deal.drone_photo_link || null,
+      deal.reference_number || null, deal.misc_deal_expenses || null
     );
 
     // Log to audit
     db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
-      id, 'deal_created', JSON.stringify({ deal_name: deal.deal_name, stage: deal.stage || 'Offer accepted' })
+      id, 'deal_created', JSON.stringify({ deal_name: deal.deal_name, stage: deal.stage || 'Purchase Agreement Signed' })
     );
 
     // Seed initial tasks from rule engine
-    const initialStage = deal.stage || 'Offer accepted';
+    const initialStage = deal.stage || 'Purchase Agreement Signed';
     const seededTasks = seedTasksForStage(db, id, dealType, initialStage);
     console.log(`[Deal Created] ${deal.deal_name}: seeded ${seededTasks.length} tasks for ${initialStage}`);
 
     return { id, ...deal, deal_type: dealType, seeded_tasks: seededTasks };
   });
 
-  ipcMain.handle('db:deals:update', (_event, id: string, fields: Record<string, any>) => {
+  ipcMain.handle('db:deals:update', async (_event, id: string, fields: Record<string, any>) => {
     // Get current deal for stage change detection
     const currentDeal = db.prepare('SELECT * FROM deals WHERE id = ?').get(id) as any;
 
@@ -180,7 +268,9 @@ export function registerIpcHandlers(): void {
     values.push(id);
     db.prepare(`UPDATE deals SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
 
-    // If stage changed, seed tasks via rule engine + push to FUB
+    // If stage changed, seed tasks via rule engine + push to FUB via outbox
+    let fubPush: { queued: boolean; success?: boolean; error?: string } = { queued: false };
+
     if (fields.stage && currentDeal && fields.stage !== currentDeal.stage) {
       console.log(`[Stage Change] ${currentDeal.deal_name}: ${currentDeal.stage} → ${fields.stage}`);
       const dealType = fields.deal_type || currentDeal.deal_type || 'Standard Flip';
@@ -189,15 +279,50 @@ export function registerIpcHandlers(): void {
         console.log(`[Stage Change] Seeded ${seededTasks.length} new tasks for stage ${fields.stage}`);
       }
 
-      // Push stage change to FUB (async, don't block)
-      import('./fub-person-sync.js').then(({ pushStageToFub }) => {
-        pushStageToFub(id, fields.stage).catch(err =>
-          console.warn('[Stage Change] Failed to push to FUB:', err)
-        );
-      }).catch(() => {});
+      // Push stage change to FUB via outbox (durable + immediate attempt)
+      try {
+        const { enqueueFubPush, attemptImmediatePush } = await import('./fub-outbox.js');
+        const jobId = enqueueFubPush(db, id, 'push_stage', { stage: fields.stage });
+        fubPush.queued = true;
+
+        // Attempt immediate push with 5s timeout
+        const pushResult = await Promise.race([
+          attemptImmediatePush(jobId),
+          new Promise<{ success: false; error: string }>(resolve =>
+            setTimeout(() => resolve({ success: false, error: 'timeout' }), 5000)
+          ),
+        ]);
+        fubPush.success = pushResult.success;
+        if (!pushResult.success) fubPush.error = pushResult.error;
+      } catch (err) {
+        fubPush.error = err instanceof Error ? err.message : String(err);
+        console.warn('[Stage Change] FUB outbox error:', fubPush.error);
+      }
     }
 
-    return { success: true };
+    // Push field changes to FUB (for deals linked to FUB persons)
+    if (currentDeal?.fub_person_id) {
+      // Build FUB field payload from changed local fields
+      const fubFieldPayload = localFieldsToFub(fields, currentDeal);
+      if (Object.keys(fubFieldPayload).length > 0) {
+        try {
+          const { enqueueFubPush, attemptImmediatePush } = await import('./fub-outbox.js');
+          const jobId = enqueueFubPush(db, id, 'push_fields', {
+            fubFields: fubFieldPayload,
+            localFields: fields, // Track which local fields triggered this push
+          });
+
+          // Attempt immediate push (fire-and-forget for field syncs)
+          attemptImmediatePush(jobId).catch(err => {
+            console.warn('[Field Sync] Immediate push failed, will retry:', err);
+          });
+        } catch (err) {
+          console.warn('[Field Sync] FUB outbox error:', err);
+        }
+      }
+    }
+
+    return { success: true, fubPush };
   });
 
   // Check for incomplete tasks before stage change
@@ -701,6 +826,136 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('fub:getPersonSyncRecords', () => {
     return db.prepare('SELECT * FROM fub_person_sync ORDER BY updated_at DESC').all();
+  });
+
+  // ===== FUB ACTIVITIES =====
+
+  ipcMain.handle('fub:getActivities', (_event, dealId: string, activityType?: string) => {
+    if (activityType) {
+      return db.prepare(
+        'SELECT * FROM fub_activities WHERE deal_id = ? AND activity_type = ? ORDER BY activity_date DESC'
+      ).all(dealId, activityType);
+    }
+    return db.prepare(
+      'SELECT * FROM fub_activities WHERE deal_id = ? ORDER BY activity_date DESC'
+    ).all(dealId);
+  });
+
+  ipcMain.handle('fub:syncActivities', async (_event, dealId: string) => {
+    const deal = db.prepare('SELECT fub_person_id FROM deals WHERE id = ?').get(dealId) as any;
+    if (!deal?.fub_person_id) return { success: false, error: 'Deal has no FUB person link' };
+
+    const { getFubConfig } = await import('./fub-client.js');
+    const config = getFubConfig(db);
+    if (!config) return { success: false, error: 'FUB not configured' };
+
+    const personId = deal.fub_person_id;
+    let synced = 0;
+
+    try {
+      // Fetch notes, calls, texts, emails in parallel
+      const { fetchPersonNotes, fetchPersonCalls, fetchPersonTexts, fetchPersonEmails } = await import('./fub-client.js');
+      const [notes, calls, texts, emails] = await Promise.all([
+        fetchPersonNotes(config, personId).catch(() => []),
+        fetchPersonCalls(config, personId).catch(() => []),
+        fetchPersonTexts(config, personId).catch(() => []),
+        fetchPersonEmails(config, personId).catch(() => []),
+      ]);
+
+      const upsert = db.prepare(`
+        INSERT INTO fub_activities (deal_id, fub_person_id, fub_id, activity_type, direction, subject, body, from_number, to_number, duration, outcome, status, created_by, activity_date, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(fub_person_id, activity_type, fub_id) DO UPDATE SET
+          body = excluded.body,
+          status = excluded.status,
+          outcome = excluded.outcome,
+          raw_json = excluded.raw_json
+      `);
+
+      const insertAll = db.transaction(() => {
+        // Notes
+        for (const note of notes) {
+          upsert.run(
+            dealId, personId, note.id, 'note',
+            null, // direction
+            note.subject || null,
+            note.body || null,
+            null, null, // from/to number
+            null, // duration
+            null, // outcome
+            null, // status
+            note.createdBy || null,
+            note.created || new Date().toISOString(),
+            JSON.stringify(note)
+          );
+          synced++;
+        }
+
+        // Calls
+        for (const call of calls) {
+          upsert.run(
+            dealId, personId, call.id, 'call',
+            call.isIncoming ? 'inbound' : 'outbound',
+            null, // subject
+            call.note || null,
+            call.fromNumber || null,
+            call.toNumber || null,
+            call.duration || null,
+            call.outcome || null,
+            null, // status
+            call.userName || null,
+            call.startedAt || call.created || new Date().toISOString(),
+            JSON.stringify(call)
+          );
+          synced++;
+        }
+
+        // Texts
+        for (const text of texts) {
+          upsert.run(
+            dealId, personId, text.id, 'text',
+            text.isIncoming ? 'inbound' : 'outbound',
+            null, // subject
+            text.message || null,
+            text.fromNumber || null,
+            text.toNumber || null,
+            null, // duration
+            null, // outcome
+            text.deliveryStatus || text.status || null,
+            text.userName || null,
+            text.sent || text.created || new Date().toISOString(),
+            JSON.stringify(text)
+          );
+          synced++;
+        }
+
+        // Emails
+        for (const email of emails) {
+          upsert.run(
+            dealId, personId, email.id, 'email',
+            email.isIncoming ? 'inbound' : 'outbound',
+            email.subject || null,
+            email.body || null,
+            null, null, // from/to number
+            null, // duration
+            null, // outcome
+            null, // status
+            null, // created_by
+            email.created || new Date().toISOString(),
+            JSON.stringify(email)
+          );
+          synced++;
+        }
+      });
+
+      insertAll();
+      console.log(`[FubActivities] Synced ${synced} activities for deal ${dealId} (${notes.length} notes, ${calls.length} calls, ${texts.length} texts, ${emails.length} emails)`);
+      return { success: true, synced, notes: notes.length, calls: calls.length, texts: texts.length, emails: emails.length };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[FubActivities] Sync error for deal ${dealId}:`, msg);
+      return { success: false, error: msg };
+    }
   });
 
   // ===== AI (Claude / Anthropic) =====
