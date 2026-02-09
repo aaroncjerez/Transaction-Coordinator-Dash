@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, LayoutGrid, CheckSquare, BarChart3, Archive, Settings, Landmark } from 'lucide-react';
+import { Home, LayoutGrid, CheckSquare, BarChart3, TrendingUp, Archive, Settings, Landmark } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { getFubPersonSyncStatus, fetchAllDeals, fetchAllTasks } from '../lib/database';
@@ -84,6 +84,7 @@ export const Sidebar: React.FC = () => {
         <NavItem to="/pipeline" icon={LayoutGrid} label="Pipeline" count={dealCount} />
         <NavItem to="/tasks" icon={CheckSquare} label="Tasks" count={pendingTaskCount} />
         <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
+        <NavItem to="/kpis" icon={TrendingUp} label="KPIs" />
         <NavItem to="/archive" icon={Archive} label="Archive" />
         <NavItem to="/settings" icon={Settings} label="Settings" />
       </nav>

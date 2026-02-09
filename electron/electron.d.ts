@@ -93,6 +93,11 @@ export interface ElectronAPI {
     triggerFileSync: (dealId?: string) => Promise<{ success: boolean; synced: number; errors: number }>;
     getDealsWithFubLinks: () => Promise<{ id: string; deal_name: string; fub_person_id: string }[]>;
   };
+
+  kpi: {
+    getDashboardData: () => Promise<any>;
+    getCeoBrief: (dashboardState: any) => Promise<any>;
+  };
 }
 
 export interface FubActivity {

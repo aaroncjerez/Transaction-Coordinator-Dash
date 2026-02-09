@@ -7,6 +7,7 @@ import { DealDetail } from './pages/DealDetail';
 import { Tasks } from './pages/Tasks';
 import { Archive } from './pages/Archive';
 import { Analytics } from './pages/Analytics';
+import { KPIs } from './pages/KPIs';
 import { Settings } from './pages/Settings';
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
           <Route path="/deals/:id" element={<DealDetail />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/kpis" element={<KPIs />} />
           <Route path="/archive" element={<Archive />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />

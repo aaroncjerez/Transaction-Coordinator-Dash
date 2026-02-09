@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "node",
     "outDir": "../electron-dist",
-    "rootDir": ".",
+    "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -12,5 +12,5 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["./**/*.ts"]
+  "include": ["./**/*.ts", "../lib/kpi/**/*.ts"]
 }
