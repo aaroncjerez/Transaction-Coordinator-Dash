@@ -68,7 +68,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside className="hidden md:flex w-56 bg-sidebar flex-col h-screen fixed left-0 top-0 z-40">
       {/* Logo */}
-      <div className="px-4 py-4 flex items-center gap-2.5">
+      <div className="px-4 pt-8 pb-4 flex items-center gap-2.5">
         <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
           <Landmark className="h-4 w-4 text-white" />
         </div>

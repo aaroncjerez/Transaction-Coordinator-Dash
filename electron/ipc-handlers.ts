@@ -1389,7 +1389,10 @@ Provide your analysis in JSON format:
 
   ipcMain.handle('kpi:getCeoBrief', async (_event, dashboardState: any) => {
     try {
-      return await generateCEOBrief(dashboardState);
+      const setting = db.prepare("SELECT value FROM settings WHERE key = 'anthropic_api_key'").get() as any;
+      const apiKey = setting?.value || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured. Set it in Settings.');
+      return await generateCEOBrief(dashboardState, apiKey);
     } catch (error: any) {
       console.error('[KPI] Error generating CEO brief:', error);
       throw new Error(error?.message || 'Failed to generate CEO brief');

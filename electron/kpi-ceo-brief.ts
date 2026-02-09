@@ -8,13 +8,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { DashboardState, CEOBrief } from '../lib/kpi/types.js';
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
 export async function generateCEOBrief(
   dashboardState: DashboardState,
+  apiKey: string,
 ): Promise<CEOBrief> {
+  const client = new Anthropic({ apiKey });
   const prompt = buildAnalysisPrompt(dashboardState);
 
   const message = await client.messages.create({
