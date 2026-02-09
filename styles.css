@@ -119,6 +119,80 @@ body {
   animation: slide-in-up 200ms ease-out;
 }
 
+/* ---- KPI Dashboard styles ---- */
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.text-display-1 {
+  font-size: 4.5rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.text-display-2 {
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.text-display-3 {
+  font-size: 2.25rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+@keyframes kpi-slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kpi-progress-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes kpi-shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+@keyframes kpi-count-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-slide-up {
+  animation: kpi-slide-up 0.4s ease-out;
+}
+
+.animate-progress {
+  animation: kpi-progress-fill 1s ease-out;
+  transform-origin: left center;
+}
+
+.animate-shimmer {
+  animation: kpi-shimmer 2s infinite;
+  background: linear-gradient(90deg, #E5E7EB 0%, #F3F4F6 50%, #E5E7EB 100%);
+  background-size: 1000px 100%;
+}
+
+.hover-lift {
+  transition: all 0.2s ease-out;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
 /* ---- Reduced motion ---- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -126,7 +200,10 @@ body {
   .animate-slide-in-right,
   .animate-slide-out-right,
   .animate-fade-in,
-  .animate-slide-in-up {
+  .animate-slide-in-up,
+  .animate-slide-up,
+  .animate-progress,
+  .animate-shimmer {
     animation: none !important;
   }
 

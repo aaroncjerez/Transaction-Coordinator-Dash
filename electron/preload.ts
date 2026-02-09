@@ -146,4 +146,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDealsWithFubLinks: () =>
       ipcRenderer.invoke('fub:getDealsWithFubLinks'),
   },
+
+  kpi: {
+    getDashboardData: () =>
+      ipcRenderer.invoke('kpi:getDashboardData'),
+    getCeoBrief: (dashboardState: any) =>
+      ipcRenderer.invoke('kpi:getCeoBrief', dashboardState),
+  },
 });

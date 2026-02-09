@@ -3,6 +3,27 @@ import { getDb } from './database.js';
 import { seedTasksForStage, seedTasksUpToStage } from './rule-engine.js';
 import { chunkTextParagraphAware } from './chunker.js';
 import { triggerFubSync } from './fub-file-sync.js';
+import {
+  fetchWeeklyKPIs,
+  fetchPreviousWeekKPIs,
+  fetchBusinessMetrics,
+  fetchPricingRecords,
+  fetchHistoricalKPIs,
+  aggregateWeeklyKPIs,
+  calculateAvgSpeedToPricing,
+  calculate6MonthAverages,
+  getCurrentWeekTotals,
+  getPreviousWeekTotals,
+} from './kpi-airtable.js';
+import { generateCEOBrief } from './kpi-ceo-brief.js';
+import {
+  calculateMetrics,
+  calculateFourLevers,
+  detectBottleneck,
+  buildTeamScorecards,
+  isTeamWinning,
+} from '../lib/kpi/calculations.js';
+import { calculateScaleProgress } from '../lib/kpi/scale-calculations.js';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -13,7 +34,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // Ensure .env is loaded (backup in case main.ts load timing is off)
 const __ipc_filename = fileURLToPath(import.meta.url);
 const __ipc_dirname = path.dirname(__ipc_filename);
-dotenv.config({ path: path.join(__ipc_dirname, '..', '.env') });
+dotenv.config({ path: path.join(__ipc_dirname, '..', '..', '.env') });
 
 function generateUUID(): string {
   return crypto.randomUUID();
@@ -1295,6 +1316,87 @@ Provide your analysis in JSON format:
       }
     }
     return null;
+  });
+  // ── KPI Dashboard handlers ──────────────────────────────────────────
+  ipcMain.handle('kpi:getDashboardData', async () => {
+    try {
+      const currentWeekKPIs = await fetchWeeklyKPIs();
+      const currentWeekEnding = currentWeekKPIs[0]?.weekEnding || '';
+      const previousWeekKPIs = await fetchPreviousWeekKPIs(currentWeekEnding);
+
+      const [pricingRecords, historicalData] = await Promise.all([
+        fetchPricingRecords(),
+        fetchHistoricalKPIs(6),
+      ]);
+
+      const businessMetrics = await fetchBusinessMetrics(currentWeekEnding);
+      const currentWeek = aggregateWeeklyKPIs(currentWeekKPIs, getCurrentWeekTotals());
+      const previousWeek = previousWeekKPIs.length > 0
+        ? aggregateWeeklyKPIs(previousWeekKPIs, getPreviousWeekTotals())
+        : null;
+
+      const sixMonthAverages = calculate6MonthAverages(historicalData);
+      const avgSpeedToPricing = calculateAvgSpeedToPricing(pricingRecords);
+      const aaronOffers = currentWeek.byTeamMember.aaron?.offersSent || 0;
+
+      const calculatedMetrics = calculateMetrics(
+        currentWeek,
+        businessMetrics,
+        avgSpeedToPricing,
+        aaronOffers
+      );
+
+      const fourLevers = calculateFourLevers(calculatedMetrics, currentWeek);
+      const bottleneck = detectBottleneck(fourLevers);
+      const teamScorecards = buildTeamScorecards(currentWeek, calculatedMetrics);
+      const winning = isTeamWinning(currentWeek);
+      const scaleProgress = calculateScaleProgress(currentWeek, businessMetrics);
+
+      return {
+        currentWeek,
+        previousWeek,
+        businessMetrics,
+        calculatedMetrics,
+        fourLevers,
+        bottleneck,
+        ceoBrief: null,
+        scaleProgress,
+        teamScorecards,
+        isWinning: winning,
+        isLoading: false,
+        error: null,
+        sixMonthAverages,
+      };
+    } catch (error: any) {
+      console.error('[KPI] Error fetching dashboard data:', error);
+      return {
+        currentWeek: null,
+        previousWeek: null,
+        businessMetrics: null,
+        calculatedMetrics: null,
+        fourLevers: null,
+        bottleneck: null,
+        ceoBrief: null,
+        scaleProgress: null,
+        teamScorecards: [],
+        isWinning: false,
+        isLoading: false,
+        error: error?.message || 'Failed to fetch KPI data',
+        sixMonthAverages: null,
+      };
+    }
+  });
+
+  ipcMain.handle('kpi:getCeoBrief', async (_event, dashboardState: any) => {
+    try {
+      const setting = db.prepare("SELECT value FROM settings WHERE key = 'anthropic_api_key'").get() as any;
+      const apiKey = setting?.value || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured. Set it in Settings.');
+      return await generateCEOBrief(dashboardState, apiKey);
+    } catch (error: any) {
+      console.error('[KPI] Error generating CEO brief:', error);
+      throw new Error(error?.message || 'Failed to generate CEO brief');
+    }
   });
 }
 

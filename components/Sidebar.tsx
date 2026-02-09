@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Home, LayoutGrid, CheckSquare, BarChart3, Archive, Settings, Landmark } from 'lucide-react';
+import { Home, LayoutGrid, CheckSquare, BarChart3, TrendingUp, Archive, Settings, Landmark } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { getFubPersonSyncStatus, fetchAllDeals, fetchAllTasks } from '../lib/database';
@@ -68,7 +68,7 @@ export const Sidebar: React.FC = () => {
   return (
     <aside className="hidden md:flex w-56 bg-sidebar flex-col h-screen fixed left-0 top-0 z-40">
       {/* Logo */}
-      <div className="px-4 py-4 flex items-center gap-2.5">
+      <div className="px-4 pt-8 pb-4 flex items-center gap-2.5">
         <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
           <Landmark className="h-4 w-4 text-white" />
         </div>
@@ -84,6 +84,7 @@ export const Sidebar: React.FC = () => {
         <NavItem to="/pipeline" icon={LayoutGrid} label="Pipeline" count={dealCount} />
         <NavItem to="/tasks" icon={CheckSquare} label="Tasks" count={pendingTaskCount} />
         <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
+        <NavItem to="/kpis" icon={TrendingUp} label="KPIs" />
         <NavItem to="/archive" icon={Archive} label="Archive" />
         <NavItem to="/settings" icon={Settings} label="Settings" />
       </nav>

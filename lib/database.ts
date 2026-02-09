@@ -248,3 +248,13 @@ export async function analyzeDeal(dealId: string): Promise<any> {
 export async function getDealAnalysis(dealId: string): Promise<any> {
   return api.ai.getDealAnalysis(dealId);
 }
+
+// ---- KPI Dashboard ----
+
+export async function fetchKpiDashboardData(): Promise<any> {
+  return api.kpi.getDashboardData();
+}
+
+export async function fetchKpiCeoBrief(dashboardState: any): Promise<any> {
+  return api.kpi.getCeoBrief(dashboardState);
+}
