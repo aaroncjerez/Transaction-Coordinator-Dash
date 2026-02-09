@@ -131,6 +131,20 @@ export interface Task {
   deal?: Partial<Deal>;
 }
 
+export interface TaskReminder {
+  id: string;
+  task_id: string;
+  remind_at: string;
+  status: 'pending' | 'sent' | 'failed';
+  error?: string | null;
+  created_at?: string;
+  sent_at?: string | null;
+  // Joined fields
+  title?: string;
+  deal_id?: string;
+  deal_name?: string;
+}
+
 export interface Deadline {
   id: string;
   deal_id: string;

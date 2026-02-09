@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { X, Clock, User, Flag, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Clock, User, Flag, FileText, ChevronDown, ChevronUp, Bell, Trash2, Plus } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
-import { fetchTaskById, updateTaskWithLog, getTaskActivity } from '../lib/database';
+import { fetchTaskById, updateTaskWithLog, getTaskActivity, createReminder, getRemindersByTask, deleteReminder } from '../lib/database';
 import { cn } from '../lib/utils';
+import { TaskReminder } from '../types';
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -17,8 +18,11 @@ const STATUSES = ['To Do', 'In Progress', 'Done', 'Cancelled'] as const;
 export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClose, onUpdate }) => {
   const [task, setTask] = useState<any>(null);
   const [activity, setActivity] = useState<any[]>([]);
+  const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showActivity, setShowActivity] = useState(false);
+  const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [customRemindAt, setCustomRemindAt] = useState('');
 
   useEffect(() => {
     if (!taskId) return;
@@ -27,13 +31,48 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
 
   const loadTask = async (id: string) => {
     setLoading(true);
-    const [taskData, activityData] = await Promise.all([
+    const [taskData, activityData, reminderData] = await Promise.all([
       fetchTaskById(id),
       getTaskActivity(id),
+      getRemindersByTask(id),
     ]);
     setTask(taskData);
     setActivity(activityData || []);
+    setReminders((reminderData || []) as TaskReminder[]);
     setLoading(false);
+  };
+
+  const handleAddReminder = async (getDate: () => Date) => {
+    if (!task) return;
+    try {
+      await createReminder(task.id, getDate().toISOString());
+      const updated = await getRemindersByTask(task.id);
+      setReminders((updated || []) as TaskReminder[]);
+    } catch (err) {
+      console.error('Failed to create reminder:', err);
+    }
+  };
+
+  const handleDeleteReminder = async (id: string) => {
+    try {
+      await deleteReminder(id);
+      setReminders(prev => prev.filter(r => r.id !== id));
+    } catch (err) {
+      console.error('Failed to delete reminder:', err);
+    }
+  };
+
+  const handleCustomReminder = async () => {
+    if (!customRemindAt || !task) return;
+    try {
+      await createReminder(task.id, new Date(customRemindAt).toISOString());
+      const updated = await getRemindersByTask(task.id);
+      setReminders((updated || []) as TaskReminder[]);
+      setCustomRemindAt('');
+      setShowReminderPicker(false);
+    } catch (err) {
+      console.error('Failed to create reminder:', err);
+    }
   };
 
   const handleFieldChange = async (field: string, value: any) => {
@@ -160,6 +199,104 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({ taskId, onClos
                 rows={2}
                 className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
               />
+            </div>
+
+            {/* Reminders */}
+            <div>
+              <label className="text-caption font-medium text-gray-500 mb-2 flex items-center gap-1">
+                <Bell size={12} /> Reminders
+              </label>
+
+              {/* Existing reminders */}
+              {reminders.filter(r => r.status === 'pending').length > 0 && (
+                <div className="space-y-1.5 mb-3">
+                  {reminders.filter(r => r.status === 'pending').map(r => (
+                    <div key={r.id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                      <span className="text-xs text-amber-700">
+                        {new Date(r.remind_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteReminder(r.id)}
+                        className="p-0.5 hover:bg-amber-100 rounded text-amber-400 hover:text-red-500"
+                        aria-label="Delete reminder"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Quick pick buttons */}
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                <button
+                  onClick={() => handleAddReminder(() => new Date(Date.now() + 60 * 60 * 1000))}
+                  className="text-xs px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
+                >
+                  1 hour
+                </button>
+                <button
+                  onClick={() => handleAddReminder(() => new Date(Date.now() + 3 * 60 * 60 * 1000))}
+                  className="text-xs px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
+                >
+                  3 hours
+                </button>
+                <button
+                  onClick={() => handleAddReminder(() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 1);
+                    d.setHours(9, 0, 0, 0);
+                    return d;
+                  })}
+                  className="text-xs px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
+                >
+                  Tomorrow 9am
+                </button>
+                <button
+                  onClick={() => handleAddReminder(() => {
+                    const d = new Date();
+                    const daysUntilMon = ((8 - d.getDay()) % 7) || 7;
+                    d.setDate(d.getDate() + daysUntilMon);
+                    d.setHours(9, 0, 0, 0);
+                    return d;
+                  })}
+                  className="text-xs px-2.5 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
+                >
+                  Next Monday 9am
+                </button>
+              </div>
+
+              {/* Custom reminder */}
+              {!showReminderPicker ? (
+                <button
+                  onClick={() => setShowReminderPicker(true)}
+                  className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                >
+                  <Plus size={12} /> Custom time
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="datetime-local"
+                    value={customRemindAt}
+                    onChange={e => setCustomRemindAt(e.target.value)}
+                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                  <button
+                    onClick={handleCustomReminder}
+                    disabled={!customRemindAt}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => { setShowReminderPicker(false); setCustomRemindAt(''); }}
+                    className="text-xs px-2 py-1.5 rounded-lg text-gray-500 hover:bg-gray-100"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Linked Deal */}

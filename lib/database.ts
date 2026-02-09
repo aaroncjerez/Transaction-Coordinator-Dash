@@ -141,6 +141,28 @@ export function onDeadlineAlert(callback: (data: any) => void): void {
   api.deadlines.onAlert(callback);
 }
 
+// ---- task reminders ----
+
+export async function createReminder(taskId: string, remindAt: string): Promise<any> {
+  return api.reminders.create(taskId, remindAt);
+}
+
+export async function getRemindersByTask(taskId: string): Promise<any[]> {
+  return api.reminders.getByTask(taskId);
+}
+
+export async function deleteReminder(id: string): Promise<void> {
+  await api.reminders.delete(id);
+}
+
+export async function getPendingReminders(): Promise<any[]> {
+  return api.reminders.getPending();
+}
+
+export function onReminderFired(callback: (data: any) => void): void {
+  api.reminders.onFired(callback);
+}
+
 // ---- audit log ----
 
 export async function getAuditLog(dealId: string, limit?: number): Promise<any[]> {
@@ -163,6 +185,10 @@ export async function setSetting(key: string, value: string): Promise<void> {
 
 export async function getAllSettings(): Promise<{ key: string; hasValue: boolean; updated_at?: string }[]> {
   return api.settings.getAll();
+}
+
+export async function testSlackWebhook(): Promise<{ success: boolean; error?: string }> {
+  return api.settings.testSlackWebhook();
 }
 
 // ---- FUB person sync ----

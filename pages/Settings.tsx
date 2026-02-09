@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders } from 'lucide-react';
-import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync } from '../lib/database';
+import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync, testSlackWebhook } from '../lib/database';
 import { Button } from '../components/ui/Button';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
@@ -19,6 +19,7 @@ const API_KEYS: ApiKeyConfig[] = [
   { key: 'fub_api_key', label: 'Follow Up Boss API Key', placeholder: 'fub_...', envFallback: 'FUB_API_KEY' },
   { key: 'fub_account_name', label: 'FUB Account Name', placeholder: 'jerezland', envFallback: 'FUB_ACCOUNT_NAME' },
   { key: 'anthropic_api_key', label: 'Anthropic API Key', placeholder: 'sk-ant-...', envFallback: 'ANTHROPIC_API_KEY' },
+  { key: 'slack_webhook_url', label: 'Slack Webhook URL', placeholder: 'https://hooks.slack.com/services/...', envFallback: 'SLACK_WEBHOOK_URL' },
 ];
 
 export const Settings: React.FC = () => {
@@ -35,6 +36,7 @@ export const Settings: React.FC = () => {
   const [fubSyncing, setFubSyncing] = useState(false);
   const [fubPersonSync, setFubPersonSync] = useState<any>(null);
   const [fubPersonSyncing, setFubPersonSyncing] = useState(false);
+  const [testingSlack, setTestingSlack] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -124,6 +126,22 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const handleTestSlack = async () => {
+    setTestingSlack(true);
+    try {
+      const result = await testSlackWebhook();
+      if (result.success) {
+        showToast({ message: 'Slack test message sent! Check your channel.', type: 'success' });
+      } else {
+        showToast({ message: result.error || 'Slack test failed', type: 'error' });
+      }
+    } catch (e) {
+      showToast({ message: 'Failed to test Slack webhook', type: 'error' });
+    } finally {
+      setTestingSlack(false);
+    }
+  };
+
   // ---- Section wrapper ----
   const Section: React.FC<{ icon: React.ReactNode; title: string; children: React.ReactNode }> = ({ icon, title, children }) => (
     <section>
@@ -179,12 +197,23 @@ export const Settings: React.FC = () => {
                     </div>
 
                     {editingKey !== config.key && (
-                      <button
-                        onClick={() => { setEditingKey(config.key); setInputValue(''); }}
-                        className="text-caption text-primary hover:text-primary/80 font-medium transition-colors"
-                      >
-                        {keyStatuses[config.key] ? 'Update' : 'Set'}
-                      </button>
+                      <div className="flex items-center gap-3">
+                        {config.key === 'slack_webhook_url' && keyStatuses[config.key] && (
+                          <button
+                            onClick={handleTestSlack}
+                            disabled={testingSlack}
+                            className="text-caption text-emerald-600 hover:text-emerald-700 font-medium transition-colors disabled:opacity-50"
+                          >
+                            {testingSlack ? 'Sending...' : 'Test'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => { setEditingKey(config.key); setInputValue(''); }}
+                          className="text-caption text-primary hover:text-primary/80 font-medium transition-colors"
+                        >
+                          {keyStatuses[config.key] ? 'Update' : 'Set'}
+                        </button>
+                      </div>
                     )}
                   </div>
 

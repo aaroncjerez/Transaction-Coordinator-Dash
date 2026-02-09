@@ -688,6 +688,25 @@ const migrations: Migration[] = [
       console.log('[Migration v14] Jerez Land share columns added (jl_share_percent, jl_share_amount)');
     },
   },
+  {
+    version: 15,
+    description: 'Task reminders table for Slack notifications',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS task_reminders (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          remind_at TEXT NOT NULL,
+          status TEXT DEFAULT 'pending',
+          error TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          sent_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_reminders_pending ON task_reminders(status, remind_at);
+      `);
+      console.log('[Migration v15] Task reminders table created');
+    },
+  },
 ];
 
 /**

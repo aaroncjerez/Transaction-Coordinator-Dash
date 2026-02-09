@@ -5,6 +5,7 @@ import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 import { useCommandPalette } from '../hooks/useCommandPalette';
 import { ToastProvider } from './ui/Toast';
 import { PreferencesProvider } from '../contexts/PreferencesContext';
+import { ReminderNotification } from './ReminderNotification';
 
 // Context to share command palette open function
 const CommandPaletteContext = createContext<{ openCommandPalette: () => void; openShortcutsHelp: () => void }>({
@@ -59,6 +60,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
             {/* Keyboard Shortcuts Help */}
             <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={closeShortcutsHelp} />
+
+            {/* Global Reminder Notifications */}
+            <ReminderNotification />
           </div>
         </CommandPaletteContext.Provider>
       </ToastProvider>

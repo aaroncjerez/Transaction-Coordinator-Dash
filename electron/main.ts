@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { initDatabase } from './database.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { startAlertScheduler } from './alert-scheduler.js';
+import { startReminderScheduler } from './reminder-scheduler.js';
 import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
 
@@ -69,6 +70,9 @@ app.whenReady().then(() => {
 
   // Start deadline alert scheduler (checks every 15 min)
   startAlertScheduler();
+
+  // Start task reminder scheduler (checks every 60s)
+  startReminderScheduler();
 
   // Start FUB person sync runner (polls every 30s)
   startFubPersonSync();

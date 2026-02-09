@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('settings:set', key, value),
     getAll: () =>
       ipcRenderer.invoke('settings:getAll'),
+    testSlackWebhook: () =>
+      ipcRenderer.invoke('settings:testSlackWebhook'),
   },
 
   fub: {
@@ -152,5 +154,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('kpi:getDashboardData'),
     getCeoBrief: (dashboardState: any) =>
       ipcRenderer.invoke('kpi:getCeoBrief', dashboardState),
+  },
+
+  reminders: {
+    create: (taskId: string, remindAt: string) =>
+      ipcRenderer.invoke('reminders:create', taskId, remindAt),
+    getByTask: (taskId: string) =>
+      ipcRenderer.invoke('reminders:getByTask', taskId),
+    delete: (id: string) =>
+      ipcRenderer.invoke('reminders:delete', id),
+    getPending: () =>
+      ipcRenderer.invoke('reminders:getPending'),
+    onFired: (callback: (data: any) => void) => {
+      ipcRenderer.on('reminder:fired', (_event: any, data: any) => callback(data));
+    },
   },
 });

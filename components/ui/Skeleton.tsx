@@ -46,7 +46,7 @@ export const SkeletonRow: React.FC = () => (
   </div>
 );
 
-export const SkeletonDrawer: React.FC = () => (
+export const SkeletonModal: React.FC = () => (
   <div className="p-6 space-y-6">
     <Skeleton className="h-6 w-2/3 rounded" />
     <div className="flex gap-3">

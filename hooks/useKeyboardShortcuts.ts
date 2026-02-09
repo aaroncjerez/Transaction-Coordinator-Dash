@@ -13,6 +13,7 @@ interface UseKeyboardShortcutsOptions {
   onFocusChange: (dealId: string | null) => void;
   onOpenDeal: (dealId: string) => void;
   onNewDeal: () => void;
+  onUndo?: () => void;
 }
 
 /**
@@ -33,6 +34,7 @@ export function useKeyboardShortcuts({
   onFocusChange,
   onOpenDeal,
   onNewDeal,
+  onUndo,
 }: UseKeyboardShortcutsOptions) {
   // Use refs for stable access in the keydown handler
   const dealIdsRef = useRef(dealIds);
@@ -47,6 +49,13 @@ export function useKeyboardShortcuts({
     // Ignore when typing in inputs
     const target = e.target as HTMLElement;
     const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable;
+
+    // ---- Cmd+Z / Ctrl+Z: Undo ----
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      onUndo?.();
+      return;
+    }
 
     const ids = dealIdsRef.current;
     const focused = focusedRef.current;
@@ -103,7 +112,7 @@ export function useKeyboardShortcuts({
       onNewDeal();
       return;
     }
-  }, [enabled, onFocusChange, onOpenDeal, onNewDeal]);
+  }, [enabled, onFocusChange, onOpenDeal, onNewDeal, onUndo]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);

@@ -10,8 +10,7 @@ import {
 import { Button } from '../components/ui/Button';
 import { cn } from '../lib/utils';
 import { TopBar } from '../components/TopBar';
-import { TaskDetailPanel } from '../components/TaskDetailPanel';
-import { DealDrawer } from '../components/DealDrawer';
+import { DealModal } from '../components/DealModal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { getStageColor, PIPELINE_STAGES, STAGE_ORDER } from '../constants';
 import { useOpenCommandPalette } from '../components/Layout';
@@ -34,8 +33,7 @@ export const Tasks: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('by-deal');
 
-  // Panels
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  // Panel
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -160,7 +158,7 @@ export const Tasks: React.FC = () => {
     return (
       <div
         className="px-4 py-2.5 flex items-center gap-3 hover:bg-subtle transition-colors cursor-pointer group"
-        onClick={() => setSelectedTaskId(task.id)}
+        onClick={() => task.deal_id && setSelectedDealId(task.deal_id)}
       >
         <button
           onClick={(e) => { e.stopPropagation(); toggleTaskStatus(task); }}
@@ -433,15 +431,8 @@ export const Tasks: React.FC = () => {
         </div>
       </div>
 
-      {/* Task Detail Panel */}
-      <TaskDetailPanel
-        taskId={selectedTaskId}
-        onClose={() => setSelectedTaskId(null)}
-        onUpdate={fetchData}
-      />
-
-      {/* Deal Drawer */}
-      <DealDrawer
+      {/* Deal Modal */}
+      <DealModal
         dealId={selectedDealId}
         onClose={() => setSelectedDealId(null)}
         onDealUpdate={fetchData}

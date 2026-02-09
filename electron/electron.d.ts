@@ -74,6 +74,7 @@ export interface ElectronAPI {
     get: (key: string) => Promise<string | null>;
     set: (key: string, value: string) => Promise<{ success: boolean }>;
     getAll: () => Promise<{ key: string; hasValue: boolean; updated_at?: string }[]>;
+    testSlackWebhook: () => Promise<{ success: boolean; error?: string }>;
   };
 
   fub: {
@@ -97,6 +98,14 @@ export interface ElectronAPI {
   kpi: {
     getDashboardData: () => Promise<any>;
     getCeoBrief: (dashboardState: any) => Promise<any>;
+  };
+
+  reminders: {
+    create: (taskId: string, remindAt: string) => Promise<any>;
+    getByTask: (taskId: string) => Promise<any[]>;
+    delete: (id: string) => Promise<{ success: boolean }>;
+    getPending: () => Promise<any[]>;
+    onFired: (callback: (data: any) => void) => void;
   };
 }
 

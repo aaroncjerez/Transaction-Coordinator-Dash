@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   DndContext,
   DragOverlay,
@@ -10,7 +10,7 @@ import {
   DragStartEvent,
   DragEndEvent,
 } from '@dnd-kit/core';
-import { RefreshCw, Plus, Filter, X, Search, LayoutGrid, List, CheckSquare, XSquare } from 'lucide-react';
+import { RefreshCw, Plus, Filter, X, Search, LayoutGrid, List, CheckSquare, XSquare, ChevronRight } from 'lucide-react';
 import { Deal, Task, Deadline, FubSyncStatus, DealType } from '../types';
 import { PIPELINE_STAGES, DEAL_TYPES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
@@ -33,13 +33,14 @@ import { KanbanColumn } from '../components/KanbanColumn';
 import { KanbanCard } from '../components/KanbanCard';
 import { SkeletonColumn } from '../components/ui/Skeleton';
 import { Button } from '../components/ui/Button';
-import { DealDrawer } from '../components/DealDrawer';
+import { DealModal } from '../components/DealModal';
 import { PipelineSummaryBar } from '../components/PipelineSummaryBar';
 import { OnboardingEmptyState } from '../components/ui/EmptyState';
 import { useOpenCommandPalette } from '../components/Layout';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useToast } from '../components/ui/Toast';
 import { usePreferences } from '../contexts/PreferencesContext';
+import { useUndoStack } from '../hooks/useUndoStack';
 
 // ---- Stage Change Confirmation Dialog ----
 
@@ -115,6 +116,7 @@ const FILTER_PRESETS_KEY = 'pipeline_filter_presets';
 
 export const Pipeline: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const openCommandPalette = useOpenCommandPalette();
   const { showToast } = useToast();
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -123,6 +125,10 @@ export const Pipeline: React.FC = () => {
   const [syncStatuses, setSyncStatuses] = useState<Record<string, FubSyncStatus | null>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const undoStack = useUndoStack();
+
+  // Cancelled deals visibility
+  const [showCancelled, setShowCancelled] = useState(false);
 
   // Filters
   const [dealTypeFilter, setDealTypeFilter] = useState<DealType | 'all'>('all');
@@ -254,8 +260,18 @@ export const Pipeline: React.FC = () => {
     incompleteTasks: { id: string; title: string; status: string }[];
   } | null>(null);
 
-  // DealDrawer selection
+  // DealModal selection
   const [selectedDealId, setSelectedDealId] = useState<string | null>(null);
+
+  // Auto-open deal from ?deal= query param (e.g. from reminder notification)
+  useEffect(() => {
+    const dealParam = searchParams.get('deal');
+    if (dealParam) {
+      setSelectedDealId(dealParam);
+      searchParams.delete('deal');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Keyboard focus (visual ring, separate from drawer)
   const [focusedDealId, setFocusedDealId] = useState<string | null>(null);
@@ -382,6 +398,7 @@ export const Pipeline: React.FC = () => {
   }, [filteredDeals]);
 
   const activeCount = deals.filter(d => d.stage !== 'Cancelled').length;
+  const cancelledDeals = useMemo(() => deals.filter(d => d.stage === 'Cancelled'), [deals]);
   const hasActiveFilters = dealTypeFilter !== 'all' || deadlineFilter !== 'all' || syncFilter !== 'all';
 
   // Flat ordered deal IDs for keyboard navigation (stage by stage, top to bottom)
@@ -395,12 +412,13 @@ export const Pipeline: React.FC = () => {
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
-    enabled: !selectedDealId && !stageDialog && !activeDealId, // disable when drawer/dialog/drag open
+    enabled: !selectedDealId && !stageDialog && !activeDealId,
     dealIds: orderedDealIds,
     focusedDealId,
     onFocusChange: setFocusedDealId,
     onOpenDeal: (dealId) => { setSelectedDealId(dealId); setFocusedDealId(null); },
     onNewDeal: () => handleNewDeal(),
+    onUndo: undoStack.undo,
   });
 
   // ---- Drag Handlers ----
@@ -442,19 +460,33 @@ export const Pipeline: React.FC = () => {
   };
 
   const executeStageChange = async (dealId: string, newStage: string) => {
-    // Capture deal name before async ops (deals array may be stale after fetchData)
-    const dealName = deals.find(d => d.id === dealId)?.deal_name ?? 'Deal';
+    const deal = deals.find(d => d.id === dealId);
+    const dealName = deal?.deal_name ?? 'Deal';
+    const previousStage = deal?.stage ?? '';
     try {
-      // updateDealFields already seeds tasks for the new stage in the backend handler
       const result = await updateDealFields(dealId, { stage: newStage });
       await fetchData();
 
-      // Build toast with FUB sync status
+      // Push undo action
+      undoStack.pushUndo({
+        type: 'deal_stage_change',
+        label: `${dealName} → ${newStage}`,
+        timestamp: Date.now(),
+        revert: async () => {
+          await updateDealFields(dealId, { stage: previousStage });
+          await fetchData();
+        },
+      });
+
       let fubNote = '';
       if (result.fubPush?.queued) {
         fubNote = result.fubPush.success ? ' · FUB ✓' : ' · FUB pending';
       }
-      showToast({ message: `${dealName} → ${newStage}${fubNote}`, type: 'success' });
+      showToast({
+        message: `${dealName} → ${newStage}${fubNote}`,
+        type: 'success',
+        action: { label: 'Undo', onClick: () => undoStack.undo() },
+      });
     } catch (err) {
       console.error('Stage change failed:', err);
       showToast({ message: 'Failed to update stage', type: 'error' });
@@ -514,7 +546,22 @@ export const Pipeline: React.FC = () => {
     try {
       await updateTaskWithLog(taskId, { status: 'Done' });
       await fetchData();
-      showToast({ message: 'Task completed', type: 'success' });
+
+      undoStack.pushUndo({
+        type: 'task_status_change',
+        label: 'Task completed',
+        timestamp: Date.now(),
+        revert: async () => {
+          await updateTaskWithLog(taskId, { status: 'To Do' });
+          await fetchData();
+        },
+      });
+
+      showToast({
+        message: 'Task completed',
+        type: 'success',
+        action: { label: 'Undo', onClick: () => undoStack.undo() },
+      });
     } catch (err) {
       console.error('Quick task complete failed:', err);
       showToast({ message: 'Failed to complete task', type: 'error' });
@@ -544,6 +591,37 @@ export const Pipeline: React.FC = () => {
     } catch (err) {
       console.error('Quick advance failed:', err);
       showToast({ message: 'Failed to advance stage', type: 'error' });
+    }
+  };
+
+  // ---- Restore Cancelled Deal ----
+
+  const handleRestoreDeal = async (dealId: string) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (!deal) return;
+    const restoreTo = deal.previous_stage || 'Purchase Agreement Signed';
+    try {
+      await updateDealFields(dealId, { stage: restoreTo });
+      await fetchData();
+
+      undoStack.pushUndo({
+        type: 'deal_stage_change',
+        label: `Restored ${deal.deal_name}`,
+        timestamp: Date.now(),
+        revert: async () => {
+          await updateDealFields(dealId, { stage: 'Cancelled' });
+          await fetchData();
+        },
+      });
+
+      showToast({
+        message: `${deal.deal_name} restored to ${restoreTo}`,
+        type: 'success',
+        action: { label: 'Undo', onClick: () => undoStack.undo() },
+      });
+    } catch (err) {
+      console.error('Restore deal failed:', err);
+      showToast({ message: 'Failed to restore deal', type: 'error' });
     }
   };
 
@@ -867,11 +945,62 @@ export const Pipeline: React.FC = () => {
         )}
       </div>
 
-      {/* Deal Drawer */}
-      <DealDrawer
+      {/* Cancelled Deals Dropdown */}
+      {cancelledDeals.length > 0 && (
+        <div className="px-4 pb-3">
+          <button
+            onClick={() => setShowCancelled(!showCancelled)}
+            className="w-full flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-card hover:bg-gray-50 transition-colors"
+          >
+            <ChevronRight
+              size={14}
+              className={cn('text-gray-400 transition-transform', showCancelled && 'rotate-90')}
+            />
+            <span className="text-caption font-semibold text-gray-500">
+              {cancelledDeals.length} Cancelled Deal{cancelledDeals.length !== 1 ? 's' : ''}
+            </span>
+            <span className="flex-1" />
+            <span className="text-micro text-gray-400">
+              {showCancelled ? 'Click to hide' : 'Click to view'}
+            </span>
+          </button>
+
+          {showCancelled && (
+            <div className="mt-2 bg-white border border-gray-200 rounded-card divide-y divide-gray-100 max-h-60 overflow-y-auto scrollbar-thin animate-fade-in">
+              {cancelledDeals.map(deal => (
+                <div
+                  key={deal.id}
+                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors group"
+                  onClick={() => setSelectedDealId(deal.id)}
+                >
+                  <span className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
+                  <span className="text-sm font-medium text-gray-600 truncate flex-1">
+                    {deal.deal_name}
+                  </span>
+                  {(deal.county || deal.state) && (
+                    <span className="text-micro text-gray-400">
+                      {[deal.county, deal.state].filter(Boolean).join(', ')}
+                    </span>
+                  )}
+                  <button
+                    onClick={e => { e.stopPropagation(); handleRestoreDeal(deal.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-micro text-primary hover:text-primary/80 font-medium transition-all"
+                  >
+                    Restore
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Deal Modal */}
+      <DealModal
         dealId={selectedDealId}
         onClose={() => setSelectedDealId(null)}
         onDealUpdate={fetchData}
+        onUndoableAction={undoStack.pushUndo}
       />
 
       {/* Batch Action Bar */}

@@ -770,6 +770,7 @@ export function registerIpcHandlers(): void {
     const envKeyMap: Record<string, string> = {
       'anthropic_api_key': 'ANTHROPIC_API_KEY',
       'fub_api_key': 'FUB_API_KEY',
+      'slack_webhook_url': 'SLACK_WEBHOOK_URL',
     };
     if (envKeyMap[key]) {
       process.env[envKeyMap[key]] = value;
@@ -781,6 +782,24 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('settings:getAll', () => {
     const rows = db.prepare('SELECT key, updated_at FROM settings').all() as any[];
     return rows.map(r => ({ key: r.key, hasValue: true, updated_at: r.updated_at }));
+  });
+
+  ipcMain.handle('settings:testSlackWebhook', async () => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'slack_webhook_url'").get() as any;
+    const url = row?.value || process.env.SLACK_WEBHOOK_URL || null;
+    if (!url) return { success: false, error: 'No Slack webhook URL configured' };
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: '\ud83d\udd14 Test notification from TC Dashboard — Slack integration is working!' }),
+      });
+      if (!res.ok) return { success: false, error: `Slack returned ${res.status}: ${res.statusText}` };
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   // ===== FUB FILE SYNC =====
@@ -1397,6 +1416,44 @@ Provide your analysis in JSON format:
       console.error('[KPI] Error generating CEO brief:', error);
       throw new Error(error?.message || 'Failed to generate CEO brief');
     }
+  });
+
+  // ===== TASK REMINDERS =====
+
+  ipcMain.handle('reminders:create', (_event, taskId: string, remindAt: string) => {
+    const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+
+    const id = crypto.randomUUID();
+    db.prepare('INSERT INTO task_reminders (id, task_id, remind_at) VALUES (?, ?, ?)').run(id, taskId, remindAt);
+
+    db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+      null, 'reminder_created',
+      JSON.stringify({ reminder_id: id, task_id: taskId, remind_at: remindAt })
+    );
+
+    console.log(`[Reminders] Created reminder ${id} for task ${taskId} at ${remindAt}`);
+    return { id, task_id: taskId, remind_at: remindAt, status: 'pending' };
+  });
+
+  ipcMain.handle('reminders:getByTask', (_event, taskId: string) => {
+    return db.prepare('SELECT * FROM task_reminders WHERE task_id = ? ORDER BY remind_at ASC').all(taskId);
+  });
+
+  ipcMain.handle('reminders:delete', (_event, id: string) => {
+    db.prepare('DELETE FROM task_reminders WHERE id = ?').run(id);
+    return { success: true };
+  });
+
+  ipcMain.handle('reminders:getPending', () => {
+    return db.prepare(`
+      SELECT r.*, t.title, t.deal_id, d.deal_name
+      FROM task_reminders r
+      JOIN tasks t ON r.task_id = t.id
+      LEFT JOIN deals d ON t.deal_id = d.id
+      WHERE r.status = 'pending'
+      ORDER BY r.remind_at ASC
+    `).all();
   });
 }
 
