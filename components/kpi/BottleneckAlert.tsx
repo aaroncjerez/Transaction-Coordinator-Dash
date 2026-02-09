@@ -7,7 +7,7 @@ interface BottleneckAlertProps {
 }
 
 export function BottleneckAlert({ bottleneck }: BottleneckAlertProps) {
-  if (!bottleneck) {
+  if (!bottleneck?.title) {
     return (
       <motion.div
         initial={{ opacity: 0 }}
@@ -37,22 +37,22 @@ export function BottleneckAlert({ bottleneck }: BottleneckAlertProps) {
         <AlertTriangle className="w-6 h-6 text-red-500 flex-shrink-0 mt-0.5" />
         <div className="flex-1">
           <h4 className="font-bold text-red-800 text-lg">
-            THIS WEEK&apos;S BOTTLENECK: {bottleneck.title}
+            THIS WEEK&apos;S BOTTLENECK: {bottleneck.title ?? ''}
           </h4>
           <div className="mt-2 space-y-1 text-sm text-red-700">
             <p>
-              <span className="font-medium">Current:</span> {bottleneck.currentValue}{' '}
+              <span className="font-medium">Current:</span> {bottleneck.currentValue ?? 'N/A'}{' '}
               <span className="text-red-500">{'\u2192'}</span>{' '}
-              <span className="font-medium">Target:</span> {bottleneck.targetValue}
+              <span className="font-medium">Target:</span> {bottleneck.targetValue ?? 'N/A'}
             </p>
-            <p className="text-red-600">{bottleneck.impact}</p>
+            <p className="text-red-600">{bottleneck.impact ?? ''}</p>
           </div>
           <div className="mt-3 bg-red-100 rounded-md p-3">
             <p className="text-red-800 font-semibold">
-              FIX: {bottleneck.fix}
+              FIX: {bottleneck.fix ?? ''}
             </p>
             <p className="text-sm text-red-600 mt-1">
-              Owner: {bottleneck.owner}
+              Owner: {bottleneck.owner ?? 'Team'}
             </p>
           </div>
         </div>

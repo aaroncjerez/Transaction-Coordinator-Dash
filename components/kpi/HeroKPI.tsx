@@ -12,13 +12,15 @@ interface HeroKPIProps {
 }
 
 export function HeroKPI({
-  current,
-  target,
+  current = 0,
+  target = 10,
   label = 'Contracts Signed',
   subtitle = 'This Week',
 }: HeroKPIProps) {
-  const animatedCurrent = useCountUp(current, { duration: 1500, easing: 'easeOut' });
-  const percentage = (current / target) * 100;
+  const safeCurrent = current ?? 0;
+  const safeTarget = target ?? 10;
+  const animatedCurrent = useCountUp(safeCurrent, { duration: 1500, easing: 'easeOut' });
+  const percentage = safeTarget > 0 ? (safeCurrent / safeTarget) * 100 : 0;
   const gap = target - current;
   const isAchieved = current >= target;
   const exceeding = current > target;

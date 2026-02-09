@@ -13,51 +13,51 @@ export function GoalsDashboard({ halfMillionProgress }: GoalsDashboardProps) {
   const goalCards = [
     {
       title: 'Text Volume',
-      value: currentWeek.totalTexts.toLocaleString(),
-      target: targets.texts.toLocaleString(),
-      progress: currentWeek.totalTexts,
-      targetNum: targets.texts,
-      progressPercent: progress.texts,
+      value: (currentWeek?.totalTexts ?? 0).toLocaleString(),
+      target: (targets?.texts ?? 0).toLocaleString(),
+      progress: currentWeek?.totalTexts ?? 0,
+      targetNum: targets?.texts ?? 0,
+      progressPercent: progress?.texts ?? 0,
     },
     {
       title: 'Call Volume',
-      value: currentWeek.totalCalls.toLocaleString(),
-      target: targets.calls.toLocaleString(),
-      progress: currentWeek.totalCalls,
-      targetNum: targets.calls,
-      progressPercent: progress.calls,
+      value: (currentWeek?.totalCalls ?? 0).toLocaleString(),
+      target: (targets?.calls ?? 0).toLocaleString(),
+      progress: currentWeek?.totalCalls ?? 0,
+      targetNum: targets?.calls ?? 0,
+      progressPercent: progress?.calls ?? 0,
     },
     {
       title: 'Hot Leads',
-      value: currentWeek.hotLeads.toLocaleString(),
-      target: targets.hotLeads.toLocaleString(),
-      progress: currentWeek.hotLeads,
-      targetNum: targets.hotLeads,
-      progressPercent: progress.hotLeads,
+      value: (currentWeek?.hotLeads ?? 0).toLocaleString(),
+      target: (targets?.hotLeads ?? 0).toLocaleString(),
+      progress: currentWeek?.hotLeads ?? 0,
+      targetNum: targets?.hotLeads ?? 0,
+      progressPercent: progress?.hotLeads ?? 0,
     },
     {
       title: 'Real Offers',
-      value: currentWeek.realOffers.toLocaleString(),
-      target: targets.realOffers.toLocaleString(),
-      progress: currentWeek.realOffers,
-      targetNum: targets.realOffers,
-      progressPercent: progress.realOffers,
+      value: (currentWeek?.realOffers ?? 0).toLocaleString(),
+      target: (targets?.realOffers ?? 0).toLocaleString(),
+      progress: currentWeek?.realOffers ?? 0,
+      targetNum: targets?.realOffers ?? 0,
+      progressPercent: progress?.realOffers ?? 0,
     },
     {
       title: 'Contracts',
-      value: currentWeek.contracts.toFixed(1),
-      target: targets.contracts.toFixed(1),
-      progress: currentWeek.contracts,
-      targetNum: targets.contracts,
-      progressPercent: progress.contracts,
+      value: (currentWeek?.contracts ?? 0).toFixed(1),
+      target: (targets?.contracts ?? 0).toFixed(1),
+      progress: currentWeek?.contracts ?? 0,
+      targetNum: targets?.contracts ?? 0,
+      progressPercent: progress?.contracts ?? 0,
     },
     {
       title: 'Deals Closed',
-      value: currentWeek.deals.toFixed(1),
-      target: targets.deals.toFixed(1),
-      progress: currentWeek.deals,
-      targetNum: targets.deals,
-      progressPercent: progress.deals,
+      value: (currentWeek?.deals ?? 0).toFixed(1),
+      target: (targets?.deals ?? 0).toFixed(1),
+      progress: currentWeek?.deals ?? 0,
+      targetNum: targets?.deals ?? 0,
+      progressPercent: progress?.deals ?? 0,
     },
   ];
 
@@ -134,7 +134,7 @@ export function GoalsDashboard({ halfMillionProgress }: GoalsDashboardProps) {
             Weekly Profit Progress
           </span>
           <span className="text-sm text-neutral-600">
-            ${currentWeek.profit.toLocaleString()} / ${targets.profit.toLocaleString()}
+            ${(currentWeek?.profit ?? 0).toLocaleString()} / ${(targets?.profit ?? 0).toLocaleString()}
           </span>
         </div>
         <div className="h-3 bg-neutral-200 rounded-full overflow-hidden">
@@ -142,20 +142,20 @@ export function GoalsDashboard({ halfMillionProgress }: GoalsDashboardProps) {
             className={`
               h-full
               rounded-full
-              ${progress.profit >= 100
+              ${(progress?.profit ?? 0) >= 100
                 ? 'bg-gradient-to-r from-green-500 to-emerald-500'
-                : progress.profit >= 70
+                : (progress?.profit ?? 0) >= 70
                   ? 'bg-gradient-to-r from-blue-500 to-blue-600'
                   : 'bg-gradient-to-r from-amber-500 to-orange-500'
               }
             `}
             initial={{ width: 0 }}
-            animate={{ width: `${Math.min(progress.profit, 100)}%` }}
+            animate={{ width: `${Math.min(progress?.profit ?? 0, 100)}%` }}
             transition={{ duration: 1.5, ease: [0.4, 0, 0.2, 1] }}
           />
         </div>
         <div className="mt-2 text-xs text-neutral-600">
-          {Math.round(progress.profit)}% of weekly profit target
+          {Math.round(progress?.profit ?? 0)}% of weekly profit target
         </div>
       </motion.div>
     </div>

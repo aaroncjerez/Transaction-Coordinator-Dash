@@ -34,7 +34,7 @@ export function InsightsPanel({ ceoBrief, isLoading = false, onGenerate }: Insig
     );
   }
 
-  if (!ceoBrief || !ceoBrief.priorities || ceoBrief.priorities.length === 0) {
+  if (!ceoBrief || !Array.isArray(ceoBrief.priorities) || ceoBrief.priorities.length === 0) {
     return (
       <div className="glass-card rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">

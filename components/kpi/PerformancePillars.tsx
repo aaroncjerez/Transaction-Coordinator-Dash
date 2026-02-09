@@ -59,8 +59,10 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
 
         <div className="grid grid-cols-3 gap-6">
           {pillars.map((pillar, index) => {
-            const colors = getStatusColor(pillar.lever.status);
-            const percentage = (pillar.lever.value / pillar.lever.target) * 100;
+            const colors = getStatusColor(pillar.lever?.status ?? 'yellow');
+            const leverValue = pillar.lever?.value ?? 0;
+            const leverTarget = pillar.lever?.target ?? 1;
+            const percentage = (leverValue / leverTarget) * 100;
             const Icon = pillar.icon;
 
             return (
@@ -98,13 +100,13 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
 
                 {/* Value */}
                 <div className={`text-2xl font-bold ${colors.text} mb-2`}>
-                  {pillar.lever.value.toFixed(1)}
+                  {leverValue.toFixed(1)}
                   {pillar.id === 'coverage' || pillar.id === 'closeRate' ? '%' : ''}
                 </div>
 
                 {/* Target */}
                 <div className="text-xs text-neutral-500 mb-3">
-                  Target: {pillar.lever.target}
+                  Target: {leverTarget}
                   {pillar.id === 'coverage' || pillar.id === 'closeRate' ? '%' : ''}
                 </div>
 
@@ -160,7 +162,7 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
                 const pillar = pillars.find((p) => p.id === selectedLever);
                 if (!pillar) return null;
 
-                const colors = getStatusColor(pillar.lever.status);
+                const colors = getStatusColor(pillar.lever?.status ?? 'yellow');
                 const Icon = pillar.icon;
 
                 return (
@@ -183,7 +185,7 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
                       <div className="flex items-baseline justify-between">
                         <span className="text-sm text-neutral-600">Current</span>
                         <span className={`text-3xl font-bold ${colors.text}`}>
-                          {pillar.lever.value.toFixed(1)}
+                          {(pillar.lever?.value ?? 0).toFixed(1)}
                           {pillar.id === 'coverage' || pillar.id === 'closeRate' ? '%' : ''}
                         </span>
                       </div>
@@ -191,7 +193,7 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
                       <div className="flex items-baseline justify-between">
                         <span className="text-sm text-neutral-600">Target</span>
                         <span className="text-2xl font-semibold text-neutral-900">
-                          {pillar.lever.target}
+                          {pillar.lever?.target ?? 0}
                           {pillar.id === 'coverage' || pillar.id === 'closeRate' ? '%' : ''}
                         </span>
                       </div>
@@ -202,7 +204,7 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
                             Action Item
                           </h4>
                           <p className={`text-sm ${colors.text}`}>
-                            {pillar.lever.action}
+                            {pillar.lever?.action ?? 'Review metrics'}
                           </p>
                         </div>
                       </div>
@@ -220,7 +222,7 @@ export function PerformancePillars({ fourLevers }: PerformancePillarsProps) {
                             ${colors.text}
                           `}
                         >
-                          {pillar.lever.status.toUpperCase()}
+                          {(pillar.lever?.status ?? 'yellow').toUpperCase()}
                         </span>
                       </div>
                     </div>

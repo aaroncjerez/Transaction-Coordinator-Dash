@@ -14,8 +14,8 @@ export function TeamPerformance({ teamScorecards }: TeamPerformanceProps) {
 
   // Sort by status (red first for focus), then by progress
   const sortedTeam = [...teamScorecards].sort((a, b) => {
-    const statusOrder = { red: 0, yellow: 1, green: 2 };
-    const statusDiff = statusOrder[a.status] - statusOrder[b.status];
+    const statusOrder: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+    const statusDiff = (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1);
     if (statusDiff !== 0) return statusDiff;
     const aProgress = (a.primaryMetric.current / a.primaryMetric.target) * 100;
     const bProgress = (b.primaryMetric.current / b.primaryMetric.target) * 100;
@@ -30,6 +30,8 @@ export function TeamPerformance({ teamScorecards }: TeamPerformanceProps) {
         return { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-300', accent: 'bg-amber-500' };
       case 'red':
         return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-300', accent: 'bg-red-500' };
+      default:
+        return { bg: 'bg-neutral-100', text: 'text-neutral-700', border: 'border-neutral-300', accent: 'bg-neutral-500' };
     }
   };
 

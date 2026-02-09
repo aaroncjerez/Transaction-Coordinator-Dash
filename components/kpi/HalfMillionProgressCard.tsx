@@ -73,7 +73,7 @@ function SimpleMetricRow({
 export function HalfMillionProgressCard({ progress, weekEnding }: HalfMillionProgressCardProps) {
   const { currentWeek, targets, progress: progressPercent, insights } = progress;
 
-  const overallProgress = progressPercent.profit;
+  const overallProgress = progressPercent?.profit ?? 0;
   const getOverallColor = () => {
     if (overallProgress >= 100) return 'text-green-600';
     if (overallProgress >= 70) return 'text-yellow-600';
@@ -215,12 +215,15 @@ export function HalfMillionProgressCard({ progress, weekEnding }: HalfMillionPro
         <div className="mt-6 pt-4 border-t-2 border-gray-300">
           <div className="text-sm font-semibold text-gray-700 mb-3">Key Insights</div>
           <div className="space-y-2">
-            {insights.map((insight, idx) => (
-              <div key={idx} className="text-sm text-gray-700 flex items-start gap-2">
-                <span className="mt-0.5">{insight.charAt(0)}</span>
-                <span>{insight.slice(1)}</span>
-              </div>
-            ))}
+            {(insights ?? []).map((insight, idx) => {
+              const text = String(insight ?? '');
+              return (
+                <div key={idx} className="text-sm text-gray-700 flex items-start gap-2">
+                  <span className="mt-0.5">{text.charAt(0)}</span>
+                  <span>{text.slice(1)}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -228,14 +231,14 @@ export function HalfMillionProgressCard({ progress, weekEnding }: HalfMillionPro
         <div className="mt-6 bg-teal-50 border-2 border-teal-200 rounded-lg p-4">
           <div className="text-sm font-semibold text-teal-900 mb-2">Weekly $500K Targets</div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-teal-800">
-            <div>{'\uD83D\uDCE4'} {targets.texts.toLocaleString()} texts/week</div>
-            <div>{'\uD83D\uDCDE'} {targets.calls.toLocaleString()} calls/week</div>
-            <div>{'\uD83C\uDFAF'} {targets.grossLeads.toFixed(1)} gross leads/week</div>
-            <div>{'\uD83D\uDD25'} {targets.hotLeads} hot leads/week</div>
-            <div>{'\uD83D\uDCDD'} {targets.realOffers} real offers/week</div>
-            <div>{'\uD83D\uDCC4'} {targets.contracts.toFixed(2)} contracts/week</div>
-            <div>{'\uD83E\uDD1D'} {targets.deals.toFixed(2)} deals/week</div>
-            <div>{'\uD83D\uDCB0'} ${targets.profit.toLocaleString()}/week</div>
+            <div>{'\uD83D\uDCE4'} {(targets?.texts ?? 0).toLocaleString()} texts/week</div>
+            <div>{'\uD83D\uDCDE'} {(targets?.calls ?? 0).toLocaleString()} calls/week</div>
+            <div>{'\uD83C\uDFAF'} {(targets?.grossLeads ?? 0).toFixed(1)} gross leads/week</div>
+            <div>{'\uD83D\uDD25'} {targets?.hotLeads ?? 0} hot leads/week</div>
+            <div>{'\uD83D\uDCDD'} {targets?.realOffers ?? 0} real offers/week</div>
+            <div>{'\uD83D\uDCC4'} {(targets?.contracts ?? 0).toFixed(2)} contracts/week</div>
+            <div>{'\uD83E\uDD1D'} {(targets?.deals ?? 0).toFixed(2)} deals/week</div>
+            <div>{'\uD83D\uDCB0'} ${(targets?.profit ?? 0).toLocaleString()}/week</div>
           </div>
         </div>
 

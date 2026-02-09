@@ -76,6 +76,9 @@ function MetricRow({ icon, label, currentActual, currentTarget, goalTarget, unit
 }
 
 export function ScaleProgressCard({ scaleProgress }: ScaleProgressCardProps) {
+  if (!scaleProgress?.currentReality || !scaleProgress?.sevenFigureGoal || !scaleProgress?.gaps) {
+    return null;
+  }
   const { currentReality, sevenFigureGoal, gaps } = scaleProgress;
 
   return (
