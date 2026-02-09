@@ -8,41 +8,44 @@
  * Adapted for Electron main process (Node.js, CommonJS-compatible).
  */
 
-const Airtable = require('airtable');
+import Airtable from 'airtable';
 import type {
   WeeklyKPI,
   BusinessMetrics,
   PricingRecord,
   WeeklyAggregate,
-} from '../lib/kpi/types';
+} from '../lib/kpi/types.js';
 
 // ---------------------------------------------------------------------------
 // Airtable client initialisation (was client.ts)
+// Lazy init — env vars read at call time so dotenv has loaded first.
 // ---------------------------------------------------------------------------
 
-const apiKey = process.env.AIRTABLE_PAT;
-const baseId = process.env.AIRTABLE_BASE_ID;
+let _base: ReturnType<InstanceType<typeof Airtable>['base']> | null = null;
 
-if (!apiKey || !baseId) {
-  console.warn('Airtable credentials not found. Using mock data.');
+function getBase() {
+  if (_base) return _base;
+  const apiKey = process.env.AIRTABLE_PAT;
+  const baseId = process.env.AIRTABLE_BASE_ID;
+  if (!apiKey || !baseId) {
+    console.warn('[KPI-Airtable] AIRTABLE_PAT or AIRTABLE_BASE_ID missing');
+    return null;
+  }
+  _base = new Airtable({ apiKey, requestTimeout: 30000 }).base(baseId);
+  return _base;
 }
 
-// Configure Airtable with personal access token (Bearer authentication)
-const base =
-  apiKey && baseId
-    ? new Airtable({
-        apiKey: apiKey,
-        // Personal access tokens require Bearer authentication
-        requestTimeout: 30000,
-      }).base(baseId)
-    : null;
+function getTable(name: string) {
+  const b = getBase();
+  return b ? b(name) : null;
+}
 
 export const tables = {
-  weeklyKpi: base?.('Weekly KPI'),
-  dailyKpi: base?.('Daily KPI'),
-  businessMetrics: base?.('Business Metrics'),
-  landPricing: base?.('Land Pricing'),
-  teamMembers: base?.('Team'),
+  get weeklyKpi() { return getTable('Weekly KPI'); },
+  get dailyKpi() { return getTable('Daily KPI'); },
+  get businessMetrics() { return getTable('Business Metrics'); },
+  get landPricing() { return getTable('Land Pricing'); },
+  get teamMembers() { return getTable('Team'); },
 };
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { WeeklyAggregate, ScaleProgress, HalfMillionProgress, BusinessMetrics } from './types';
+import type { WeeklyAggregate, ScaleProgress, HalfMillionProgress, BusinessMetrics } from './types.js';
 
 // Playbook constants from user-provided "Channel playbook 2 - Cold texting" screenshot
 const PLAYBOOK_CONSTANTS = {

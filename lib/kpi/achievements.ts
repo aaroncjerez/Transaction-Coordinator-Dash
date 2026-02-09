@@ -1,4 +1,4 @@
-import { WeeklyAggregate, CalculatedMetrics } from './types';
+import { WeeklyAggregate, CalculatedMetrics } from './types.js';
 
 export interface Achievement {
   id: string;

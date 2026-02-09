@@ -6,8 +6,8 @@ import type {
   Bottleneck,
   TeamScorecard,
   StatusColor,
-} from './types';
-import { TEAM_MEMBERS, TARGETS, STATUS_THRESHOLDS, getStatus } from './constants';
+} from './types.js';
+import { TEAM_MEMBERS, TARGETS, STATUS_THRESHOLDS, getStatus } from './constants.js';
 
 // Calculate all derived metrics
 export function calculateMetrics(

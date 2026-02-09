@@ -34,7 +34,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // Ensure .env is loaded (backup in case main.ts load timing is off)
 const __ipc_filename = fileURLToPath(import.meta.url);
 const __ipc_dirname = path.dirname(__ipc_filename);
-dotenv.config({ path: path.join(__ipc_dirname, '..', '.env') });
+dotenv.config({ path: path.join(__ipc_dirname, '..', '..', '.env') });
 
 function generateUUID(): string {
   return crypto.randomUUID();
