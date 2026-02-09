@@ -1,33 +1,35 @@
+# Transaction Coordinator Dashboard — Audit Report
 
-# Transaction Coordinator Dashboard Audit Report
+## Current Architecture (as of 2026-02-09)
 
-## Phase 1: Connectivity & Sync Audit
-*   **Airtable Connection**: **VERIFIED**. Schema analysis successful. 22 records found.
-*   **Supabase Connection**: **VERIFIED**. Connection successful. 22 records found.
-*   **Data Integrity**: **100% SYNCED**. No orphan records found in `Deals` table.
-*   **Sync Logic**: 
-    *   **Direction**: Airtable -> Supabase (via manual Refresh or App-side Trigger).
-    *   **Bottleneck**: There is **no automatic webhook** from Airtable to Supabase. Records created directly in Airtable do not appear in Supabase until a user clicks "Refresh" or updates a record in the App.
-    *   **Resolution**: Confirmed behavior is "Pull-on-Demand" or "Push-on-Write". This is stable but not real-time if multiple users edit Airtable directly.
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Desktop shell | Electron 40 | Native macOS app with hidden title bar |
+| Frontend | React 19 + Vite 6 + Tailwind 3 | SPA with route-based pages |
+| Local DB | SQLite (better-sqlite3) | Deals, tasks, deadlines, settings |
+| Deal source | Follow Up Boss API | Person sync (10s), file sync (5min) |
+| KPI data | Airtable SDK | Weekly team metrics, live fetching |
+| AI | Claude Sonnet (Anthropic) | CEO brief, deal chat, PDF analysis |
 
-## Phase 2: Frontend-Backend Integrity
-*   **Data Source**: Frontend correctly uses `supabase-js` client and `fetch` for Airtable (via `lib/sync.ts`). No hardcoded mock data found in production paths.
-*   **Dead/Broken Logic Identified & Fixed**:
-    *   **CRITICAL FIX**: The **"New Deal"** button on the `Deals` page was non-functional (no action).
-    *   **CRITICAL FIX**: The **"New Deal"** button on the `Dashboard` page opened a "Create User" modal instead of creating a deal.
-    *   **Resolution**: Implemented a new `CreateDealModal` component and integrated it into both pages. Users can now create deals (Optimistic UI update to Supabase).
+## Data Flow
 
-## Phase 3: Repository & File Cleanup
-*   **Analysis**: Scanned for duplicates and unused files.
-*   **Action**: Deleted `components/pages/` directory which contained unused/dead boilerplate files (`Settings.tsx`, `Analytics.tsx`, etc. which were not imported by App.tsx).
-*   **Status**: Repository is leaner.
+1. **Deals:** FUB API -> Electron IPC -> SQLite -> React state
+2. **KPIs:** Airtable -> Electron IPC -> React KPI components
+3. **Tasks:** Rule engine generates tasks per deal stage, stored in SQLite
+4. **Deadlines:** Auto-generated from deal dates, alert scheduler checks every 15min
+5. **CEO Brief:** Dashboard data -> Claude tool call -> structured 3-priority output
 
-## Phase 4: Fixes Applied
-1.  **Implemented `CreateDealModal`**: A functional modal to create deals with County, State, and Type.
-2.  **Fixed `Dashboard.tsx`**: Replaced incorrect `CreateUserModal` with `CreateDealModal`. Added check to prevent syncing `temp-` IDs to Airtable to avoid 404s.
-3.  **Fixed `Deals.tsx`**: Wired up the "New Deal" button to the new modal.
-4.  **Verified Write**: Validated that editing a deal in the browser updates Supabase and triggers the Airtable sync logic (verified via browser audit logs).
+## Previous Issues (Resolved)
 
-## Recommendations
-1.  **Tasks Sync**: `Tasks.tsx` currently only writes to Supabase. There is no logic to sync Tasks to Airtable. This is a functionality gap if Tasks are intended to be synced.
-2.  **Real-timeness**: Consider adding a Supabase Edge Function to listen to Airtable Webhooks for true bi-directional sync if Airtable-side editing is frequent.
+- Supabase has been fully removed — all data is local SQLite + FUB API
+- Airtable is no longer used for deal storage, only for KPI weekly metrics
+- Native module version mismatch (better-sqlite3) resolved with electron-rebuild
+- Deleted entry files (index.html, index.tsx, etc.) restored from git
+
+## Health Status
+
+- Database migrations: v14 (up to date)
+- FUB person sync: running (10s interval)
+- FUB file sync: running (5min interval)
+- Alert scheduler: running (15min interval)
+- KPI Airtable fetch: operational (live weekly data)

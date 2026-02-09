@@ -1,11 +1,13 @@
-# Task: Debug Deal Type & Stage Sync
+# Current Tasks
 
-- [ ] Investigation <!-- id: 0 -->
-    - [ ] Review `DealDetail.tsx` `syncToAirtable` mapping <!-- id: 1 -->
-    - [ ] Review `lib/sync.ts` `updateAirtableRecord` logic <!-- id: 2 -->
-    - [ ] Browser Test: specifically check console for "Synced [Field] to Airtable" <!-- id: 3 -->
-- [ ] Fix <!-- id: 4 -->
-    - [ ] Correct any field name mismatches (e.g. "Deal type" vs "Deal Type") <!-- id: 5 -->
-    - [ ] Improve error visibility if sync fails <!-- id: 6 -->
-- [ ] Verification <!-- id: 7 -->
-    - [ ] Confirm success log in browser console <!-- id: 8 -->
+No active debug tasks. App is running on:
+- **Deal source:** Follow Up Boss (FUB) API with 10s person sync
+- **Local storage:** SQLite via better-sqlite3
+- **KPI data:** Airtable SDK (weekly team metrics)
+- **AI:** Claude Sonnet for CEO brief + deal chat
+
+## Recently Completed
+- Merged KPI dashboard branch into main (2026-02-09)
+- Restored deleted entry files (index.html, index.tsx, App.tsx, styles.css)
+- Fixed Dashboard overflow (min-h-0)
+- Rebuilt Electron native modules for better-sqlite3

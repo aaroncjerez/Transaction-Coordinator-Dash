@@ -1,20 +1,59 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Transaction Coordinator Dashboard
 
-# Run and deploy your AI Studio app
+Electron desktop app for managing real estate transaction coordination — deal pipeline, task engine, KPI tracking, and AI-powered insights.
 
-This contains everything you need to run your app locally.
+## Stack
 
-View your app in AI Studio: https://ai.studio/apps/drive/1dJFFxPL30CN6u6asd6g2vfcNlC3zJ8WG
+- **Electron** + **Vite** + **React 19** + **TypeScript**
+- **SQLite** (better-sqlite3) for local deal/task storage
+- **Airtable SDK** for KPI data (weekly team metrics)
+- **Follow Up Boss API** for deal source & contact sync
+- **Claude Sonnet** for CEO weekly brief generation & deal chat
+- **Tailwind CSS 3** + Lucide icons + Framer Motion
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Dashboard — quick stats, stage distribution, task progress, alerts |
+| `/pipeline` | Kanban board — drag-and-drop deal stages |
+| `/deals/:id` | Deal detail — financials, deadlines, tasks, files, AI chat |
+| `/tasks` | Global task list with priority sorting and rule engine |
+| `/kpis` | KPI dashboard — team performance, funnel, goals, CEO brief |
+| `/analytics` | Charts and reporting |
+| `/archive` | Closed/cancelled deals |
+| `/settings` | API keys, preferences, FUB config |
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisites:** Node.js 20+
 
+```bash
+npm install
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+This starts Vite on port 3000 and launches Electron once the server is ready.
+
+## Environment
+
+Create a `.env` file with:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+FUB_API_KEY=...
+AIRTABLE_API_KEY=pat...
+AIRTABLE_BASE_ID=app...
+```
+
+The Anthropic key can also be set in Settings within the app (stored in SQLite).
+
+## Architecture
+
+- **Renderer** (React) communicates with **Main** (Electron) via IPC
+- **Preload** script exposes typed `window.electronAPI` bridge
+- **FUB sync** runs on a 10-second interval for person data
+- **File sync** runs on a 5-minute interval for FUB attachments
+- **Alert scheduler** checks deadlines every 15 minutes
+- **KPI data** pulled live from Airtable with weekly snapshots
+- **CEO Brief** uses Claude with forced tool calling for structured 3-priority output

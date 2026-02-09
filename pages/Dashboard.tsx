@@ -153,7 +153,7 @@ export const Dashboard: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col min-h-0">
         <TopBar title="Dashboard" subtitle="Loading..." onSearchClick={openCommandPalette} />
         <div className="flex-1 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-gray-200 border-t-primary rounded-full animate-spin" />
@@ -163,7 +163,7 @@ export const Dashboard: React.FC = () => {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col min-h-0">
       <TopBar
         title="Dashboard"
         subtitle={`${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}`}

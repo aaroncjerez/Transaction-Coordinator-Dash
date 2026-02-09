@@ -1,6 +1,24 @@
-# TC Dash — Session Changes Log
+# TC Dash — Changes Log
 
-## Commits
+## 2026-02-09 — KPI Dashboard Merged into Main
+
+Merged `claude/mystifying-shaw` branch (6 commits) into `main`. Adds full KPI dashboard with team performance tracking, funnel visualization, goals, CEO weekly brief, and Airtable integration.
+
+**Key additions:**
+- `pages/KPIs.tsx` — KPI dashboard page with header, hero metrics, funnel, team cards, goals, insights
+- `components/kpi/` — 15 KPI components (HeroKPI, FunnelFlow, TeamPerformance, GoalsDashboard, InsightsPanel, etc.)
+- `components/kpi/ui/` — Reusable KPI UI primitives (ProgressBar, ProgressRing, MetricCard, StatCard, etc.)
+- `lib/kpi/` — Calculations, types, constants, achievements, scale calculations, useCountUp hook
+- `electron/kpi-airtable.ts` — Airtable SDK integration for weekly KPI data fetching
+- `electron/kpi-ceo-brief.ts` — Claude-powered CEO weekly brief with forced tool calling
+- Sidebar updated with KPIs nav entry
+- New dependencies: `airtable`, `framer-motion`, `@radix-ui/react-avatar`, `@radix-ui/react-tooltip`
+
+Also restored deleted files (`index.html`, `index.tsx`, `App.tsx`, `styles.css`, `contexts/PreferencesContext.tsx`) and fixed Dashboard.tsx `min-h-0` overflow issue.
+
+---
+
+## Prior Commits
 
 ### `17444d3` — feat: add CEO weekly brief, Maria conversations metric, and hot leads tracking
 
