@@ -181,6 +181,36 @@ export function TeamPerformance({ teamScorecards }: TeamPerformanceProps) {
                           </div>
                         </div>
 
+                        {/* Hot Leads vs $500K Target (cold texters) */}
+                        {scorecard.hotLeadsMetric && (
+                          <div className="col-span-2 pt-2 border-t border-neutral-200">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs text-neutral-600">Hot Leads ($500K pace)</span>
+                              <span className={`text-sm font-semibold ${
+                                scorecard.hotLeadsMetric.current >= scorecard.hotLeadsMetric.target
+                                  ? 'text-green-600'
+                                  : scorecard.hotLeadsMetric.current >= scorecard.hotLeadsMetric.target * 0.5
+                                    ? 'text-amber-600'
+                                    : 'text-red-600'
+                              }`}>
+                                {scorecard.hotLeadsMetric.current} / {scorecard.hotLeadsMetric.target}
+                              </span>
+                            </div>
+                            <AnimatedProgress
+                              value={scorecard.hotLeadsMetric.current}
+                              max={Math.max(scorecard.hotLeadsMetric.target, 1)}
+                              height="sm"
+                              color={
+                                scorecard.hotLeadsMetric.current >= scorecard.hotLeadsMetric.target
+                                  ? 'success'
+                                  : scorecard.hotLeadsMetric.current >= scorecard.hotLeadsMetric.target * 0.5
+                                    ? 'warning'
+                                    : 'danger'
+                              }
+                            />
+                          </div>
+                        )}
+
                         {/* Additional Metrics if available */}
                         {scorecard.primaryMetric.target && (
                           <div className="col-span-2 pt-2">

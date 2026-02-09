@@ -229,6 +229,7 @@ export function buildTeamScorecards(
 
     let primaryMetric: TeamScorecard['primaryMetric'];
     let secondaryMetric: TeamScorecard['secondaryMetric'];
+    let hotLeadsMetric: TeamScorecard['hotLeadsMetric'];
     let funnelMetrics: TeamScorecard['funnelMetrics'];
     let status: StatusColor = 'yellow';
     let isCrushingIt = false;
@@ -266,6 +267,12 @@ export function buildTeamScorecards(
           conversion2: qualificationRate,
         };
 
+        // Hot leads vs $500K target: 10 hot leads/week per cold texter
+        hotLeadsMetric = {
+          current: hotLeads,
+          target: 10,
+        };
+
         // Status based on CONVERSION RATES, not volume
         // Good conversion: ≥0.15% text-to-lead AND ≥25% qualification
         const goodTextToLead = leadsPerText >= 0.15; // ~1 lead per 667 texts
@@ -282,16 +289,17 @@ export function buildTeamScorecards(
         break;
 
       case 'cold_caller':
-        const callsMade = kpi?.callsMade || 0;
-        const callsTarget = member.targets.callsMade || 500;
+        const conversations = kpi?.conversations || 0;
+        const conversationsTarget = member.targets.conversations || 125;
         const callHotLeads = kpi?.hotLeadsCall || 0;
 
-        // Primary: Calls Made (LEADING indicator)
+        // Primary: Conversations (60s+) — meaningful phone interactions
+        // Floor: 75–125, Good: 125–200, Strong: 200–300, Elite: 300–400+
         primaryMetric = {
-          label: 'calls made',
-          current: callsMade,
-          target: callsTarget,
-          unit: 'calls',
+          label: 'conversations (60s+)',
+          current: conversations,
+          target: conversationsTarget,
+          unit: 'convos',
         };
         secondaryMetric = {
           label: 'hot leads',
@@ -299,11 +307,12 @@ export function buildTeamScorecards(
           unit: '',
         };
 
-        // Status based on call volume (activity), not results
-        if (callsMade >= callsTarget) {
+        // Status based on conversations (60s+)
+        // Green: ≥125 (Good tier), Yellow: ≥75 (Floor tier), Red: <75
+        if (conversations >= conversationsTarget) {
           status = 'green';
-          isCrushingIt = callsMade >= callsTarget * 1.10; // 110% = crushing it (550+ calls)
-        } else if (callsMade >= callsTarget * 0.80) { // 80% threshold (400+ calls)
+          isCrushingIt = conversations >= 200; // Strong tier = crushing it
+        } else if (conversations >= 75) {
           status = 'yellow';
         } else {
           status = 'red';
@@ -370,6 +379,7 @@ export function buildTeamScorecards(
       member,
       primaryMetric,
       secondaryMetric,
+      hotLeadsMetric,
       funnelMetrics,
       status,
       isCrushingIt,

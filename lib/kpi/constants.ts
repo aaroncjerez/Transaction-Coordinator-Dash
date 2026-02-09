@@ -27,7 +27,8 @@ export const TEAM_MEMBERS: TeamMember[] = [
     role: 'cold_caller',
     isActive: true,
     targets: {
-      callsMade: 500,
+      callsMade: 500,          // Logged calls (still tracked)
+      conversations: 125,      // PRIMARY: conversations (60s+) per week — Green threshold
       hotLeads: 10,
     },
   },

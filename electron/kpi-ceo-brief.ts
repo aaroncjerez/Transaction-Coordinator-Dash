@@ -1,10 +1,8 @@
 /**
  * KPI CEO Brief Generator — Electron Main Process
  *
- * Source: dashboard/src/lib/ai/claude-client.ts
- *
- * Adapted for Electron main process (Node.js).
- * Uses Anthropic SDK to generate structured CEO briefs from dashboard state.
+ * Uses Anthropic SDK to generate a concise CEO-level weekly brief
+ * from dashboard state. Returns 3 top priorities with 1-2 sentence reasoning.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -17,53 +15,45 @@ const client = new Anthropic({
 export async function generateCEOBrief(
   dashboardState: DashboardState,
 ): Promise<CEOBrief> {
-  // Build comprehensive data summary for Claude
   const prompt = buildAnalysisPrompt(dashboardState);
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 1500,
-    temperature: 0.3, // Lower temp for consistent business advice
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-    // Use tool calling to ensure structured JSON response
+    max_tokens: 800,
+    temperature: 0.3,
+    messages: [{ role: 'user', content: prompt }],
     tools: [
       {
         name: 'provide_ceo_brief',
-        description: 'Provide strategic CEO brief with priorities',
+        description: 'Provide the CEO weekly brief with top 3 priorities',
         input_schema: {
           type: 'object' as const,
           properties: {
+            summary: {
+              type: 'string',
+              description: '1-2 sentences: how did the week go and what is the main takeaway',
+            },
             priorities: {
               type: 'array',
               items: {
                 type: 'object',
                 properties: {
-                  focus: { type: 'string' },
-                  why: { type: 'string' },
-                  action: { type: 'string' },
-                  owner: { type: 'string' },
-                  impact: { type: 'string' },
+                  title: { type: 'string', description: 'Short headline — the change to make' },
+                  detail: { type: 'string', description: '1-2 sentences: why this matters and what to do about it this week' },
                 },
-                required: ['focus', 'why', 'action', 'owner', 'impact'],
+                required: ['title', 'detail'],
               },
-              minItems: 2,
+              minItems: 3,
               maxItems: 3,
             },
-            summary: { type: 'string' },
           },
-          required: ['priorities', 'summary'],
+          required: ['summary', 'priorities'],
         },
       },
     ],
     tool_choice: { type: 'tool', name: 'provide_ceo_brief' },
   });
 
-  // Extract structured data from tool call
   const toolUse = message.content.find(
     (block: any) => block.type === 'tool_use',
   );
@@ -72,8 +62,8 @@ export async function generateCEOBrief(
   }
 
   const briefData = toolUse.input as {
-    priorities: any[];
     summary: string;
+    priorities: { title: string; detail: string }[];
   };
 
   return {
@@ -91,117 +81,79 @@ function buildAnalysisPrompt(state: DashboardState): string {
     fourLevers,
     sixMonthAverages,
     teamScorecards,
-    businessMetrics,
   } = state;
 
   if (!currentWeek) {
     throw new Error('No current week data available');
   }
 
-  return `You are a CEO advisor for a land acquisition business. Analyze the KPI data and provide strategic guidance.
-
-## BUSINESS MODEL
-- Cold texters (John, Edward) generate leads via SMS
-- Cold caller (Maria) converts leads to hot leads
-- Comper (Justine) prices deals quickly
-- Closer (Aaron) sends offers, gets contracts signed
-- Goal: 5 contracts signed/week → $1M annual revenue
-
-## CURRENT WEEK (ending ${currentWeek.weekEnding})
-**Volumes:**
-- Texts: ${currentWeek.totalTexts} (target: 40,000)
-- Hot Leads: ${currentWeek.totalHotLeads} (target: 30)
-- Aaron's Offers: ${currentWeek.byTeamMember.aaron?.offersSent || 0} (target: 20)
-- Contracts Sent: ${currentWeek.totalContractsSent}
-- Contracts Signed: ${currentWeek.totalContractsSigned} (target: 5)
-
-**The 3 Levers:**
-- Yield: ${fourLevers?.yield.value || 'N/A'} (${fourLevers?.yield.status || 'unknown'}) - target: ${fourLevers?.yield.target || 0.55}
-- Offer Coverage: ${fourLevers?.offerCoverage.value || 'N/A'}% (${fourLevers?.offerCoverage.status || 'unknown'}) - target: ${fourLevers?.offerCoverage.target || 75}%
-- Close Rate: ${fourLevers?.closeRate.value || 'N/A'}% (${fourLevers?.closeRate.status || 'unknown'}) - target: ${fourLevers?.closeRate.target || 70}%
-
-**Conversion Rates:**
-- Text Yield: ${calculatedMetrics?.textYield.toFixed(2) || 'N/A'} hot leads per 1k texts
-- Offer to Contract: ${calculatedMetrics?.offerToContractRate.toFixed(1) || 'N/A'}%
-- Close Rate: ${calculatedMetrics?.contractToCloseRate.toFixed(1) || 'N/A'}%
-
-## WEEK-OVER-WEEK TRENDS
-${
-  previousWeek
-    ? `
-- Hot Leads: ${currentWeek.totalHotLeads} vs ${previousWeek.totalHotLeads} (${getChangeText(currentWeek.totalHotLeads, previousWeek.totalHotLeads)})
+  // Week-over-week trends
+  let trendsSection = 'No previous week data available.';
+  if (previousWeek) {
+    trendsSection = `Week-over-Week:
+- Hot Leads: ${currentWeek.totalHotLeads} vs ${previousWeek.totalHotLeads} last week (${getChangeText(currentWeek.totalHotLeads, previousWeek.totalHotLeads)})
 - Offers: ${currentWeek.byTeamMember.aaron?.offersSent || 0} vs ${previousWeek.byTeamMember.aaron?.offersSent || 0} (${getChangeText(currentWeek.byTeamMember.aaron?.offersSent || 0, previousWeek.byTeamMember.aaron?.offersSent || 0)})
-- Contracts Signed: ${currentWeek.totalContractsSigned} vs ${previousWeek.totalContractsSigned} (${getChangeText(currentWeek.totalContractsSigned, previousWeek.totalContractsSigned)})
-`
-    : 'No previous week data available'
-}
+- Contracts Signed: ${currentWeek.totalContractsSigned} vs ${previousWeek.totalContractsSigned} (${getChangeText(currentWeek.totalContractsSigned, previousWeek.totalContractsSigned)})`;
+  }
 
-## 6-MONTH CONTEXT
-${
-  sixMonthAverages
-    ? `
-- Avg Hot Leads: ${sixMonthAverages.totalHotLeads?.toFixed(1) || 'N/A'}
-- Avg Offers: ${sixMonthAverages.totalOffersSent?.toFixed(1) || 'N/A'}
-- Avg Contracts: ${sixMonthAverages.totalContractsSigned?.toFixed(1) || 'N/A'}
-`
-    : 'No historical data available'
-}
+  // 6-month context
+  let sixMonthSection = '';
+  if (sixMonthAverages) {
+    sixMonthSection = `6-Month Averages:
+- Hot Leads: ${sixMonthAverages.totalHotLeads?.toFixed(1) || 'N/A'}/week
+- Offers: ${sixMonthAverages.totalOffersSent?.toFixed(1) || 'N/A'}/week
+- Contracts: ${sixMonthAverages.totalContractsSigned?.toFixed(1) || 'N/A'}/week`;
+  }
 
-## TEAM PERFORMANCE
-${
-  teamScorecards
+  // Team scorecards
+  const teamSection = teamScorecards
     ?.map(
       (sc) =>
-        `\n- ${sc.member.name} (${sc.member.role}): ${sc.status} - ${sc.primaryMetric.current}/${sc.primaryMetric.target} ${sc.primaryMetric.label}\n`,
+        `- ${sc.member.name} (${sc.member.role.replace(/_/g, ' ')}): ${sc.status.toUpperCase()} — ${sc.primaryMetric.current}/${sc.primaryMetric.target} ${sc.primaryMetric.label}`,
     )
-    .join('') || 'No team scorecard data'
-}
+    .join('\n') || 'No team data';
 
-## YOUR ROLE & CONTEXT
-You are the AI CEO of Jerez Land, a real estate investment company. Your role is to review the weekly KPI dashboard data and provide strategic guidance to the team.
+  return `You are the CEO of Jerez Land, a real estate investment company that buys land. You're reviewing your weekly KPI dashboard. Think like an owner who cares about one thing: closing more profitable deals.
 
-**Your Team:**
-- **Aaron**: CEO/Owner, Lead Closer - the person you're presenting recommendations to
-- **John**: Cold Texter
-- **Edward**: Cold Texter/Acquisitions Manager
-- **Justine**: Data Specialist/Comper (Comparable Property Analyst)
-- **Maria**: Cold Caller
+## YOUR NUMBERS THIS WEEK (ending ${currentWeek.weekEnding})
 
-## YOUR PROCESS
-1. **Thoroughly review** all knowledge base data and documents (historical context)
-2. **Analyze** the past week's KPI data in detail - look at every metric carefully
-3. **Identify patterns** - what's working, what's declining, what needs immediate attention
-4. **Consider context** - compare this week to previous weeks and 6-month averages
+Texts Sent: ${currentWeek.totalTexts.toLocaleString()} (target: 40,000)
+Hot Leads: ${currentWeek.totalHotLeads} (target: 30)
+Aaron's Real Offers: ${currentWeek.byTeamMember.aaron?.offersSent || 0} (target: 20)
+Contracts Sent: ${currentWeek.totalContractsSent}
+Contracts Signed: ${currentWeek.totalContractsSigned} (target: 5)
 
-## YOUR OUTPUT FORMAT
+3 Levers:
+- Yield: ${fourLevers?.yield.value ?? 'N/A'} (${fourLevers?.yield.status ?? 'unknown'}) — target: 0.55 hot leads per 1k texts
+- Offer Coverage: ${fourLevers?.offerCoverage.value ?? 'N/A'}% (${fourLevers?.offerCoverage.status ?? 'unknown'}) — target: 100%
+- Close Rate: ${fourLevers?.closeRate.value ?? 'N/A'}% (${fourLevers?.closeRate.status ?? 'unknown'}) — target: 70%
 
-Start with a brief overview (2-3 sentences max) of how the week went overall. This becomes your **summary** field.
+Conversion Rates:
+- Text Yield: ${calculatedMetrics?.textYield.toFixed(2) ?? 'N/A'} hot leads per 1k texts
+- Offer to Contract: ${calculatedMetrics?.offerToContractRate.toFixed(1) ?? 'N/A'}%
+- Close Rate: ${calculatedMetrics?.contractToCloseRate.toFixed(1) ?? 'N/A'}%
 
-Then provide exactly **3 Main Focus Points** in the **priorities** array:
+${trendsSection}
 
-### Focus Point Structure (each priority object):
+${sixMonthSection}
 
-**focus**: [Clear Action Item - what needs to be done]
+## TEAM THIS WEEK
+${teamSection}
 
-**why** (The Issue): [Reference the specific KPI(s) showing the problem and explain the business impact in plain English - why should we care about fixing this now?]
+## YOUR PIPELINE
+Texts → Leads → Hot Leads → Offers → Contracts → Deals → Profit
+Every bottleneck upstream kills revenue downstream. Find the constraint and fix it.
 
-**action** (What To Do): [Specific, actionable step the team can implement this week. Must be concrete and implementable.]
+## INSTRUCTIONS
+You're talking to yourself as the CEO. Give me the 3 most important things I need to change or focus on this week to grow revenue.
 
-**owner**: [The team member responsible - use their actual name: Aaron, John, Edward, Maria, or Justine. Use "Team" only if it requires everyone]
-
-**impact**: [Quantified expected result (e.g., "+3 contracts/week", "+5 hot leads", "reduce pricing time by 15 min")]
-
-## GUIDELINES
-- Use plain English - no jargon or corporate speak
-- Be direct and honest about problems
-- Every recommendation must tie back to actual KPI data from above
-- Focus on what's most urgent and impactful for the business
-- Make action items specific enough that Aaron can immediately assign them
-- Think like an owner - prioritize what will actually move revenue and profit
-- Don't sugarcoat issues, but be constructive in your tone
-- Reference specific numbers from the data provided
-- Consider both the 4 Levers framework and week-over-week trends
-- Prioritize actions that unblock the throughput pipeline (texts → hot leads → offers → contracts → deals)`;
+Rules:
+- Each priority: a short title and 1-2 sentences explaining why it matters and what to do
+- Reference actual numbers from above — no vague advice
+- Think highest-level: what moves the needle on deals and profit?
+- Be blunt. If something is broken, say it. If something is working, don't waste a slot on it.
+- No corporate jargon. Talk like an owner, not a consultant.
+- The summary should be 1-2 sentences: how did the week go, what's the main takeaway?`;
 }
 
 function getChangeText(current: number, previous: number): string {

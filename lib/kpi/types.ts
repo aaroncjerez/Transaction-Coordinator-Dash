@@ -9,6 +9,7 @@ export interface TeamMember {
   targets: {
     textsSent?: number;
     callsMade?: number;
+    conversations?: number;  // Conversations (60s+) for cold callers
     hotLeads?: number;
     offersSent?: number;
     contractsSigned?: number;
@@ -30,6 +31,7 @@ export interface WeeklyKPI {
   offersSent: number;
   contractsSent: number;
   contractsSigned: number;
+  conversations?: number;  // Cold call conversations (60s+)
   leadsPriced?: number;
   medianPricingSpeed?: number;
 }
@@ -134,6 +136,10 @@ export interface TeamScorecard {
     value: number;
     unit: string;
   };
+  hotLeadsMetric?: {
+    current: number;
+    target: number;  // $500K pace target
+  };
   funnelMetrics?: {
     stage1: { label: string; value: number };
     stage2: { label: string; value: number };
@@ -169,11 +175,8 @@ export interface SixMonthAverages {
 
 // CEO Brief types
 export interface CEOPriority {
-  focus: string;
-  why: string;
-  action: string;
-  owner: string;
-  impact: string;
+  title: string;       // Short headline — the change to make
+  detail: string;      // 1-2 sentences: why it matters and what to do
 }
 
 export interface CEOBrief {

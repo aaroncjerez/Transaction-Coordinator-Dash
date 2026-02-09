@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
-import { fetchKpiDashboardData } from '../lib/database';
+import { fetchKpiDashboardData, fetchKpiCeoBrief } from '../lib/database';
 import { detectAchievements } from '../lib/kpi/achievements';
 import { TARGETS } from '../lib/kpi/constants';
-import type { DashboardState } from '../lib/kpi/types';
+import type { DashboardState, CEOBrief } from '../lib/kpi/types';
 
 import { KpiHeader } from '../components/kpi/KpiHeader';
 import { HeroKPI } from '../components/kpi/HeroKPI';
@@ -20,6 +20,8 @@ export const KPIs: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<DashboardState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ceoBrief, setCeoBrief] = useState<CEOBrief | null>(null);
+  const [isBriefLoading, setIsBriefLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -44,6 +46,19 @@ export const KPIs: React.FC = () => {
       setIsLoading(false);
     }
   }, []);
+
+  const generateBrief = useCallback(async () => {
+    if (!dashboardData) return;
+    try {
+      setIsBriefLoading(true);
+      const brief = await fetchKpiCeoBrief(dashboardData);
+      setCeoBrief(brief);
+    } catch (err) {
+      console.error('Error generating CEO brief:', err);
+    } finally {
+      setIsBriefLoading(false);
+    }
+  }, [dashboardData]);
 
   useEffect(() => {
     fetchData();
@@ -161,7 +176,11 @@ export const KPIs: React.FC = () => {
               )}
 
               {/* Insights Panel */}
-              <InsightsPanel ceoBrief={dashboardData.ceoBrief} />
+              <InsightsPanel
+                ceoBrief={ceoBrief || dashboardData.ceoBrief}
+                isLoading={isBriefLoading}
+                onGenerate={generateBrief}
+              />
 
               {/* Team Performance */}
               {dashboardData.teamScorecards && dashboardData.teamScorecards.length > 0 && (

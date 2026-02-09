@@ -71,6 +71,7 @@ interface AirtableWeeklyRecord {
   'Edward Logged Calls'?: number;
   // Maria's metrics
   'Maria Logged Calls'?: number;
+  'Maria Cold Call Conversations'?: number;  // Conversations (60s+)
   'Maria Total Leads'?: number;
   'Maria Hot Leads'?: number;
   'Maria Offers Shared'?: number;
@@ -177,6 +178,7 @@ function parseAirtableWeekRecord(record: AirtableWeeklyRecord): ParsedWeekData {
       name: 'Maria',
       textsSent: 0,
       callsMade: record['Maria Logged Calls'] || 0,
+      conversations: record['Maria Cold Call Conversations'] || 0,
       totalLeadsText: 0,
       totalLeadsCall: record['Maria Total Leads'] || 0,
       hotLeadsText: 0,
@@ -222,6 +224,7 @@ function parseAirtableWeekRecord(record: AirtableWeeklyRecord): ParsedWeekData {
     teamMemberName: member.name,
     textsSent: member.textsSent,
     callsMade: member.callsMade,
+    conversations: (member as any).conversations,
     totalLeadsText: member.totalLeadsText,
     totalLeadsCall: member.totalLeadsCall,
     hotLeadsText: member.hotLeadsText,
