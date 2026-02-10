@@ -57,15 +57,23 @@ export const PreferencesProvider: React.FC<{ children: ReactNode }> = ({ childre
   }, []);
 
   const updatePref = useCallback(async <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => {
-    setPrefs(prev => {
-      const next = { ...prev, [key]: value };
-      // Persist async (fire-and-forget with error logging)
-      setSetting(SETTINGS_KEY, JSON.stringify(next)).catch(err =>
-        console.error('[Preferences] Failed to save:', err)
-      );
-      return next;
-    });
-  }, []);
+    const next = { ...prefs, [key]: value };
+    setPrefs(next);
+
+    // Persist with retry (3 attempts, 500ms delay between)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await setSetting(SETTINGS_KEY, JSON.stringify(next));
+        return; // Success
+      } catch (err) {
+        console.error(`[Preferences] Save attempt ${attempt + 1} failed:`, err);
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    }
+    console.error('[Preferences] All save attempts failed for key:', key);
+  }, [prefs]);
 
   return (
     <PreferencesContext.Provider value={{ prefs, updatePref, loaded }}>

@@ -13,14 +13,16 @@ interface DealOverviewProps {
   deal: DealViewData;
   onDealChange: (field: string, value: any) => void;
   onDealPersisted?: (fubPush?: { queued: boolean; success?: boolean; error?: string }) => void;
+  queueSave?: (field: string, value: any) => void;
   deadlines?: Deadline[];
 }
 
-export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, onDealPersisted, deadlines }) => {
+export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, onDealPersisted, queueSave, deadlines }) => {
   const stageColor = getStageColor(deal.stage);
   const spread = deal.expected_sales_price - deal.purchase_price;
 
-  const handleFieldUpdate = async (field: string, value: any) => {
+  /** Immediate save for dropdowns (stage, type) — single-action discrete changes */
+  const handleImmediateSave = async (field: string, value: any) => {
     onDealChange(field, value);
     try {
       const result = await updateDealFields(deal.id, {
@@ -28,9 +30,16 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
       });
       onDealPersisted?.(result.fubPush);
     } catch (error) {
-      console.error('Error auto-saving:', error);
+      console.error('Error saving:', error);
       onDealPersisted?.();
     }
+  };
+
+  /** Debounced save for text/number/date inputs — queues via useAutoSave */
+  const handleFieldChange = (field: string, value: any) => {
+    onDealChange(field, value);
+    const dbField = field === 'contract_date' ? 'contract_execution_date' : field;
+    queueSave?.(dbField, value);
   };
 
   const inputClasses = 'w-full bg-subtle border border-gray-200 rounded-md px-3 py-1.5 text-sm text-gray-800 focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none mt-0.5';
@@ -50,7 +59,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
           <div className="relative">
             <select
               value={deal.stage}
-              onChange={(e) => handleFieldUpdate('stage', e.target.value)}
+              onChange={(e) => handleImmediateSave('stage', e.target.value)}
               className={cn(
                 'w-full text-sm font-semibold rounded-md px-3 py-2 border appearance-none cursor-pointer transition-all',
                 'focus:ring-2 focus:ring-offset-1 focus:ring-primary/30',
@@ -66,7 +75,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
           <label className="text-caption text-gray-500 font-medium block mb-1">Type</label>
           <select
             value={deal.deal_type}
-            onChange={(e) => handleFieldUpdate('deal_type', e.target.value)}
+            onChange={(e) => handleImmediateSave('deal_type', e.target.value)}
             className={cn(inputClasses, 'cursor-pointer mt-0')}
           >
             {DEAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -120,8 +129,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <input
                 type="number"
                 value={deal.purchase_price}
-                onChange={e => onDealChange('purchase_price', Number(e.target.value))}
-                onBlur={e => handleFieldUpdate('purchase_price', Number(e.target.value))}
+                onChange={e => handleFieldChange('purchase_price', Number(e.target.value))}
                 className={inputClasses}
               />
             </div>
@@ -130,8 +138,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <input
                 type="number"
                 value={deal.expected_sales_price}
-                onChange={e => onDealChange('expected_sales_price', Number(e.target.value))}
-                onBlur={e => handleFieldUpdate('expected_sales_price', Number(e.target.value))}
+                onChange={e => handleFieldChange('expected_sales_price', Number(e.target.value))}
                 className={inputClasses}
               />
             </div>
@@ -150,8 +157,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
                   <input
                     type="number"
                     value={deal.seller_bottom_price}
-                    onChange={e => onDealChange('seller_bottom_price', Number(e.target.value))}
-                    onBlur={e => handleFieldUpdate('seller_bottom_price', Number(e.target.value))}
+                    onChange={e => handleFieldChange('seller_bottom_price', Number(e.target.value))}
                     className={inputClasses}
                   />
                 </div>
@@ -162,8 +168,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
                   <input
                     type="number"
                     value={deal.double_close_offer}
-                    onChange={e => onDealChange('double_close_offer', Number(e.target.value))}
-                    onBlur={e => handleFieldUpdate('double_close_offer', Number(e.target.value))}
+                    onChange={e => handleFieldChange('double_close_offer', Number(e.target.value))}
                     className={inputClasses}
                   />
                 </div>
@@ -174,8 +179,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
                   <input
                     type="number"
                     value={deal.realtor_price_opinion}
-                    onChange={e => onDealChange('realtor_price_opinion', Number(e.target.value))}
-                    onBlur={e => handleFieldUpdate('realtor_price_opinion', Number(e.target.value))}
+                    onChange={e => handleFieldChange('realtor_price_opinion', Number(e.target.value))}
                     className={inputClasses}
                   />
                 </div>
@@ -189,7 +193,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
       </Section>
 
       {/* Fees & Profit — default open */}
-      <FeesAndProfit deal={deal} spread={spread} onDealChange={onDealChange} handleFieldUpdate={handleFieldUpdate} inputClasses={inputClasses} />
+      <FeesAndProfit deal={deal} spread={spread} onDealChange={onDealChange} queueSave={queueSave} inputClasses={inputClasses} />
 
       {/* Dates — default open */}
       <Section icon={<Calendar size={13} />} title="Dates" defaultOpen>
@@ -200,8 +204,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <input
                 type="date"
                 value={deal.contract_date === 'TBD' ? '' : deal.contract_date}
-                onChange={e => onDealChange('contract_date', e.target.value)}
-                onBlur={e => handleFieldUpdate('contract_date', e.target.value)}
+                onChange={e => handleFieldChange('contract_date', e.target.value)}
                 className={inputClasses}
               />
             </div>
@@ -210,8 +213,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <input
                 type="date"
                 value={deal.close_date === 'TBD' ? '' : deal.close_date}
-                onChange={e => onDealChange('close_date', e.target.value)}
-                onBlur={e => handleFieldUpdate('close_date', e.target.value)}
+                onChange={e => handleFieldChange('close_date', e.target.value)}
                 className={inputClasses}
               />
             </div>
@@ -222,8 +224,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <input
                 type="date"
                 value={deal.contract_end_date}
-                onChange={e => onDealChange('contract_end_date', e.target.value)}
-                onBlur={e => handleFieldUpdate('contract_end_date', e.target.value)}
+                onChange={e => handleFieldChange('contract_end_date', e.target.value)}
                 className={inputClasses}
               />
             </div>
@@ -337,8 +338,7 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
         <label className="text-caption text-gray-500 font-medium block mb-1.5">Notes</label>
         <textarea
           value={deal.notes || ''}
-          onChange={e => onDealChange('notes', e.target.value)}
-          onBlur={e => handleFieldUpdate('notes', e.target.value)}
+          onChange={e => handleFieldChange('notes', e.target.value)}
           className={cn(inputClasses, 'min-h-[80px] resize-none mt-0')}
           placeholder="Add notes..."
         />
@@ -353,9 +353,9 @@ const FeesAndProfit: React.FC<{
   deal: DealViewData;
   spread: number;
   onDealChange: (field: string, value: any) => void;
-  handleFieldUpdate: (field: string, value: any) => Promise<void>;
+  queueSave?: (field: string, value: any) => void;
   inputClasses: string;
-}> = ({ deal, spread, onDealChange, handleFieldUpdate, inputClasses }) => {
+}> = ({ deal, spread, onDealChange, queueSave, inputClasses }) => {
   const transactionalFundingFee = deal.transactional_funding_fee || 0;
   const realtorFeePercent = deal.realtor_fee_percent || 0;
   const realtorFeeAmount = deal.realtor_fee_amount || 0;
@@ -368,28 +368,27 @@ const FeesAndProfit: React.FC<{
   const totalFees = transactionalFundingFee + realtorFeeAmount + improvementCosts + miscFees;
   const realizedGrossProfit = spread - totalFees;
 
+  /** Debounced save helper for fee fields */
+  const handleFeeChange = (field: string, value: any) => {
+    onDealChange(field, value);
+    queueSave?.(field, value);
+  };
+
   const handleRealtorPercentChange = (percent: number) => {
     onDealChange('realtor_fee_percent', percent);
     const calculatedAmount = Math.round((deal.expected_sales_price * (percent / 100)) * 100) / 100;
     onDealChange('realtor_fee_amount', calculatedAmount);
-  };
-
-  const handleRealtorPercentBlur = async (percent: number) => {
-    const calculatedAmount = Math.round((deal.expected_sales_price * (percent / 100)) * 100) / 100;
-    await handleFieldUpdate('realtor_fee_percent', percent);
-    await handleFieldUpdate('realtor_fee_amount', calculatedAmount);
+    // Queue both fields — they batch together in the pending object
+    queueSave?.('realtor_fee_percent', percent);
+    queueSave?.('realtor_fee_amount', calculatedAmount);
   };
 
   const handleJlPercentChange = (percent: number) => {
     onDealChange('jl_share_percent', percent);
     const calculatedAmount = Math.round((realizedGrossProfit * (percent / 100)) * 100) / 100;
     onDealChange('jl_share_amount', calculatedAmount);
-  };
-
-  const handleJlPercentBlur = async (percent: number) => {
-    const calculatedAmount = Math.round((realizedGrossProfit * (percent / 100)) * 100) / 100;
-    await handleFieldUpdate('jl_share_percent', percent);
-    await handleFieldUpdate('jl_share_amount', calculatedAmount);
+    queueSave?.('jl_share_percent', percent);
+    queueSave?.('jl_share_amount', calculatedAmount);
   };
 
   return (
@@ -403,8 +402,7 @@ const FeesAndProfit: React.FC<{
               type="number"
               value={transactionalFundingFee || ''}
               placeholder="0"
-              onChange={e => onDealChange('transactional_funding_fee', Number(e.target.value))}
-              onBlur={e => handleFieldUpdate('transactional_funding_fee', Number(e.target.value))}
+              onChange={e => handleFeeChange('transactional_funding_fee', Number(e.target.value))}
               className={inputClasses}
             />
           </div>
@@ -414,8 +412,7 @@ const FeesAndProfit: React.FC<{
               type="number"
               value={improvementCosts || ''}
               placeholder="0"
-              onChange={e => onDealChange('improvement_costs', Number(e.target.value))}
-              onBlur={e => handleFieldUpdate('improvement_costs', Number(e.target.value))}
+              onChange={e => handleFeeChange('improvement_costs', Number(e.target.value))}
               className={inputClasses}
             />
           </div>
@@ -433,7 +430,6 @@ const FeesAndProfit: React.FC<{
               value={realtorFeePercent || ''}
               placeholder="0"
               onChange={e => handleRealtorPercentChange(Number(e.target.value))}
-              onBlur={e => handleRealtorPercentBlur(Number(e.target.value))}
               className={inputClasses}
             />
           </div>
@@ -443,8 +439,7 @@ const FeesAndProfit: React.FC<{
               type="number"
               value={realtorFeeAmount || ''}
               placeholder="0"
-              onChange={e => onDealChange('realtor_fee_amount', Number(e.target.value))}
-              onBlur={e => handleFieldUpdate('realtor_fee_amount', Number(e.target.value))}
+              onChange={e => handleFeeChange('realtor_fee_amount', Number(e.target.value))}
               className={inputClasses}
             />
           </div>
@@ -457,8 +452,7 @@ const FeesAndProfit: React.FC<{
             type="number"
             value={miscFees || ''}
             placeholder="0"
-            onChange={e => onDealChange('misc_fees', Number(e.target.value))}
-            onBlur={e => handleFieldUpdate('misc_fees', Number(e.target.value))}
+            onChange={e => handleFeeChange('misc_fees', Number(e.target.value))}
             className={inputClasses}
           />
         </div>
@@ -507,7 +501,6 @@ const FeesAndProfit: React.FC<{
                 value={jlSharePercent || ''}
                 placeholder="0"
                 onChange={e => handleJlPercentChange(Number(e.target.value))}
-                onBlur={e => handleJlPercentBlur(Number(e.target.value))}
                 className={inputClasses}
               />
             </div>
@@ -517,8 +510,7 @@ const FeesAndProfit: React.FC<{
                 type="number"
                 value={jlShareAmount || ''}
                 placeholder="0"
-                onChange={e => onDealChange('jl_share_amount', Number(e.target.value))}
-                onBlur={e => handleFieldUpdate('jl_share_amount', Number(e.target.value))}
+                onChange={e => handleFeeChange('jl_share_amount', Number(e.target.value))}
                 className={inputClasses}
               />
             </div>

@@ -142,11 +142,22 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
   };
 
   const handleFieldChange = async (taskId: string, field: string, value: any) => {
+    const oldValue = tasks.find(t => t.id === taskId)?.[field];
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: value } : t));
-    try {
-      await updateTaskWithLog(taskId, { [field]: value });
-    } catch (err) {
-      console.error('Task field update failed:', err);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await updateTaskWithLog(taskId, { [field]: value });
+        return; // Success
+      } catch (err) {
+        if (attempt >= 2) {
+          console.error('Task field update failed after 3 attempts:', err);
+          // Revert optimistic update so UI reflects actual DB state
+          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: oldValue } : t));
+          return;
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
     }
   };
 

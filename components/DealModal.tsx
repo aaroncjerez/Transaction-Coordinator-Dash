@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { X, ExternalLink, CheckCircle2, Loader2 } from 'lucide-react';
 import { Deadline } from '../types';
 import { DealViewData, mapDealData } from '../lib/deal-utils';
-import { fetchDealById, getDeadlinesByDeal } from '../lib/database';
+import { fetchDealById, getDeadlinesByDeal, updateDealFields } from '../lib/database';
 import { getStageColor } from '../constants';
 import { cn } from '../lib/utils';
 import { DealOverview } from './deal/DealOverview';
@@ -10,7 +10,9 @@ import { DealTasks } from './deal/DealTasks';
 import { DealFilesAndActivity } from './deal/DealFilesAndActivity';
 import { DealChat } from './DealChat';
 import { SkeletonModal } from './ui/Skeleton';
+import { SaveIndicator } from './ui/SaveIndicator';
 import type { UndoAction } from '../hooks/useUndoStack';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 type ModalTab = 'summary' | 'tasks' | 'files-activity' | 'chat';
 
@@ -57,6 +59,44 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
   const [fubSyncStatus, setFubSyncStatus] = useState<'idle' | 'synced' | 'pending' | null>(null);
   const modalSize = useModalSize();
   const isTwoCol = modalSize !== 'default';
+  const prevDealIdRef = useRef<string | null>(null);
+
+  // Auto-save: debounced persistence for deal field edits
+  const { queueSave, flush, status: saveStatus } = useAutoSave({
+    saveFn: async (fields) => {
+      if (!dealId) throw new Error('No deal ID');
+      return updateDealFields(dealId, fields);
+    },
+    debounceMs: 800,
+    maxRetries: 3,
+    onSaved: async (result) => {
+      try {
+        await onDealUpdate?.();
+      } catch (err) {
+        console.error('[DealModal] Pipeline refresh after auto-save failed:', err);
+      }
+      if (result?.fubPush?.queued) {
+        setFubSyncStatus(result.fubPush.success ? 'synced' : 'pending');
+      }
+    },
+    onError: (error, failedFields) => {
+      console.error('[DealModal] Auto-save failed after retries:', error, failedFields);
+    },
+  });
+
+  // Flush pending saves when switching deals
+  useEffect(() => {
+    if (prevDealIdRef.current && prevDealIdRef.current !== dealId) {
+      flush();
+    }
+    prevDealIdRef.current = dealId;
+  }, [dealId, flush]);
+
+  // Close handler: flush pending saves before closing
+  const handleClose = useCallback(async () => {
+    await flush();
+    onClose();
+  }, [flush, onClose]);
 
   const fetchDeal = useCallback(async (id: string) => {
     setLoading(true);
@@ -89,11 +129,11 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
   // Close on Escape
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   // Auto-dismiss FUB sync indicator after 3s
   useEffect(() => {
@@ -146,11 +186,11 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/30 z-40 animate-fade-in"
-        onClick={onClose}
+        onClick={handleClose}
       />
 
       {/* Centered Modal */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={handleClose}>
         <div
           className={cn(
             'bg-white rounded-drawer shadow-lg w-full flex flex-col animate-modal-scale-in max-h-[90vh]',
@@ -196,7 +236,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                       </a>
                     )}
                     <button
-                      onClick={onClose}
+                      onClick={handleClose}
                       className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                       aria-label="Close modal"
                     >
@@ -205,7 +245,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                   </div>
                 </div>
 
-                {/* Stage badge + FUB sync indicator */}
+                {/* Stage badge + save/sync indicators */}
                 <div className="flex items-center gap-2">
                   {stageColor && (
                     <span className={cn(
@@ -215,6 +255,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                       {deal.stage}
                     </span>
                   )}
+                  <SaveIndicator status={saveStatus} />
                   {fubSyncStatus === 'synced' && (
                     <span className="inline-flex items-center gap-1 text-micro font-medium text-emerald-600 animate-fade-in">
                       <CheckCircle2 size={12} />
@@ -258,7 +299,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                   <div className="flex-1 flex overflow-hidden min-h-0">
                     {/* Left column — Overview */}
                     <div className="w-[58%] overflow-y-auto scrollbar-thin px-5 py-4 border-r border-gray-100">
-                      <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} deadlines={deadlines} />
+                      <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} />
                     </div>
                     {/* Right column — Tasks */}
                     <div className="w-[42%] overflow-y-auto scrollbar-thin px-4 py-4">
@@ -281,7 +322,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                 /* Single-column layout (<1280px) */
                 <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
                   {activeTab === 'summary' && (
-                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} deadlines={deadlines} />
+                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} />
                   )}
                   {activeTab === 'tasks' && stageColor && (
                     <DealTasks dealId={deal.id} stageHex={stageColor.hex} onUndoableAction={onUndoableAction} />
