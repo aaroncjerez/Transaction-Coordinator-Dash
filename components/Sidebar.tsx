@@ -43,8 +43,16 @@ export const Sidebar: React.FC = () => {
     const loadCounts = async () => {
       try {
         const [deals, tasks] = await Promise.all([fetchAllDeals(), fetchAllTasks()]);
-        setDealCount((deals as any[]).filter(d => d.stage !== 'Cancelled').length);
-        setPendingTaskCount((tasks as any[]).filter(t => t.status === 'To Do' || t.status === 'In Progress').length);
+        const cancelledDealIds = new Set(
+          (deals as any[]).filter(d => d.stage === 'Cancelled').map(d => d.id)
+        );
+        setDealCount((deals as any[]).length - cancelledDealIds.size);
+        setPendingTaskCount(
+          (tasks as any[]).filter(t =>
+            (t.status === 'To Do' || t.status === 'In Progress') &&
+            !cancelledDealIds.has(t.deal_id)
+          ).length
+        );
       } catch { /* ignore */ }
     };
 
