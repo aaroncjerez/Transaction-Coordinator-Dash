@@ -16,7 +16,7 @@ import { getStageColor, PIPELINE_STAGES, STAGE_ORDER } from '../constants';
 import { useOpenCommandPalette } from '../components/Layout';
 import type { DealStage } from '../types';
 
-type StatusFilter = 'all' | 'To Do' | 'In Progress' | 'Done';
+type StatusFilter = 'active' | 'all' | 'To Do' | 'In Progress' | 'Done';
 type ViewMode = 'by-deal' | 'by-stage' | 'all';
 
 export const Tasks: React.FC = () => {
@@ -29,7 +29,8 @@ export const Tasks: React.FC = () => {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
 
   // Filters & view
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
+  const [showCompleted, setShowCompleted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('by-deal');
 
@@ -106,7 +107,9 @@ export const Tasks: React.FC = () => {
   // ---- Filtered tasks ----
   const filteredTasks = useMemo(() => {
     let filtered = [...tasks];
-    if (statusFilter !== 'all') {
+    if (statusFilter === 'active') {
+      filtered = filtered.filter(t => t.status === 'To Do' || t.status === 'In Progress');
+    } else if (statusFilter !== 'all') {
       filtered = filtered.filter(t => t.status === statusFilter);
     }
     if (searchQuery) {
@@ -116,6 +119,16 @@ export const Tasks: React.FC = () => {
     return filtered;
   }, [tasks, statusFilter, searchQuery]);
 
+  // Completed tasks (Done + Skipped) for the collapsible section
+  const completedTasks = useMemo(() => {
+    let filtered = tasks.filter(t => t.status === 'Done' || t.status === 'Skipped');
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter(t => t.title.toLowerCase().includes(q));
+    }
+    return filtered;
+  }, [tasks, searchQuery]);
+
   // Group by deal for "by-deal" view
   const dealsMap = useMemo(() => {
     const map = new Map<string, Deal>();
@@ -124,8 +137,8 @@ export const Tasks: React.FC = () => {
   }, [deals]);
 
   // Counts
-  const pendingCount = tasks.filter(t => t.status !== 'Done').length;
-  const doneCount = tasks.filter(t => t.status === 'Done').length;
+  const activeCount = tasks.filter(t => t.status === 'To Do' || t.status === 'In Progress').length;
+  const doneCount = tasks.filter(t => t.status === 'Done' || t.status === 'Skipped').length;
 
   // ---- Status filter chip ----
   const FilterChip: React.FC<{ label: string; isActive: boolean; onClick: () => void; count?: number }> = ({
@@ -368,7 +381,7 @@ export const Tasks: React.FC = () => {
       {/* TopBar */}
       <TopBar
         title="Tasks"
-        subtitle={`${pendingCount} pending · ${doneCount} done`}
+        subtitle={`${activeCount} active · ${doneCount} done`}
         onSearchClick={openCommandPalette}
         actions={
           <div className="flex items-center gap-1 bg-subtle rounded-md p-0.5">
@@ -408,10 +421,10 @@ export const Tasks: React.FC = () => {
         <div className="w-px h-6 bg-gray-200" />
 
         {/* Status chips */}
-        <FilterChip label="All" isActive={statusFilter === 'all'} onClick={() => setStatusFilter('all')} count={tasks.length} />
+        <FilterChip label="Active" isActive={statusFilter === 'active'} onClick={() => setStatusFilter('active')} count={activeCount} />
         <FilterChip label="To Do" isActive={statusFilter === 'To Do'} onClick={() => setStatusFilter('To Do')} count={tasks.filter(t => t.status === 'To Do').length} />
         <FilterChip label="In Progress" isActive={statusFilter === 'In Progress'} onClick={() => setStatusFilter('In Progress')} count={tasks.filter(t => t.status === 'In Progress').length} />
-        <FilterChip label="Done" isActive={statusFilter === 'Done'} onClick={() => setStatusFilter('Done')} count={doneCount} />
+        <FilterChip label="All" isActive={statusFilter === 'all'} onClick={() => setStatusFilter('all')} count={tasks.length} />
       </div>
 
       {/* Content */}
@@ -426,6 +439,29 @@ export const Tasks: React.FC = () => {
               {viewMode === 'by-deal' && renderByDeal()}
               {viewMode === 'by-stage' && renderByStage()}
               {viewMode === 'all' && renderAll()}
+
+              {/* Collapsible completed section — shown on 'active' filter */}
+              {statusFilter === 'active' && completedTasks.length > 0 && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => setShowCompleted(prev => !prev)}
+                    className="flex items-center gap-2 text-caption text-gray-400 hover:text-gray-600 transition-colors mb-2"
+                  >
+                    <ChevronRight
+                      size={12}
+                      className={cn('transition-transform', showCompleted && 'rotate-90')}
+                    />
+                    <span className="font-medium">{completedTasks.length} completed</span>
+                  </button>
+                  {showCompleted && (
+                    <div className="bg-white rounded-card border border-gray-200 overflow-hidden divide-y divide-gray-100 opacity-60">
+                      {completedTasks.map(task => (
+                        <TaskRow key={task.id} task={task} showDealName />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>
