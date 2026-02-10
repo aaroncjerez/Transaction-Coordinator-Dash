@@ -104,9 +104,29 @@ export const Tasks: React.FC = () => {
     });
   };
 
-  // ---- Filtered tasks ----
+  // Group by deal for "by-deal" view
+  const dealsMap = useMemo(() => {
+    const map = new Map<string, Deal>();
+    deals.forEach(d => map.set(d.id, d));
+    return map;
+  }, [deals]);
+
+  // Exclude tasks belonging to cancelled deals
+  const cancelledDealIds = useMemo(() => {
+    return new Set(deals.filter(d => d.stage === 'Cancelled').map(d => d.id));
+  }, [deals]);
+
+  const activeDealTasks = useMemo(() => {
+    return tasks.filter(t => !t.deal_id || !cancelledDealIds.has(t.deal_id));
+  }, [tasks, cancelledDealIds]);
+
+  // Counts (based on active-deal tasks only)
+  const activeCount = activeDealTasks.filter(t => t.status === 'To Do' || t.status === 'In Progress').length;
+  const doneCount = activeDealTasks.filter(t => t.status === 'Done' || t.status === 'Skipped').length;
+
+  // ---- Filtered tasks (cancelled-deal tasks already excluded) ----
   const filteredTasks = useMemo(() => {
-    let filtered = [...tasks];
+    let filtered = [...activeDealTasks];
     if (statusFilter === 'active') {
       filtered = filtered.filter(t => t.status === 'To Do' || t.status === 'In Progress');
     } else if (statusFilter !== 'all') {
@@ -117,28 +137,17 @@ export const Tasks: React.FC = () => {
       filtered = filtered.filter(t => t.title.toLowerCase().includes(q));
     }
     return filtered;
-  }, [tasks, statusFilter, searchQuery]);
+  }, [activeDealTasks, statusFilter, searchQuery]);
 
   // Completed tasks (Done + Skipped) for the collapsible section
   const completedTasks = useMemo(() => {
-    let filtered = tasks.filter(t => t.status === 'Done' || t.status === 'Skipped');
+    let filtered = activeDealTasks.filter(t => t.status === 'Done' || t.status === 'Skipped');
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       filtered = filtered.filter(t => t.title.toLowerCase().includes(q));
     }
     return filtered;
-  }, [tasks, searchQuery]);
-
-  // Group by deal for "by-deal" view
-  const dealsMap = useMemo(() => {
-    const map = new Map<string, Deal>();
-    deals.forEach(d => map.set(d.id, d));
-    return map;
-  }, [deals]);
-
-  // Counts
-  const activeCount = tasks.filter(t => t.status === 'To Do' || t.status === 'In Progress').length;
-  const doneCount = tasks.filter(t => t.status === 'Done' || t.status === 'Skipped').length;
+  }, [activeDealTasks, searchQuery]);
 
   // ---- Status filter chip ----
   const FilterChip: React.FC<{ label: string; isActive: boolean; onClick: () => void; count?: number }> = ({
@@ -218,6 +227,7 @@ export const Tasks: React.FC = () => {
 
   const renderByDeal = () => {
     const dealGroups = deals
+      .filter(deal => deal.stage !== 'Cancelled')
       .map(deal => ({
         deal,
         tasks: filteredTasks.filter(t => t.deal_id === deal.id),
@@ -422,9 +432,9 @@ export const Tasks: React.FC = () => {
 
         {/* Status chips */}
         <FilterChip label="Active" isActive={statusFilter === 'active'} onClick={() => setStatusFilter('active')} count={activeCount} />
-        <FilterChip label="To Do" isActive={statusFilter === 'To Do'} onClick={() => setStatusFilter('To Do')} count={tasks.filter(t => t.status === 'To Do').length} />
-        <FilterChip label="In Progress" isActive={statusFilter === 'In Progress'} onClick={() => setStatusFilter('In Progress')} count={tasks.filter(t => t.status === 'In Progress').length} />
-        <FilterChip label="All" isActive={statusFilter === 'all'} onClick={() => setStatusFilter('all')} count={tasks.length} />
+        <FilterChip label="To Do" isActive={statusFilter === 'To Do'} onClick={() => setStatusFilter('To Do')} count={activeDealTasks.filter(t => t.status === 'To Do').length} />
+        <FilterChip label="In Progress" isActive={statusFilter === 'In Progress'} onClick={() => setStatusFilter('In Progress')} count={activeDealTasks.filter(t => t.status === 'In Progress').length} />
+        <FilterChip label="All" isActive={statusFilter === 'all'} onClick={() => setStatusFilter('all')} count={activeDealTasks.length} />
       </div>
 
       {/* Content */}
