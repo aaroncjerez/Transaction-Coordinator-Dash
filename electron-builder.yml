@@ -1,0 +1,31 @@
+appId: com.jerezland.jerez-land-tc
+productName: Jerez Land TC
+copyright: Copyright © 2026 Jerez Land
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron-dist/**/*
+  - .env
+  - "!node_modules/**/*.{md,txt,map}"
+  - "!node_modules/**/{test,tests,__tests__}/**"
+
+mac:
+  category: public.app-category.business
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - universal
+  hardenedRuntime: false
+  darkModeSupport: true
+
+dmg:
+  title: Jerez Land TC
+  artifactName: "Jerez-Land-TC-${version}.${ext}"
+
+# Rebuild better-sqlite3 for the target
+npmRebuild: true

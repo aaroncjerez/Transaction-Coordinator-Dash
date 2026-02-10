@@ -1,7 +1,10 @@
 {
-  "name": "copy-of-nexus-analytics-dashboard",
+  "name": "jerez-land-tc",
+  "productName": "Jerez Land TC",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Transaction Coordinator Dashboard",
+  "author": "Jerez Land",
   "type": "module",
   "main": "electron-dist/electron/main.js",
   "scripts": {
@@ -10,7 +13,7 @@
     "dev:electron": "electron .",
     "build": "vite build && tsc -p electron/tsconfig.json",
     "start": "electron .",
-    "package": "electron-builder",
+    "package": "npm run build && electron-builder --mac",
     "preview": "vite preview"
   },
   "dependencies": {

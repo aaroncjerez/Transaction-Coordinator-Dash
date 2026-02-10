@@ -22,7 +22,6 @@ import {
   triggerFubPersonSync,
   onFubPersonSyncComplete,
   updateDealFields,
-  updateTaskWithLog,
   checkStageChange,
   insertDeal,
   getSetting,
@@ -540,60 +539,6 @@ export const Pipeline: React.FC = () => {
     }
   };
 
-  // ---- Quick Actions ----
-
-  const handleQuickCompleteTask = async (taskId: string) => {
-    try {
-      await updateTaskWithLog(taskId, { status: 'Done' });
-      await fetchData();
-
-      undoStack.pushUndo({
-        type: 'task_status_change',
-        label: 'Task completed',
-        timestamp: Date.now(),
-        revert: async () => {
-          await updateTaskWithLog(taskId, { status: 'To Do' });
-          await fetchData();
-        },
-      });
-
-      showToast({
-        message: 'Task completed',
-        type: 'success',
-        action: { label: 'Undo', onClick: () => undoStack.undo() },
-      });
-    } catch (err) {
-      console.error('Quick task complete failed:', err);
-      showToast({ message: 'Failed to complete task', type: 'error' });
-    }
-  };
-
-  const handleQuickAdvanceStage = async (dealId: string) => {
-    const deal = deals.find(d => d.id === dealId);
-    if (!deal) return;
-    const currentIdx = PIPELINE_STAGES.indexOf(deal.stage as any);
-    if (currentIdx < 0 || currentIdx >= PIPELINE_STAGES.length - 1) return;
-    const nextStage = PIPELINE_STAGES[currentIdx + 1];
-
-    try {
-      const result = await checkStageChange(dealId, nextStage);
-      if (!result.canProceed && result.incompleteTasks && result.incompleteTasks.length > 0) {
-        setStageDialog({
-          dealId,
-          dealName: deal.deal_name,
-          fromStage: deal.stage,
-          toStage: nextStage,
-          incompleteTasks: result.incompleteTasks,
-        });
-        return;
-      }
-      await executeStageChange(dealId, nextStage);
-    } catch (err) {
-      console.error('Quick advance failed:', err);
-      showToast({ message: 'Failed to advance stage', type: 'error' });
-    }
-  };
-
   // ---- Restore Cancelled Deal ----
 
   const handleRestoreDeal = async (dealId: string) => {
@@ -918,8 +863,6 @@ export const Pipeline: React.FC = () => {
                   focusedDealId={focusedDealId}
                   compact={isCompact}
                   dimmedDealIds={dimmedDealIds}
-                  onCompleteTask={handleQuickCompleteTask}
-                  onAdvanceStage={handleQuickAdvanceStage}
                   isSelectMode={isSelectMode}
                   selectedDealIds={selectedDealIds}
                   onToggleSelect={handleToggleSelect}
@@ -960,9 +903,6 @@ export const Pipeline: React.FC = () => {
               {cancelledDeals.length} Cancelled Deal{cancelledDeals.length !== 1 ? 's' : ''}
             </span>
             <span className="flex-1" />
-            <span className="text-micro text-gray-400">
-              {showCancelled ? 'Click to hide' : 'Click to view'}
-            </span>
           </button>
 
           {showCancelled && (

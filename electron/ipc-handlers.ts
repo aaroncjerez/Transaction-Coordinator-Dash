@@ -1,5 +1,5 @@
 import { ipcMain, app } from 'electron';
-import { getDb } from './database.js';
+import { getDb, getDataDir } from './database.js';
 import { seedTasksForStage, seedTasksUpToStage } from './rule-engine.js';
 import { chunkTextParagraphAware } from './chunker.js';
 import { triggerFubSync } from './fub-file-sync.js';
@@ -584,7 +584,7 @@ export function registerIpcHandlers(): void {
 
   // ===== FILES =====
 
-  const FILE_STORAGE_DIR = path.join(app.getPath('userData'), 'transaction-docs');
+  const FILE_STORAGE_DIR = path.join(getDataDir(), 'transaction-docs');
 
   ipcMain.handle('files:upload', (_event, dealId: string, categoryKey: string, fileName: string, buffer: ArrayBuffer) => {
     const fileBuffer = Buffer.from(buffer);

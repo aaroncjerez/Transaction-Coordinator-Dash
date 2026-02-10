@@ -8,13 +8,12 @@ import { cn } from '../lib/utils';
 import { TopBar } from '../components/TopBar';
 import { DealOverview } from '../components/deal/DealOverview';
 import { DealTasks } from '../components/deal/DealTasks';
-import { DealDeadlines } from '../components/deal/DealDeadlines';
 import { DealFiles } from '../components/deal/DealFiles';
 import { DealAnalyzer } from '../components/DealAnalyzer';
 import { DealChat } from '../components/DealChat';
 import { DealActivity } from '../components/deal/DealActivity';
 
-type DetailTab = 'overview' | 'tasks' | 'deadlines' | 'files' | 'activity' | 'analysis' | 'chat';
+type DetailTab = 'overview' | 'tasks' | 'files' | 'activity' | 'analysis' | 'chat';
 
 export const DealDetail: React.FC = () => {
   const { id } = useParams();
@@ -52,7 +51,6 @@ export const DealDetail: React.FC = () => {
   const tabs: { id: DetailTab; label: string; icon?: React.ReactNode }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'tasks', label: 'Tasks' },
-    { id: 'deadlines', label: 'Deadlines' },
     { id: 'files', label: 'Files' },
     { id: 'activity', label: 'Activity' },
     { id: 'analysis', label: 'Analysis', icon: <Sparkles size={14} /> },
@@ -116,9 +114,6 @@ export const DealDetail: React.FC = () => {
           )}
           {activeTab === 'tasks' && (
             <DealTasks dealId={deal.id} stageHex={stageColor.hex} />
-          )}
-          {activeTab === 'deadlines' && (
-            <DealDeadlines dealId={deal.id} />
           )}
           {activeTab === 'files' && (
             <DealFiles dealId={deal.id} fubPersonId={deal.fub_person_id} />

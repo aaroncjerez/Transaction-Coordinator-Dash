@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Circle, CheckCircle2, Clock, DollarSign, AlertTriangle, ArrowRight, ChevronRight } from 'lucide-react';
+import { Circle, CheckCircle2, Clock, DollarSign, AlertTriangle, ArrowRight } from 'lucide-react';
 import { Deal, Task, Deadline, FubSyncStatus } from '../types';
 import { getStageColor } from '../constants';
 import { cn } from '../lib/utils';
@@ -13,8 +13,6 @@ interface KanbanCardProps {
   isFocused?: boolean;
   compact?: boolean;
   isDimmed?: boolean;
-  onCompleteTask?: (taskId: string) => void;
-  onAdvanceStage?: (dealId: string) => void;
   isSelectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (dealId: string) => void;
@@ -56,7 +54,7 @@ const getSyncDot = (status: FubSyncStatus | null | undefined, hasFub: boolean): 
 
 export const KanbanCard: React.FC<KanbanCardProps> = ({
   deal, nextTask, nearestDeadline, syncStatus, onClick, isFocused, compact, isDimmed,
-  onCompleteTask, onAdvanceStage, isSelectMode, isSelected, onToggleSelect,
+  isSelectMode, isSelected, onToggleSelect,
 }) => {
   const cardRef = useRef<HTMLButtonElement>(null);
 
@@ -109,7 +107,7 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
           : 'border-gray-200 hover:border-gray-300',
       )}
     >
-      {/* Row 1: Name + sync dot + quick actions on hover */}
+      {/* Row 1: Name + sync dot */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {isSelectMode && (
@@ -130,32 +128,7 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
             {deal.deal_name}
           </h3>
         </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {/* Quick actions — visible on hover only */}
-          {(onCompleteTask || onAdvanceStage) && (
-            <div className="hidden group-hover:flex items-center gap-0.5 mr-1">
-              {nextTask && onCompleteTask && (
-                <button
-                  onClick={e => { e.stopPropagation(); onCompleteTask(nextTask.id); }}
-                  className="p-1 rounded hover:bg-emerald-50 text-gray-400 hover:text-emerald-600 transition-colors"
-                  title={`Complete: ${nextTask.title}`}
-                >
-                  <CheckCircle2 size={14} />
-                </button>
-              )}
-              {onAdvanceStage && deal.stage !== 'Sold' && deal.stage !== 'Cancelled' && (
-                <button
-                  onClick={e => { e.stopPropagation(); onAdvanceStage(deal.id); }}
-                  className="p-1 rounded hover:bg-blue-50 text-gray-400 hover:text-blue-600 transition-colors"
-                  title="Advance to next stage"
-                >
-                  <ChevronRight size={14} />
-                </button>
-              )}
-            </div>
-          )}
-          <span className={cn('w-2 h-2 rounded-full mt-1.5', syncDot.color)} title={syncDot.title} />
-        </div>
+        <span className={cn('w-2 h-2 rounded-full mt-1.5 flex-shrink-0', syncDot.color)} title={syncDot.title} />
       </div>
 
       {/* Row 2: Deal type chip + compact urgency OR full subtitle */}

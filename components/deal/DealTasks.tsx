@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Check, Trash2, Bell, Plus, ChevronDown, Calendar, User, Flag } from 'lucide-react';
+import { Trash2, Bell, Plus, ChevronDown, ChevronRight, Calendar, User, Flag } from 'lucide-react';
 import {
   fetchTasksByDealId,
   updateTaskWithLog,
@@ -32,6 +32,7 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const addInputRef = useRef<HTMLInputElement>(null);
@@ -214,7 +215,7 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
 
       {/* Task List */}
       <div className="space-y-1">
-        {tasks.map(task => {
+        {tasks.filter(t => t.status !== 'Done').map(task => {
           const isExpanded = expandedTaskId === task.id;
           const taskReminders = (reminders[task.id] || []).filter(r => r.status === 'pending');
 
@@ -228,31 +229,14 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
                 )}
                 onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
               >
-                {/* Status circle */}
-                <button
-                  className="flex-shrink-0 mr-2"
-                  onClick={e => {
-                    e.stopPropagation();
-                    handleStatusChange(task, task.status === 'Done' ? 'To Do' : 'Done');
-                  }}
-                >
-                  <div className={cn(
-                    'w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors',
-                    task.status === 'Done'
-                      ? 'bg-emerald-500 border-emerald-500'
-                      : task.status === 'In Progress'
-                      ? 'border-primary bg-primary/10'
-                      : 'border-gray-300 hover:border-gray-400'
-                  )}>
-                    {task.status === 'Done' && <Check size={10} className="text-white" />}
-                  </div>
-                </button>
+                {/* Status dot */}
+                <span className={cn(
+                  'w-2 h-2 rounded-full flex-shrink-0 mr-2.5',
+                  task.status === 'In Progress' ? 'bg-primary' : 'bg-gray-300'
+                )} />
 
                 {/* Title */}
-                <span className={cn(
-                  'text-sm font-medium truncate flex-1 transition-colors',
-                  task.status === 'Done' ? 'text-gray-400 line-through' : 'text-gray-700'
-                )}>
+                <span className="text-sm font-medium truncate flex-1 text-gray-700">
                   {task.title}
                 </span>
 
@@ -268,7 +252,6 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
                   onClick={e => e.stopPropagation()}
                   className={cn(
                     'text-micro font-bold px-2 py-1 rounded-md border-0 cursor-pointer outline-none ring-1 ring-inset transition-all flex-shrink-0 ml-2',
-                    task.status === 'Done' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' :
                     task.status === 'In Progress' ? 'bg-primary-light text-primary ring-blue-200' :
                     'bg-white text-gray-600 ring-gray-200 hover:bg-gray-50'
                   )}
@@ -300,16 +283,6 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
               {/* Expanded Detail */}
               {isExpanded && (
                 <div className="px-3 py-3 bg-white border-t border-gray-100 space-y-3 animate-fade-in">
-                  {/* Description */}
-                  <textarea
-                    value={task.description || ''}
-                    onChange={e => setTasks(prev => prev.map(t => t.id === task.id ? { ...t, description: e.target.value } : t))}
-                    onBlur={e => handleFieldChange(task.id, 'description', e.target.value || null)}
-                    placeholder="Add a description..."
-                    rows={2}
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                  />
-
                   {/* Priority + Due Date + Assignee Row */}
                   <div className="flex flex-wrap gap-2">
                     <div className="flex items-center gap-1.5">
@@ -354,7 +327,7 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
                     value={task.notes || ''}
                     onChange={e => setTasks(prev => prev.map(t => t.id === task.id ? { ...t, notes: e.target.value } : t))}
                     onBlur={e => handleFieldChange(task.id, 'notes', e.target.value || null)}
-                    placeholder="Quick notes..."
+                    placeholder="Add notes..."
                     rows={1}
                     className="w-full text-micro border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                   />
@@ -462,9 +435,57 @@ export const DealTasks: React.FC<DealTasksProps> = ({ dealId, stageHex, onUndoab
         })}
       </div>
 
+      {/* Completed Tasks — collapsible */}
+      {completedTasks > 0 && (
+        <div>
+          <button
+            onClick={() => setShowCompleted(!showCompleted)}
+            className="flex items-center gap-1.5 text-caption text-gray-500 hover:text-gray-700 transition-colors py-1"
+          >
+            <ChevronRight
+              size={14}
+              className={cn('transition-transform', showCompleted && 'rotate-90')}
+            />
+            <span className="font-medium">{completedTasks} completed task{completedTasks !== 1 ? 's' : ''}</span>
+          </button>
+          {showCompleted && (
+            <div className="space-y-1 mt-1 animate-fade-in">
+              {tasks.filter(t => t.status === 'Done').map(task => (
+                <div key={task.id} className="rounded-md border border-gray-100 overflow-hidden">
+                  <div
+                    className="flex items-center px-3 py-2 bg-subtle hover:bg-gray-100 transition-all group cursor-pointer"
+                    onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 mr-2.5" />
+                    <span className="text-sm text-gray-400 line-through truncate flex-1">{task.title}</span>
+                    <select
+                      value={task.status}
+                      onChange={e => { e.stopPropagation(); handleStatusChange(task, e.target.value); }}
+                      onClick={e => e.stopPropagation()}
+                      className="text-micro font-bold px-2 py-1 rounded-md border-0 cursor-pointer outline-none ring-1 ring-inset bg-emerald-50 text-emerald-700 ring-emerald-200 flex-shrink-0 ml-2 transition-all"
+                    >
+                      <option value="To Do">To Do</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Done">Done</option>
+                    </select>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteTask(task); }}
+                      className="opacity-0 group-hover:opacity-100 ml-1.5 p-1 text-gray-400 hover:text-red-500 rounded transition-all flex-shrink-0"
+                      title="Remove task"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Inline Add Task */}
       <div className="flex items-center gap-2">
-        <div className="w-4 h-4 rounded-full border-2 border-dashed border-gray-300 flex-shrink-0" />
+        <Plus size={14} className="text-gray-400 flex-shrink-0" />
         <input
           ref={addInputRef}
           type="text"

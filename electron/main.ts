@@ -1,8 +1,8 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, protocol, net } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import dotenv from 'dotenv';
-import { initDatabase } from './database.js';
+import { initDatabase, backupDatabase } from './database.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { startAlertScheduler } from './alert-scheduler.js';
 import { startReminderScheduler } from './reminder-scheduler.js';
@@ -12,19 +12,37 @@ import { startFubFileSync } from './fub-file-sync.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const isDev = !app.isPackaged;
+
 // Load environment variables from .env in the project root
 // With rootDir="..", compiled output is at electron-dist/electron/main.js → go up 2 levels
 const envPath = path.join(__dirname, '..', '..', '.env');
 const envResult = dotenv.config({ path: envPath, override: true });
-if (envResult.error) {
-  // Fallback: try from cwd
+if (envResult.error && !app.isPackaged) {
+  // Fallback: try from cwd (dev only)
   dotenv.config({ path: path.join(process.cwd(), '.env') });
 }
-console.log('[Main] ENV path:', envPath, '| ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY);
+if (isDev) {
+  console.log('[Main] ENV path:', envPath, '| ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY);
+}
+
+// Register custom app:// protocol for serving renderer files in production
+// This avoids all file:// CORS/module issues in packaged Electron apps
+if (!isDev) {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'app',
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+      },
+    },
+  ]);
+}
 
 let mainWindow: BrowserWindow | null = null;
-
-const isDev = !app.isPackaged;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -41,13 +59,6 @@ function createWindow(): void {
     },
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
-  }
-
   // Forward renderer console messages to main process stdout (for debugging)
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     const levelName = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
@@ -56,12 +67,29 @@ function createWindow(): void {
     }
   });
 
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadURL('app://./index.html');
+  }
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
 app.whenReady().then(() => {
+  // In production, handle app:// protocol by serving from dist/ folder
+  if (!isDev) {
+    const distPath = path.join(__dirname, '..', '..', 'dist');
+    protocol.handle('app', (request) => {
+      const url = new URL(request.url);
+      const filePath = path.join(distPath, decodeURIComponent(url.pathname));
+      return net.fetch(pathToFileURL(filePath).toString());
+    });
+  }
+
   // Initialize SQLite database
   initDatabase();
 
@@ -79,6 +107,15 @@ app.whenReady().then(() => {
 
   // Start FUB file sync runner (checks every 5 min)
   startFubFileSync();
+
+  // Schedule automatic database backups every 30 minutes (keeps last 5)
+  setInterval(() => {
+    try {
+      backupDatabase();
+    } catch (err) {
+      console.error('[Main] Scheduled backup failed:', err);
+    }
+  }, 30 * 60 * 1000);
 
   // Create window
   createWindow();

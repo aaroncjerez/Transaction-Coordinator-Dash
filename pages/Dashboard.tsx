@@ -2,15 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, Clock, CheckSquare, TrendingUp, DollarSign,
-  ArrowRight, Calendar, LayoutGrid, Plus,
+  ArrowRight, Calendar, LayoutGrid,
 } from 'lucide-react';
 import { Deal, Task, Deadline, DealStage } from '../types';
 import { PIPELINE_STAGES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
 import { fetchAllDeals, fetchAllTasks, getAllDeadlines } from '../lib/database';
 import { TopBar } from '../components/TopBar';
-import { Button } from '../components/ui/Button';
-import { CreateTaskModal } from '../components/CreateTaskModal';
 import { useOpenCommandPalette } from '../components/Layout';
 import { usePreferences } from '../contexts/PreferencesContext';
 
@@ -42,14 +40,6 @@ export const Dashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showCreateTask, setShowCreateTask] = useState(false);
-
-  const refreshData = async () => {
-    const [d, t, dl] = await Promise.all([fetchAllDeals(), fetchAllTasks(), getAllDeadlines()]);
-    setDeals(d as Deal[]);
-    setTasks(t as Task[]);
-    setDeadlines(dl as Deadline[]);
-  };
 
   useEffect(() => {
     const load = async () => {
@@ -178,11 +168,6 @@ export const Dashboard: React.FC = () => {
         title="Dashboard"
         subtitle={`${activeDeals.length} active deal${activeDeals.length !== 1 ? 's' : ''}`}
         onSearchClick={openCommandPalette}
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setShowCreateTask(true)}>
-            <Plus size={14} className="mr-1.5" /> Add Task
-          </Button>
-        }
       />
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
@@ -335,13 +320,6 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {showCreateTask && (
-        <CreateTaskModal
-          deals={deals}
-          onClose={() => setShowCreateTask(false)}
-          onCreated={() => { setShowCreateTask(false); refreshData(); }}
-        />
-      )}
     </div>
   );
 };

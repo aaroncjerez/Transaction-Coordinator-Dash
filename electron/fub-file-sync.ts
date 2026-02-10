@@ -15,7 +15,7 @@ import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { getDb } from './database.js';
+import { getDb, getDataDir } from './database.js';
 import {
   getFubConfig,
   discoverAttachments,
@@ -182,7 +182,7 @@ async function syncDealFiles(
   const newAttachmentIds = fubAttachmentIds.filter(id => !localFubIdSet.has(id));
 
   let newFileCount = 0;
-  const FILE_STORAGE_DIR = path.join(app.getPath('userData'), 'transaction-docs');
+  const FILE_STORAGE_DIR = path.join(getDataDir(), 'transaction-docs');
   const dealDir = path.join(FILE_STORAGE_DIR, dealId);
 
   for (const attachmentId of newAttachmentIds) {

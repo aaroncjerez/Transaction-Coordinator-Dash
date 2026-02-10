@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  DollarSign, Calendar, Phone, MapPin, ExternalLink, ChevronDown, ChevronRight,
+  DollarSign, Calendar, Phone, MapPin, ChevronDown, ChevronRight,
   Mail, Building2, FileText, User, Link as LinkIcon, AlertTriangle, Clock, Receipt,
 } from 'lucide-react';
 import { Deadline } from '../../types';
@@ -251,17 +251,6 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
               <MapPin size={14} className="text-gray-400" />
               <span>{[deal.county, deal.state].filter(Boolean).join(', ')}</span>
             </div>
-          )}
-          {deal.fub_person_id && (
-            <a
-              href={`https://jerezland.followupboss.com/2/people/view/${deal.fub_person_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 text-sm text-primary hover:text-primary/80 transition-colors"
-            >
-              <ExternalLink size={14} />
-              View in FUB
-            </a>
           )}
         </div>
       </Section>

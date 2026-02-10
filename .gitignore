@@ -34,3 +34,7 @@ supabase/.temp/
 # Electron
 electron-dist/
 *.db
+
+# Electron Builder output
+release/
+build/icons.iconset/
