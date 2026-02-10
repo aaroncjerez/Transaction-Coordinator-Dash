@@ -12,18 +12,24 @@ import { startFubFileSync } from './fub-file-sync.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const isDev = !app.isPackaged;
+const isCrawlMode = process.env.MOCK_EXTERNAL === 'true';
+const isDev = !app.isPackaged && !isCrawlMode;
 
 // Load environment variables from .env in the project root
-// With rootDir="..", compiled output is at electron-dist/electron/main.js → go up 2 levels
-const envPath = path.join(__dirname, '..', '..', '.env');
-const envResult = dotenv.config({ path: envPath, override: true });
-if (envResult.error && !app.isPackaged) {
-  // Fallback: try from cwd (dev only)
-  dotenv.config({ path: path.join(process.cwd(), '.env') });
-}
-if (isDev) {
-  console.log('[Main] ENV path:', envPath, '| ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY);
+// Skip in crawl mode — crawler provides its own env vars and .env would override them
+if (!isCrawlMode) {
+  // With rootDir="..", compiled output is at electron-dist/electron/main.js → go up 2 levels
+  const envPath = path.join(__dirname, '..', '..', '.env');
+  const envResult = dotenv.config({ path: envPath, override: true });
+  if (envResult.error && !app.isPackaged) {
+    // Fallback: try from cwd (dev only)
+    dotenv.config({ path: path.join(process.cwd(), '.env') });
+  }
+  if (isDev) {
+    console.log('[Main] ENV path:', envPath, '| ANTHROPIC_API_KEY set:', !!process.env.ANTHROPIC_API_KEY);
+  }
+} else {
+  console.log('[Main] Crawl mode — skipping .env, using provided env vars');
 }
 
 // Register custom app:// protocol for serving renderer files in production
@@ -70,6 +76,10 @@ function createWindow(): void {
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
+  } else if (isCrawlMode) {
+    // In crawl mode, load directly from dist/ via file:// (simpler than app:// protocol)
+    const distIndexPath = path.join(__dirname, '..', '..', 'dist', 'index.html');
+    mainWindow.loadFile(distIndexPath);
   } else {
     mainWindow.loadURL('app://./index.html');
   }
@@ -96,26 +106,31 @@ app.whenReady().then(() => {
   // Register all IPC handlers
   registerIpcHandlers();
 
-  // Start deadline alert scheduler (checks every 15 min)
-  startAlertScheduler();
+  // Start background runners (disabled in test/crawl mode)
+  if (process.env.MOCK_EXTERNAL !== 'true') {
+    // Start deadline alert scheduler (checks every 15 min)
+    startAlertScheduler();
 
-  // Start task reminder scheduler (checks every 60s)
-  startReminderScheduler();
+    // Start task reminder scheduler (checks every 60s)
+    startReminderScheduler();
 
-  // Start FUB person sync runner (polls every 30s)
-  startFubPersonSync();
+    // Start FUB person sync runner (polls every 30s)
+    startFubPersonSync();
 
-  // Start FUB file sync runner (checks every 5 min)
-  startFubFileSync();
+    // Start FUB file sync runner (checks every 5 min)
+    startFubFileSync();
 
-  // Schedule automatic database backups every 30 minutes (keeps last 5)
-  setInterval(() => {
-    try {
-      backupDatabase();
-    } catch (err) {
-      console.error('[Main] Scheduled backup failed:', err);
-    }
-  }, 30 * 60 * 1000);
+    // Schedule automatic database backups every 30 minutes (keeps last 5)
+    setInterval(() => {
+      try {
+        backupDatabase();
+      } catch (err) {
+        console.error('[Main] Scheduled backup failed:', err);
+      }
+    }, 30 * 60 * 1000);
+  } else {
+    console.log('[Main] MOCK_EXTERNAL=true — skipping background runners');
+  }
 
   // Create window
   createWindow();

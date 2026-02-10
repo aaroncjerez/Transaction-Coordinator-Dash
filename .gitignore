@@ -38,3 +38,8 @@ electron-dist/
 # Electron Builder output
 release/
 build/icons.iconset/
+
+# Crawler artifacts
+tools/crawler/artifacts/
+tools/crawler/reports/
+tools/crawler/tests/repro/

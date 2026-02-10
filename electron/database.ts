@@ -20,6 +20,14 @@ export function getDataDir(): string {
 }
 
 function getDbDir(): string {
+  // Allow crawler to override the data directory for test isolation
+  if (process.env.TC_CRAWLER_DATA_DIR) {
+    const crawlerDir = process.env.TC_CRAWLER_DATA_DIR;
+    fs.mkdirSync(crawlerDir, { recursive: true });
+    console.log(`[Database] Using crawler data dir: ${crawlerDir}`);
+    return crawlerDir;
+  }
+
   const stableDir = path.join(app.getPath('appData'), 'jerez-land-tc-data');
   fs.mkdirSync(stableDir, { recursive: true });
 

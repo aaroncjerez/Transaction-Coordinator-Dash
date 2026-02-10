@@ -1,0 +1,25 @@
+{
+  "name": "tc-crawler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "crawl": "tsx cli.ts crawl",
+    "repro": "tsx cli.ts repro",
+    "fix": "tsx cli.ts fix",
+    "fix-all": "tsx cli.ts fix-all",
+    "report": "tsx cli.ts report",
+    "full": "tsx cli.ts crawl && tsx cli.ts repro && tsx cli.ts fix-all && tsx cli.ts report"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0",
+    "better-sqlite3": "^12.6.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.8.0",
+    "glob": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
