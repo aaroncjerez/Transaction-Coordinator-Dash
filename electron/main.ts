@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net } from 'electron';
+import { app, BrowserWindow, protocol, net, shell } from 'electron';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import dotenv from 'dotenv';
@@ -85,6 +85,25 @@ function createWindow(): void {
   } else {
     mainWindow.loadURL('app://./index.html');
   }
+
+  // Open external links (http/https) in the system browser, not inside the app
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Allow internal navigation (app://, localhost dev server)
+    if (url.startsWith('app://') || url.startsWith('http://localhost')) return;
+    // External URLs → open in system browser
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
