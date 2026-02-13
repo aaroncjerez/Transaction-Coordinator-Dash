@@ -28,13 +28,10 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
 
 // Ensure .env is loaded (backup in case main.ts load timing is off)
-const __ipc_filename = fileURLToPath(import.meta.url);
-const __ipc_dirname = path.dirname(__ipc_filename);
-dotenv.config({ path: path.join(__ipc_dirname, '..', '..', '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
 function generateUUID(): string {
   return crypto.randomUUID();
@@ -556,6 +553,8 @@ export function registerIpcHandlers(): void {
       ...r,
       action_required: !!r.action_required,
       is_completed: !!r.is_completed,
+      motivation_factors: r.motivation_factors ? JSON.parse(r.motivation_factors) : null,
+      negotiation_strategy: r.negotiation_strategy ? JSON.parse(r.negotiation_strategy) : null,
     }));
   });
 
@@ -565,12 +564,55 @@ export function registerIpcHandlers(): void {
 
     for (const [key, value] of Object.entries(fields)) {
       setClauses.push(`${key} = ?`);
-      values.push(typeof value === 'boolean' ? (value ? 1 : 0) : value);
+      if (typeof value === 'boolean') {
+        values.push(value ? 1 : 0);
+      } else if (typeof value === 'object' && value !== null) {
+        values.push(JSON.stringify(value));
+      } else {
+        values.push(value);
+      }
     }
     values.push(id);
 
     db.prepare(`UPDATE daily_leads SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
     return { success: true };
+  });
+
+  ipcMain.handle('leads:fetchAndAnalyze', async () => {
+    const { analyzeAllLeads } = await import('./lead-analyzer.js');
+    return analyzeAllLeads(db);
+  });
+
+  ipcMain.handle('leads:refreshAnalysis', async (_event, leadId: number) => {
+    try {
+      const { analyzeSingleLead } = await import('./lead-analyzer.js');
+      const lead = await analyzeSingleLead(db, leadId);
+      return { success: true, lead };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { success: false, error: msg };
+    }
+  });
+
+  ipcMain.handle('leads:markContacted', (_event, leadId: number) => {
+    const today = new Date().toISOString().split('T')[0];
+    db.prepare('UPDATE daily_leads SET contacted_today = ?, updated_at = datetime(\'now\') WHERE id = ?').run(today, leadId);
+    return { success: true };
+  });
+
+  ipcMain.handle('leads:unmarkContacted', (_event, leadId: number) => {
+    db.prepare('UPDATE daily_leads SET contacted_today = NULL, updated_at = datetime(\'now\') WHERE id = ?').run(leadId);
+    return { success: true };
+  });
+
+  ipcMain.handle('leads:getStats', () => {
+    const total = (db.prepare('SELECT COUNT(*) as count FROM daily_leads').get() as any).count;
+    const cutoff48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const newLeads48h = (db.prepare('SELECT COUNT(*) as count FROM daily_leads WHERE created_at >= ?').get(cutoff48h) as any).count;
+    const today = new Date().toISOString().split('T')[0];
+    const doneToday = (db.prepare('SELECT COUNT(*) as count FROM daily_leads WHERE contacted_today = ?').get(today) as any).count;
+    const highDiscount = (db.prepare('SELECT COUNT(*) as count FROM daily_leads WHERE discount_likelihood >= 8').get() as any).count;
+    return { total, newLeads48h, doneToday, highDiscount };
   });
 
   // ===== MARKET ANALYSIS =====

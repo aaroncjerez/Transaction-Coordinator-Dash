@@ -51,6 +51,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('db:market:getAll', options),
   },
 
+  leads: {
+    fetchAndAnalyze: () =>
+      ipcRenderer.invoke('leads:fetchAndAnalyze'),
+    refreshAnalysis: (leadId: number) =>
+      ipcRenderer.invoke('leads:refreshAnalysis', leadId),
+    markContacted: (leadId: number) =>
+      ipcRenderer.invoke('leads:markContacted', leadId),
+    unmarkContacted: (leadId: number) =>
+      ipcRenderer.invoke('leads:unmarkContacted', leadId),
+    getStats: () =>
+      ipcRenderer.invoke('leads:getStats'),
+    onAnalysisProgress: (callback: (data: { current: number; total: number; name: string }) => void) => {
+      ipcRenderer.on('leads:analysis-progress', (_event: any, data: any) => callback(data));
+    },
+  },
+
   ai: {
     askQuestion: (query: string, dealId: string) =>
       ipcRenderer.invoke('ai:ask', query, dealId),

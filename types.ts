@@ -250,3 +250,56 @@ export interface FilterConfig {
   status?: string | 'all';
   search: string;
 }
+
+// ===== Lead Types =====
+
+export type MotivationFactorType =
+  | 'financial_distress' | 'divorce' | 'inheritance'
+  | 'relocation' | 'property_condition' | 'urgency' | 'other';
+
+export type NegotiationApproach =
+  | 'empathetic' | 'business-like' | 'solution-focused' | 'opportunistic';
+
+export type PriceRange = '60-70%' | '70-80%' | '80-90%' | 'market_value';
+
+export type NegotiationTimeline = 'immediate' | '1-2_weeks' | '1_month' | 'flexible';
+
+export interface MotivationFactor {
+  factor: MotivationFactorType;
+  confidence: 'high' | 'medium' | 'low';
+  evidence: string;
+}
+
+export interface NegotiationStrategy {
+  approach: NegotiationApproach;
+  keyPoints: string[];
+  priceRange: PriceRange;
+  timeline: NegotiationTimeline;
+}
+
+export interface DailyLead {
+  id: number;
+  fub_id: number;
+  name: string;
+  stage?: string;
+  source?: string;
+  score: number;
+  summary?: string;
+  rationale?: string;
+  recommended_follow_up?: string;
+  action_required: boolean;
+  is_completed: boolean;
+  last_analyzed_at?: string;
+  last_communication?: string;
+  fub_link?: string;
+  phone?: string;
+  email?: string;
+  contacted_today?: string;
+  discount_likelihood?: number;
+  motivation_factors?: MotivationFactor[];
+  negotiation_strategy?: NegotiationStrategy;
+  created_at?: string;
+  updated_at?: string;
+  // Computed (not stored)
+  _priorityScore?: number;
+}

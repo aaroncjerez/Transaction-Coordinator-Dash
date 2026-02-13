@@ -91,6 +91,34 @@ export async function updateLeadCompleted(id: number, isCompleted: boolean): Pro
   await api.db.updateLead(id, { is_completed: isCompleted });
 }
 
+export async function updateLeadFields(id: number, fields: Record<string, any>): Promise<void> {
+  await api.db.updateLead(id, fields);
+}
+
+export async function fetchAndAnalyzeLeads(): Promise<{ success: boolean; analyzed: number; errors: number; total: number }> {
+  return api.leads.fetchAndAnalyze();
+}
+
+export async function refreshLeadAnalysis(leadId: number): Promise<{ success: boolean; lead?: any; error?: string }> {
+  return api.leads.refreshAnalysis(leadId);
+}
+
+export async function markLeadContacted(leadId: number): Promise<{ success: boolean }> {
+  return api.leads.markContacted(leadId);
+}
+
+export async function unmarkLeadContacted(leadId: number): Promise<{ success: boolean }> {
+  return api.leads.unmarkContacted(leadId);
+}
+
+export async function getLeadStats(): Promise<{ total: number; newLeads48h: number; doneToday: number; highDiscount: number }> {
+  return api.leads.getStats();
+}
+
+export function onLeadAnalysisProgress(callback: (data: { current: number; total: number; name: string }) => void): void {
+  api.leads.onAnalysisProgress(callback);
+}
+
 // ---- market_analysis ----
 
 export async function fetchMarketData(limit = 100): Promise<any[]> {

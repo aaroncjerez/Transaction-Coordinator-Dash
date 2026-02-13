@@ -9,6 +9,7 @@ import { Archive } from './pages/Archive';
 import { Analytics } from './pages/Analytics';
 import { KPIs } from './pages/KPIs';
 import { Settings } from './pages/Settings';
+import { Leads } from './pages/Leads';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/deals/:id" element={<DealDetail />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/leads" element={<Leads />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/kpis" element={<KPIs />} />
           <Route path="/archive" element={<Archive />} />

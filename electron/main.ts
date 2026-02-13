@@ -1,6 +1,6 @@
 import { app, BrowserWindow, protocol, net } from 'electron';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 import dotenv from 'dotenv';
 import { initDatabase, backupDatabase } from './database.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
@@ -8,9 +8,6 @@ import { startAlertScheduler } from './alert-scheduler.js';
 import { startReminderScheduler } from './reminder-scheduler.js';
 import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const isCrawlMode = process.env.MOCK_EXTERNAL === 'true';
 const isDev = !app.isPackaged && !isCrawlMode;

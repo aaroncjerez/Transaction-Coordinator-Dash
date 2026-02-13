@@ -95,6 +95,15 @@ export interface ElectronAPI {
     getDealsWithFubLinks: () => Promise<{ id: string; deal_name: string; fub_person_id: string }[]>;
   };
 
+  leads: {
+    fetchAndAnalyze: () => Promise<{ success: boolean; analyzed: number; errors: number; total: number }>;
+    refreshAnalysis: (leadId: number) => Promise<{ success: boolean; lead?: any; error?: string }>;
+    markContacted: (leadId: number) => Promise<{ success: boolean }>;
+    unmarkContacted: (leadId: number) => Promise<{ success: boolean }>;
+    getStats: () => Promise<{ total: number; newLeads48h: number; doneToday: number; highDiscount: number }>;
+    onAnalysisProgress: (callback: (data: { current: number; total: number; name: string }) => void) => void;
+  };
+
   kpi: {
     getDashboardData: () => Promise<any>;
     getCeoBrief: (dashboardState: any) => Promise<any>;

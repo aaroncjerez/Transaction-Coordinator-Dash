@@ -707,6 +707,42 @@ const migrations: Migration[] = [
       console.log('[Migration v15] Task reminders table created');
     },
   },
+  {
+    version: 16,
+    description: 'Daily leads table for hot-lead reviewer',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_leads (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          fub_id INTEGER UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          stage TEXT,
+          source TEXT,
+          score INTEGER DEFAULT 0,
+          summary TEXT,
+          rationale TEXT,
+          recommended_follow_up TEXT,
+          action_required INTEGER DEFAULT 0,
+          is_completed INTEGER DEFAULT 0,
+          last_analyzed_at TEXT,
+          last_communication TEXT,
+          fub_link TEXT,
+          phone TEXT,
+          email TEXT,
+          contacted_today TEXT,
+          discount_likelihood INTEGER,
+          motivation_factors TEXT,
+          negotiation_strategy TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_leads_fub_id ON daily_leads(fub_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_leads_score ON daily_leads(score DESC);
+        CREATE INDEX IF NOT EXISTS idx_daily_leads_discount ON daily_leads(discount_likelihood DESC);
+      `);
+      console.log('[Migration v16] daily_leads table created');
+    },
+  },
 ];
 
 /**
