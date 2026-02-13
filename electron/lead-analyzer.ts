@@ -22,6 +22,18 @@ import {
   type FubTextMessage,
 } from './fub-client.js';
 
+// ── Safe console wrappers (EPIPE when stdout not connected) ──
+
+function safeLog(...args: any[]) {
+  try { console.log(...args); } catch { /* EPIPE — stdout closed */ }
+}
+function safeWarn(...args: any[]) {
+  try { console.warn(...args); } catch { /* EPIPE */ }
+}
+function safeError(...args: any[]) {
+  try { console.error(...args); } catch { /* EPIPE */ }
+}
+
 // ── Constants ──
 
 const LEAD_FUB_STAGES = ['nurture', 'hot lead', 'lead', 'purchase agreement sent'];
@@ -198,7 +210,7 @@ async function callClaudeWithRetry(
     } catch (error: any) {
       if ((error.status === 429 || error.message?.includes('rate_limit')) && attempt < maxRetries) {
         const waitMs = Math.pow(2, attempt + 1) * 5000;
-        console.warn(`[LeadAnalyzer] Rate limited — retrying in ${waitMs / 1000}s (${attempt + 1}/${maxRetries})`);
+        safeWarn(`[LeadAnalyzer] Rate limited — retrying in ${waitMs / 1000}s (${attempt + 1}/${maxRetries})`);
         await delay(waitMs);
       } else {
         throw error;
@@ -298,9 +310,9 @@ export async function analyzeAllLeads(
   const anthropic = getAnthropicClient(db);
   const accountName = getAccountName(db);
 
-  console.log('[LeadAnalyzer] Fetching leads from FUB...');
+  safeLog('[LeadAnalyzer] Fetching leads from FUB...');
   const people = await fetchPeopleByStages(config, LEAD_FUB_STAGES);
-  console.log(`[LeadAnalyzer] Found ${people.length} leads to analyze.`);
+  safeLog(`[LeadAnalyzer] Found ${people.length} leads to analyze.`);
 
   let analyzed = 0;
   let errors = 0;
@@ -317,7 +329,7 @@ export async function analyzeAllLeads(
     });
 
     try {
-      console.log(`[LeadAnalyzer] [${i + 1}/${people.length}] Analyzing ${name}...`);
+      safeLog(`[LeadAnalyzer] [${i + 1}/${people.length}] Analyzing ${name}...`);
 
       // Fetch history in parallel
       const [notes, calls, texts] = await Promise.all([
@@ -334,7 +346,7 @@ export async function analyzeAllLeads(
       analyzed++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[LeadAnalyzer] Error analyzing ${name}:`, msg);
+      safeError(`[LeadAnalyzer] Error analyzing ${name}:`, msg);
       errors++;
     }
 
@@ -344,7 +356,7 @@ export async function analyzeAllLeads(
     }
   }
 
-  console.log(`[LeadAnalyzer] Done. Analyzed: ${analyzed}, Errors: ${errors}, Total: ${people.length}`);
+  safeLog(`[LeadAnalyzer] Done. Analyzed: ${analyzed}, Errors: ${errors}, Total: ${people.length}`);
   return { success: true, analyzed, errors, total: people.length };
 }
 

@@ -9,6 +9,11 @@ import { startReminderScheduler } from './reminder-scheduler.js';
 import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
 
+// Suppress EPIPE errors on stdout/stderr — GUI apps launched from Finder
+// have no connected terminal, so console.log can throw when the pipe breaks.
+process.stdout?.on?.('error', () => {});
+process.stderr?.on?.('error', () => {});
+
 const isCrawlMode = process.env.MOCK_EXTERNAL === 'true';
 const isDev = !app.isPackaged && !isCrawlMode;
 
