@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Flame, RefreshCw, Search, Loader2 } from 'lucide-react';
+import { Flame, RefreshCw, Search, Loader2, ArrowUpDown } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { LeadCard } from '../components/leads/LeadCard';
 import { LeadModal } from '../components/leads/LeadModal';
@@ -57,6 +57,44 @@ function isContactedToday(lead: DailyLead): boolean {
 }
 
 type Tab = 'today' | 'all' | 'done';
+type SortOption = 'priority' | 'score' | 'newest' | 'oldest' | 'least_contacted' | 'most_contacted';
+
+const SORT_LABELS: Record<SortOption, string> = {
+  priority: 'Priority',
+  score: 'AI Score',
+  newest: 'Newest in FUB',
+  oldest: 'Oldest in FUB',
+  least_contacted: 'Least Recently Contacted',
+  most_contacted: 'Most Recently Contacted',
+};
+
+function getContactDate(lead: DailyLead): number {
+  // Use contacted_today first, then last_communication, then 0 (never contacted)
+  if (lead.contacted_today) return new Date(lead.contacted_today).getTime();
+  if (lead.last_communication) return new Date(lead.last_communication).getTime();
+  return 0;
+}
+
+function sortLeads(leads: DailyLead[], sortBy: SortOption): DailyLead[] {
+  return [...leads].sort((a, b) => {
+    switch (sortBy) {
+      case 'priority':
+        return (b._priorityScore || 0) - (a._priorityScore || 0);
+      case 'score':
+        return (b.score || 0) - (a.score || 0);
+      case 'newest':
+        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      case 'oldest':
+        return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+      case 'least_contacted':
+        return getContactDate(a) - getContactDate(b); // 0 (never) sorts first
+      case 'most_contacted':
+        return getContactDate(b) - getContactDate(a);
+      default:
+        return 0;
+    }
+  });
+}
 
 export const Leads: React.FC = () => {
   const [leads, setLeads] = useState<DailyLead[]>([]);
@@ -66,6 +104,7 @@ export const Leads: React.FC = () => {
   const [progress, setProgress] = useState<{ current: number; total: number; name: string } | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('today');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<SortOption>('priority');
   const [selectedLead, setSelectedLead] = useState<DailyLead | null>(null);
   const [addedToToday, setAddedToToday] = useState<Set<number>>(new Set());
 
@@ -122,7 +161,7 @@ export const Leads: React.FC = () => {
     let filtered: DailyLead[];
     if (activeTab === 'today') filtered = todaysActions;
     else if (activeTab === 'done') filtered = doneTodayLeads;
-    else filtered = leadsWithPriority.sort((a, b) => (b._priorityScore || 0) - (a._priorityScore || 0));
+    else filtered = leadsWithPriority;
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -134,8 +173,8 @@ export const Leads: React.FC = () => {
       );
     }
 
-    return filtered;
-  }, [activeTab, todaysActions, doneTodayLeads, leadsWithPriority, searchQuery]);
+    return sortLeads(filtered, sortBy);
+  }, [activeTab, todaysActions, doneTodayLeads, leadsWithPriority, searchQuery, sortBy]);
 
   // ── Actions ──
 
@@ -266,15 +305,29 @@ export const Leads: React.FC = () => {
                 </button>
               ))}
             </div>
-            <div className="relative">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search leads..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 pr-3 py-1.5 text-caption border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 w-56 transition-colors"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <ArrowUpDown size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="pl-8 pr-8 py-1.5 text-caption border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 bg-white appearance-none cursor-pointer transition-colors"
+                >
+                  {(Object.entries(SORT_LABELS) as [SortOption, string][]).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search leads..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 text-caption border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 w-56 transition-colors"
+                />
+              </div>
             </div>
           </div>
 
