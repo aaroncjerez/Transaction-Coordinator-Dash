@@ -711,6 +711,7 @@ const migrations: Migration[] = [
     version: 16,
     description: 'Daily leads table for hot-lead reviewer',
     up(db: Database.Database) {
+      // Step 1: Create table (no-op if it already exists from an earlier incomplete version)
       db.exec(`
         CREATE TABLE IF NOT EXISTS daily_leads (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -736,11 +737,37 @@ const migrations: Migration[] = [
           created_at TEXT DEFAULT (datetime('now')),
           updated_at TEXT DEFAULT (datetime('now'))
         );
+      `);
+
+      // Step 2: If the table already existed with fewer columns, add the missing ones.
+      // Same idempotent pattern as migrations v3 and v11.
+      const addCols = [
+        `ALTER TABLE daily_leads ADD COLUMN source TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN last_analyzed_at TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN last_communication TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN fub_link TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN phone TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN email TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN contacted_today TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN discount_likelihood INTEGER`,
+        `ALTER TABLE daily_leads ADD COLUMN motivation_factors TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN negotiation_strategy TEXT`,
+        `ALTER TABLE daily_leads ADD COLUMN created_at TEXT DEFAULT (datetime('now'))`,
+        `ALTER TABLE daily_leads ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`,
+      ];
+      for (const sql of addCols) {
+        try { db.exec(sql); } catch { /* Column already exists */ }
+      }
+
+      // Step 3: Create indexes (after columns are guaranteed to exist)
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_leads_fub_id_unique ON daily_leads(fub_id);
         CREATE INDEX IF NOT EXISTS idx_daily_leads_fub_id ON daily_leads(fub_id);
         CREATE INDEX IF NOT EXISTS idx_daily_leads_score ON daily_leads(score DESC);
         CREATE INDEX IF NOT EXISTS idx_daily_leads_discount ON daily_leads(discount_likelihood DESC);
       `);
-      console.log('[Migration v16] daily_leads table created');
+
+      console.log('[Migration v16] daily_leads table created/patched');
     },
   },
 ];
