@@ -185,4 +185,63 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('reminder:fired', (_event: any, data: any) => callback(data));
     },
   },
+
+  dialer: {
+    getCallQueue: (limit?: number) =>
+      ipcRenderer.invoke('dialer:getCallQueue', limit),
+    getCallHistory: (limit?: number, filters?: any) =>
+      ipcRenderer.invoke('dialer:getCallHistory', limit, filters),
+    getCallsForLead: (phoneNormalized: string) =>
+      ipcRenderer.invoke('dialer:getCallsForLead', phoneNormalized),
+    getLeadById: (id: string) =>
+      ipcRenderer.invoke('dialer:getLeadById', id),
+    getLeadMemory: (phoneNormalized: string) =>
+      ipcRenderer.invoke('dialer:getLeadMemory', phoneNormalized),
+    getDNCList: () =>
+      ipcRenderer.invoke('dialer:getDNCList'),
+    getDNCStats: () =>
+      ipcRenderer.invoke('dialer:getDNCStats'),
+    addManualDNC: (phone: string, reason: string) =>
+      ipcRenderer.invoke('dialer:addManualDNC', phone, reason),
+    removeFromDNC: (phone: string) =>
+      ipcRenderer.invoke('dialer:removeFromDNC', phone),
+    getDailyStats: (days?: number) =>
+      ipcRenderer.invoke('dialer:getDailyStats', days),
+    getHotLeads: () =>
+      ipcRenderer.invoke('dialer:getHotLeads'),
+    getCallbacksDue: () =>
+      ipcRenderer.invoke('dialer:getCallbacksDue'),
+    triggerCadence: () =>
+      ipcRenderer.invoke('dialer:triggerCadence'),
+    reviewCall: (callId: string) =>
+      ipcRenderer.invoke('dialer:reviewCall', callId),
+    reviewRecentCalls: (limit?: number) =>
+      ipcRenderer.invoke('dialer:reviewRecentCalls', limit),
+    getTodayCallCount: () =>
+      ipcRenderer.invoke('dialer:getTodayCallCount'),
+    onReviewProgress: (callback: (data: any) => void) => {
+      ipcRenderer.on('dialer:review-progress', (_event: any, data: any) => callback(data));
+    },
+    onNewCalls: (callback: (data: any) => void) => {
+      ipcRenderer.on('dialer:new-calls', (_event: any, data: any) => callback(data));
+    },
+    uploadLeads: (leads: any[], batchId: string) =>
+      ipcRenderer.invoke('dialer:uploadLeads', leads, batchId),
+    onUploadProgress: (callback: (data: { processed: number; total: number }) => void) => {
+      ipcRenderer.on('dialer:upload-progress', (_event: any, data: any) => callback(data));
+    },
+    syncFubDNC: () =>
+      ipcRenderer.invoke('dialer:syncFubDNC'),
+    onFubSyncProgress: (callback: (data: { stage: string; fetched: number; phones: number }) => void) => {
+      ipcRenderer.on('dialer:fub-sync-progress', (_event: any, data: any) => callback(data));
+    },
+    getUploadBatches: () =>
+      ipcRenderer.invoke('dialer:getUploadBatches'),
+    getUploadBatchLeads: (batchId: string) =>
+      ipcRenderer.invoke('dialer:getUploadBatchLeads', batchId),
+    deleteUploadBatch: (batchId: string) =>
+      ipcRenderer.invoke('dialer:deleteUploadBatch', batchId),
+    callLead: (lead: any) =>
+      ipcRenderer.invoke('dialer:callLead', lead),
+  },
 });

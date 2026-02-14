@@ -770,6 +770,23 @@ const migrations: Migration[] = [
       console.log('[Migration v16] daily_leads table created/patched');
     },
   },
+  {
+    version: 17,
+    description: 'Seed AI Dialer default settings (Supabase, n8n webhook)',
+    up(db: Database.Database) {
+      // Pre-populate dialer settings so the AI Dialer tab works out of the box.
+      // Uses INSERT OR IGNORE so manually-set values are never overwritten.
+      const seedSettings = db.prepare(`
+        INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+      `);
+
+      seedSettings.run('supabase_url', 'https://uzbfyyvdnkvbnlgndfyp.supabase.co');
+      seedSettings.run('supabase_anon_key', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV6YmZ5eXZkbmt2Ym5sZ25kZnlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwMDYyNjksImV4cCI6MjA4NDU4MjI2OX0.E_7vJriV7tUpYcwaV1_1U4hf6q0MBGoWan3G7Jfe1kI');
+      seedSettings.run('n8n_trigger_webhook', 'https://cheerful-kindness-production.up.railway.app/webhook/dialer-cadence');
+
+      console.log('[Migration v17] AI Dialer settings seeded');
+    },
+  },
 ];
 
 /**

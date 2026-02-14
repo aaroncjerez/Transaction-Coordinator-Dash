@@ -8,6 +8,7 @@ import { startAlertScheduler } from './alert-scheduler.js';
 import { startReminderScheduler } from './reminder-scheduler.js';
 import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
+import { startDialerSync } from './dialer-sync.js';
 
 const isCrawlMode = process.env.MOCK_EXTERNAL === 'true';
 const isDev = !app.isPackaged && !isCrawlMode;
@@ -116,6 +117,9 @@ app.whenReady().then(() => {
 
     // Start FUB file sync runner (checks every 5 min)
     startFubFileSync();
+
+    // Start AI Dialer sync runner (polls Supabase every 60s, auto-reviews calls)
+    startDialerSync();
 
     // Schedule automatic database backups every 30 minutes (keeps last 5)
     setInterval(() => {
