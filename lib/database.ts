@@ -312,3 +312,109 @@ export async function fetchKpiDashboardData(): Promise<any> {
 export async function fetchKpiCeoBrief(dashboardState: any): Promise<any> {
   return api.kpi.getCeoBrief(dashboardState);
 }
+
+// ---- AI Dialer (Supabase) ----
+
+export async function fetchDialerCallQueue(limit?: number): Promise<any[]> {
+  return api.dialer.getCallQueue(limit);
+}
+
+export async function fetchDialerCallHistory(limit?: number, filters?: any): Promise<any[]> {
+  return api.dialer.getCallHistory(limit, filters);
+}
+
+export async function fetchDialerCallsForLead(phoneNormalized: string): Promise<any[]> {
+  return api.dialer.getCallsForLead(phoneNormalized);
+}
+
+export async function fetchDialerLeadById(id: string): Promise<any> {
+  return api.dialer.getLeadById(id);
+}
+
+export async function fetchDialerLeadMemory(phoneNormalized: string): Promise<any> {
+  return api.dialer.getLeadMemory(phoneNormalized);
+}
+
+export async function fetchDialerDNCList(): Promise<any[]> {
+  return api.dialer.getDNCList();
+}
+
+export async function fetchDialerDNCStats(): Promise<any> {
+  return api.dialer.getDNCStats();
+}
+
+export async function addDialerManualDNC(phone: string, reason: string): Promise<any> {
+  return api.dialer.addManualDNC(phone, reason);
+}
+
+export async function removeDialerDNC(phone: string): Promise<any> {
+  return api.dialer.removeFromDNC(phone);
+}
+
+export async function fetchDialerDailyStats(days?: number): Promise<any[]> {
+  return api.dialer.getDailyStats(days);
+}
+
+export async function fetchDialerHotLeads(): Promise<any[]> {
+  return api.dialer.getHotLeads();
+}
+
+export async function fetchDialerCallbacksDue(): Promise<any[]> {
+  return api.dialer.getCallbacksDue();
+}
+
+export async function triggerDialerCadence(): Promise<{ success: boolean }> {
+  return api.dialer.triggerCadence();
+}
+
+export async function reviewDialerCall(callId: string): Promise<any> {
+  return api.dialer.reviewCall(callId);
+}
+
+export async function reviewDialerRecentCalls(limit?: number): Promise<any> {
+  return api.dialer.reviewRecentCalls(limit);
+}
+
+export async function fetchDialerTodayCallCount(): Promise<number> {
+  return api.dialer.getTodayCallCount();
+}
+
+export function onDialerReviewProgress(callback: (data: { current: number; total: number; callId: string }) => void): void {
+  api.dialer.onReviewProgress(callback);
+}
+
+export function onDialerNewCalls(callback: (data: { count: number }) => void): void {
+  api.dialer.onNewCalls(callback);
+}
+
+export async function uploadDialerLeads(leads: any[], batchId: string): Promise<import('../types').UploadBatchResult> {
+  return api.dialer.uploadLeads(leads, batchId);
+}
+
+export function onDialerUploadProgress(callback: (data: { processed: number; total: number }) => void): void {
+  api.dialer.onUploadProgress(callback);
+}
+
+export async function syncDialerFubDNC(): Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number }> {
+  return api.dialer.syncFubDNC();
+}
+
+export function onDialerFubSyncProgress(callback: (data: { stage: string; fetched: number; phones: number }) => void): void {
+  api.dialer.onFubSyncProgress(callback);
+}
+
+export async function fetchDialerUploadBatches(): Promise<Array<{ batch_id: string; lead_count: number; uploaded_at: string }>> {
+  return api.dialer.getUploadBatches();
+}
+
+export async function fetchDialerUploadBatchLeads(batchId: string): Promise<any[]> {
+  return api.dialer.getUploadBatchLeads(batchId);
+}
+
+export async function deleteDialerUploadBatch(batchId: string): Promise<{ deleted: number }> {
+  return api.dialer.deleteUploadBatch(batchId);
+}
+
+export async function dialerCallLead(lead: any): Promise<{ call_id: string; status: string }> {
+  return api.dialer.callLead(lead);
+}

@@ -20,6 +20,9 @@ const API_KEYS: ApiKeyConfig[] = [
   { key: 'fub_account_name', label: 'FUB Account Name', placeholder: 'jerezland', envFallback: 'FUB_ACCOUNT_NAME' },
   { key: 'anthropic_api_key', label: 'Anthropic API Key', placeholder: 'sk-ant-...', envFallback: 'ANTHROPIC_API_KEY' },
   { key: 'slack_webhook_url', label: 'Slack Webhook URL', placeholder: 'https://hooks.slack.com/services/...', envFallback: 'SLACK_WEBHOOK_URL' },
+  { key: 'supabase_url', label: 'Supabase URL (AI Dialer)', placeholder: 'https://xxx.supabase.co', envFallback: 'SUPABASE_URL' },
+  { key: 'supabase_anon_key', label: 'Supabase Anon Key (AI Dialer)', placeholder: 'eyJ...', envFallback: 'SUPABASE_ANON_KEY' },
+  { key: 'n8n_trigger_webhook', label: 'n8n Cadence Webhook (Railway)', placeholder: 'https://cheerful-kindness-production.up.railway.app/webhook/...', envFallback: 'N8N_TRIGGER_WEBHOOK' },
 ];
 
 export const Settings: React.FC = () => {

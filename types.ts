@@ -303,3 +303,238 @@ export interface DailyLead {
   // Computed (not stored)
   _priorityScore?: number;
 }
+
+// ===== AI Dialer Types (Supabase) =====
+
+export type DialerCallDirection = 'inbound' | 'outbound';
+export type DialerCallStatus = 'completed' | 'no_answer' | 'voicemail' | 'busy' | 'failed' | 'declined' | 'transferred';
+export type DialerSentiment = 'positive' | 'neutral' | 'negative' | 'unknown';
+export type DialerRapportLevel = 'cold' | 'warming' | 'warm' | 'hot';
+export type DialerFinalOutcome = 'DNC' | 'Deal Made' | 'Under Contract' | 'Not Interested' | 'Dead Lead' | 'Exhausted' | 'Cadence Complete' | null;
+
+export interface DialerLead {
+  id: string;
+  airtable_record_id: string;
+  phone_number: string;
+  phone_normalized: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  county: string | null;
+  state: string | null;
+  parcel_acres: number | null;
+  property_address: string | null;
+  market_value: number | null;
+  final_outcome: DialerFinalOutcome;
+  ai_cadence_on: boolean;
+  attempt_count: number;
+  max_attempts: number;
+  seller_asking_price: number | null;
+  our_last_offer: number | null;
+  agreed_price: number | null;
+  callback_requested: boolean;
+  callback_datetime: string | null;
+  rapport_level: DialerRapportLevel;
+  cadence_stage: number | null;
+  cadence_sequence: string | null;
+  next_call_date: string | null;
+  dnc_type: 'permanent' | 'temporary' | null;
+  dnc_expires_at: string | null;
+  last_contact_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DialerCallRecord {
+  id: string;
+  lead_id: string | null;
+  phone_normalized: string;
+  seller_phone_normalized: string | null;
+  our_phone: string | null;
+  call_direction: DialerCallDirection;
+  retell_call_id: string | null;
+  call_started_at: string;
+  call_ended_at: string | null;
+  duration_seconds: number | null;
+  call_status: DialerCallStatus | null;
+  call_successful: boolean;
+  sentiment: DialerSentiment | null;
+  disconnection_reason: string | null;
+  transcript: string | null;
+  summary: string | null;
+  custom_analysis: any | null;
+  extracted_data: DialerExtractedData | null;
+  cost_cents: number | null;
+  created_at: string;
+  // Joined lead info
+  leads_cache?: {
+    first_name: string | null;
+    last_name: string | null;
+    county: string | null;
+    state: string | null;
+  } | null;
+}
+
+export interface DialerExtractedData {
+  property?: {
+    county?: string;
+    state?: string;
+    acres?: number;
+    apn?: string;
+  };
+  seller?: {
+    caller_name?: string;
+    why_selling?: string;
+    timeline?: string;
+  };
+  price?: {
+    seller_asking_price?: number;
+    our_offer?: number;
+    counter_offer?: number;
+    agreed_price?: number;
+  };
+  outcome?: {
+    deal_status?: string;
+    callback_requested?: boolean;
+    callback_datetime?: string;
+    requested_dnc?: boolean;
+    deal_made?: boolean;
+  };
+}
+
+export interface DialerConversationMemory {
+  id: string;
+  phone_normalized: string;
+  conversation_summary: string | null;
+  key_facts: Record<string, unknown>;
+  rapport_level: DialerRapportLevel;
+  total_calls: number;
+  last_interaction_at: string | null;
+  last_interaction_summary: string | null;
+  next_action_strategy: string | null;
+  topics_to_mention: string[] | null;
+  topics_to_avoid: string[] | null;
+}
+
+export interface DialerDNCEntry {
+  id: string;
+  record_type: 'lead' | 'airtable' | 'fub' | 'manual';
+  phone_normalized: string;
+  first_name: string | null;
+  last_name: string | null;
+  county: string | null;
+  state: string | null;
+  source: 'Auto-Detected' | 'Not Interested' | 'Airtable DNC' | 'Follow Up Boss' | 'Manually Uploaded';
+  reason: string | null;
+  added_at: string | null;
+  dnc_type: 'permanent' | 'temporary' | null;
+  dnc_expires_at: string | null;
+}
+
+export interface DialerDNCStats {
+  total: number;
+  autoDetected: number;
+  airtable: number;
+  fub: number;
+  manual: number;
+}
+
+export interface DialerDailyStats {
+  call_date: string;
+  total_calls: number;
+  outbound_calls: number;
+  inbound_calls: number;
+  successful_calls: number;
+  positive_calls: number;
+  neutral_calls: number;
+  negative_calls: number;
+  voicemails: number;
+  no_answers: number;
+  avg_call_duration: number;
+  unique_leads: number;
+}
+
+export interface DialerHotLead extends DialerLead {
+  conversation_summary: string | null;
+  key_facts: Record<string, unknown> | null;
+  next_action_strategy: string | null;
+  total_calls: number;
+  heat_level: number;
+}
+
+export interface DialerCallQueueLead extends DialerLead {
+  priority_score: number;
+  priority_reason: string;
+  can_call_now: boolean;
+  has_market_value: boolean;
+  in_follow_up_boss: boolean;
+}
+
+export interface DialerCallbackWithDetails {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  phone_normalized: string;
+  county: string | null;
+  state: string | null;
+  callback_datetime: string;
+  callback_completed: boolean | null;
+  rapport_level: DialerRapportLevel;
+  final_outcome: string | null;
+  call_id: string | null;
+  summary: string | null;
+  sentiment: DialerSentiment | null;
+}
+
+export interface AICallReview {
+  dnc_detected: boolean;
+  dnc_evidence: string | null;
+  sentiment: DialerSentiment;
+  is_hot_lead: boolean;
+  hot_lead_reason: string | null;
+  call_quality_score: number;
+  key_insights: string[];
+  recommended_next_action: string;
+  flags: string[];
+}
+
+// ===== CSV Upload Types =====
+
+export interface UploadLeadRow {
+  phone_number: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  county?: string;
+  state?: string;
+  parcel_acres?: number;
+  market_value?: number;
+  property_address?: string;
+  property_city?: string;
+  property_zip?: string;
+  parcel_number?: string;
+  min_offer?: number;
+  max_offer?: number;
+  labels?: string;
+  notes?: string;
+  lead_source?: string;
+  acquired_by?: string;
+}
+
+export interface UploadLeadResult {
+  row_index: number;
+  lead_id: string | null;
+  action: 'inserted' | 'updated' | 'skipped' | 'error';
+  reason: string | null;
+  phone: string;
+}
+
+export interface UploadBatchResult {
+  batch_id: string;
+  total_rows: number;
+  imported: number;
+  duplicates: number;
+  errors: number;
+  skipped: number;
+  details: UploadLeadResult[];
+}

@@ -116,6 +116,35 @@ export interface ElectronAPI {
     getPending: () => Promise<any[]>;
     onFired: (callback: (data: any) => void) => void;
   };
+
+  dialer: {
+    getCallQueue: (limit?: number) => Promise<any[]>;
+    getCallHistory: (limit?: number, filters?: { search?: string; status?: string; sentiment?: string }) => Promise<any[]>;
+    getCallsForLead: (phoneNormalized: string) => Promise<any[]>;
+    getLeadById: (id: string) => Promise<any>;
+    getLeadMemory: (phoneNormalized: string) => Promise<any>;
+    getDNCList: () => Promise<any[]>;
+    getDNCStats: () => Promise<{ total: number; autoDetected: number; airtable: number; fub: number; manual: number }>;
+    addManualDNC: (phone: string, reason: string) => Promise<any>;
+    removeFromDNC: (phone: string) => Promise<any>;
+    getDailyStats: (days?: number) => Promise<any[]>;
+    getHotLeads: () => Promise<any[]>;
+    getCallbacksDue: () => Promise<any[]>;
+    triggerCadence: () => Promise<{ success: boolean }>;
+    reviewCall: (callId: string) => Promise<any>;
+    reviewRecentCalls: (limit?: number) => Promise<any>;
+    getTodayCallCount: () => Promise<number>;
+    onReviewProgress: (callback: (data: { current: number; total: number; callId: string }) => void) => void;
+    onNewCalls: (callback: (data: { count: number }) => void) => void;
+    uploadLeads: (leads: any[], batchId: string) => Promise<import('../types').UploadBatchResult>;
+    onUploadProgress: (callback: (data: { processed: number; total: number }) => void) => void;
+    syncFubDNC: () => Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number }>;
+    onFubSyncProgress: (callback: (data: { stage: string; fetched: number; phones: number }) => void) => void;
+    getUploadBatches: () => Promise<Array<{ batch_id: string; lead_count: number; uploaded_at: string }>>;
+    getUploadBatchLeads: (batchId: string) => Promise<Array<{ id: string; first_name: string; last_name: string; phone_normalized: string; county: string; state: string; created_at: string }>>;
+    deleteUploadBatch: (batchId: string) => Promise<{ deleted: number }>;
+    callLead: (lead: any) => Promise<{ call_id: string; status: string }>;
+  };
 }
 
 export interface FubActivity {

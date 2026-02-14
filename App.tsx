@@ -10,6 +10,7 @@ import { Analytics } from './pages/Analytics';
 import { KPIs } from './pages/KPIs';
 import { Settings } from './pages/Settings';
 import { Leads } from './pages/Leads';
+import { AIDialer } from './pages/AIDialer';
 
 function App() {
   return (
@@ -21,6 +22,7 @@ function App() {
           <Route path="/deals/:id" element={<DealDetail />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/dialer" element={<AIDialer />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/kpis" element={<KPIs />} />
           <Route path="/archive" element={<Archive />} />

@@ -813,6 +813,9 @@ export function registerIpcHandlers(): void {
       'anthropic_api_key': 'ANTHROPIC_API_KEY',
       'fub_api_key': 'FUB_API_KEY',
       'slack_webhook_url': 'SLACK_WEBHOOK_URL',
+      'supabase_url': 'SUPABASE_URL',
+      'supabase_anon_key': 'SUPABASE_ANON_KEY',
+      'n8n_trigger_webhook': 'N8N_TRIGGER_WEBHOOK',
     };
     if (envKeyMap[key]) {
       process.env[envKeyMap[key]] = value;
@@ -1496,6 +1499,286 @@ Provide your analysis in JSON format:
       WHERE r.status = 'pending'
       ORDER BY r.remind_at ASC
     `).all();
+  });
+
+  // ===== AI DIALER (Supabase) =====
+
+  ipcMain.handle('dialer:getCallQueue', async (_event, limit?: number) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getCallQueue } = await import('./dialer-queries.js');
+    return getCallQueue(supabase, limit);
+  });
+
+  ipcMain.handle('dialer:getCallHistory', async (_event, limit?: number, filters?: any) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getCallHistory } = await import('./dialer-queries.js');
+    return getCallHistory(supabase, limit, filters);
+  });
+
+  ipcMain.handle('dialer:getCallsForLead', async (_event, phoneNormalized: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getCallsForLead } = await import('./dialer-queries.js');
+    return getCallsForLead(supabase, phoneNormalized);
+  });
+
+  ipcMain.handle('dialer:getLeadById', async (_event, id: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getLeadById } = await import('./dialer-queries.js');
+    return getLeadById(supabase, id);
+  });
+
+  ipcMain.handle('dialer:getLeadMemory', async (_event, phoneNormalized: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getLeadMemory } = await import('./dialer-queries.js');
+    return getLeadMemory(supabase, phoneNormalized);
+  });
+
+  ipcMain.handle('dialer:getDNCList', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getDNCList } = await import('./dialer-queries.js');
+    return getDNCList(supabase);
+  });
+
+  ipcMain.handle('dialer:getDNCStats', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getDNCStats } = await import('./dialer-queries.js');
+    return getDNCStats(supabase);
+  });
+
+  ipcMain.handle('dialer:addManualDNC', async (_event, phone: string, reason: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { addManualDNC } = await import('./dialer-queries.js');
+    return addManualDNC(supabase, phone, reason);
+  });
+
+  ipcMain.handle('dialer:removeFromDNC', async (_event, phone: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { removeFromDNC } = await import('./dialer-queries.js');
+    return removeFromDNC(supabase, phone);
+  });
+
+  ipcMain.handle('dialer:getDailyStats', async (_event, days?: number) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getDailyStats } = await import('./dialer-queries.js');
+    return getDailyStats(supabase, days);
+  });
+
+  ipcMain.handle('dialer:getHotLeads', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getHotLeads } = await import('./dialer-queries.js');
+    return getHotLeads(supabase);
+  });
+
+  ipcMain.handle('dialer:getCallbacksDue', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getCallbacksDue } = await import('./dialer-queries.js');
+    return getCallbacksDue(supabase);
+  });
+
+  ipcMain.handle('dialer:triggerCadence', async () => {
+    const setting = db.prepare("SELECT value FROM settings WHERE key = 'n8n_trigger_webhook'").get() as any;
+    const webhookUrl = setting?.value || process.env.N8N_TRIGGER_WEBHOOK;
+    if (!webhookUrl) throw new Error('n8n cadence webhook not configured — set it in Settings.');
+    const { triggerCadence } = await import('./dialer-queries.js');
+    return triggerCadence(webhookUrl);
+  });
+
+  ipcMain.handle('dialer:reviewCall', async (_event, callId: string) => {
+    const { reviewCall } = await import('./call-reviewer.js');
+    return reviewCall(db, callId);
+  });
+
+  ipcMain.handle('dialer:reviewRecentCalls', async (_event, limit?: number) => {
+    const { reviewRecentCalls } = await import('./call-reviewer.js');
+    return reviewRecentCalls(db, limit);
+  });
+
+  ipcMain.handle('dialer:getTodayCallCount', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getTodayCallCount } = await import('./dialer-queries.js');
+    return getTodayCallCount(supabase);
+  });
+
+  ipcMain.handle('dialer:uploadLeads', async (_event, leads: any[], batchId: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { uploadLeadsBatch } = await import('./dialer-queries.js');
+
+    const CHUNK_SIZE = 50;
+    const allDetails: any[] = [];
+    let totalImported = 0;
+    let totalDuplicates = 0;
+    let totalErrors = 0;
+    let totalSkipped = 0;
+
+    for (let offset = 0; offset < leads.length; offset += CHUNK_SIZE) {
+      const chunk = leads.slice(offset, offset + CHUNK_SIZE);
+      const result = await uploadLeadsBatch(supabase, chunk, batchId);
+
+      totalImported += result.imported;
+      totalDuplicates += result.duplicates;
+      totalErrors += result.errors;
+      totalSkipped += result.skipped;
+
+      // Fix row indices to be global (not chunk-local)
+      for (const d of result.details) {
+        allDetails.push({ ...d, row_index: d.row_index + offset });
+      }
+
+      // Send progress update to renderer
+      _event.sender.send('dialer:upload-progress', {
+        processed: Math.min(offset + CHUNK_SIZE, leads.length),
+        total: leads.length,
+      });
+    }
+
+    return {
+      batch_id: batchId,
+      total_rows: leads.length,
+      imported: totalImported,
+      duplicates: totalDuplicates,
+      errors: totalErrors,
+      skipped: totalSkipped,
+      details: allDetails,
+    };
+  });
+
+  ipcMain.handle('dialer:getUploadBatches', async () => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getUploadBatches } = await import('./dialer-queries.js');
+    return getUploadBatches(supabase);
+  });
+
+  ipcMain.handle('dialer:getUploadBatchLeads', async (_event, batchId: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getUploadBatchLeads } = await import('./dialer-queries.js');
+    return getUploadBatchLeads(supabase, batchId);
+  });
+
+  ipcMain.handle('dialer:deleteUploadBatch', async (_event, batchId: string) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { deleteUploadBatch } = await import('./dialer-queries.js');
+    return deleteUploadBatch(supabase, batchId);
+  });
+
+  ipcMain.handle('dialer:callLead', async (_event, lead: any) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { callLead } = await import('./dialer-queries.js');
+    return callLead(supabase, lead);
+  });
+
+  ipcMain.handle('dialer:syncFubDNC', async (_event) => {
+    const { getFubConfig, fetchPeopleByStage } = await import('./fub-client.js');
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const { syncFubPeopleToDNC } = await import('./dialer-queries.js');
+
+    const config = getFubConfig(db);
+    if (!config) throw new Error('FUB API key not configured — set it in Settings.');
+
+    const supabase = getSupabaseClient(db);
+
+    // Fetch ALL people from FUB across all stages (paginated)
+    // FUB doesn't have a "get all" endpoint, so we iterate stages + no-stage
+    const allPeople: Array<{
+      id: number;
+      phone_normalized: string;
+      first_name?: string;
+      last_name?: string;
+      stage?: string;
+    }> = [];
+
+    const seenPhones = new Set<string>();
+    let totalFetched = 0;
+
+    // Helper: normalize phone to 10-digit US
+    const normalizePhone = (raw: string): string => {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
+      if (digits.length === 10) return digits;
+      return '';
+    };
+
+    // Helper: fetch one stage with pagination and extract phones
+    const fetchStage = async (stage: string) => {
+      let offset = 0;
+      for (let page = 0; page < 50; page++) {
+        const result = await fetchPeopleByStage(config, stage, 100, offset);
+        totalFetched += result.people.length;
+
+        for (const person of result.people) {
+          const phones = person.phones || [];
+          for (const ph of phones) {
+            const normalized = normalizePhone(ph.value || '');
+            if (normalized && !seenPhones.has(normalized)) {
+              seenPhones.add(normalized);
+              allPeople.push({
+                id: person.id,
+                phone_normalized: normalized,
+                first_name: person.firstName,
+                last_name: person.lastName,
+                stage: person.stage,
+              });
+            }
+          }
+        }
+
+        _event.sender.send('dialer:fub-sync-progress', {
+          stage,
+          fetched: totalFetched,
+          phones: allPeople.length,
+        });
+
+        if (!result.hasMore) break;
+        offset += 100;
+      }
+    };
+
+    // FUB stages to pull
+    const stages = [
+      'Lead', 'New Lead', 'Prospect', 'Active Client',
+      'Past Client', 'Closed', 'Archived', 'Dead',
+      'Trash', 'Unqualified', 'Do Not Contact',
+    ];
+
+    for (const stage of stages) {
+      try {
+        await fetchStage(stage);
+      } catch (err: any) {
+        console.warn(`[syncFubDNC] Failed stage "${stage}":`, err.message);
+      }
+    }
+
+    // Now upsert all phones into crm_exclusions
+    _event.sender.send('dialer:fub-sync-progress', {
+      stage: 'Saving to DNC...',
+      fetched: totalFetched,
+      phones: allPeople.length,
+    });
+
+    const result = await syncFubPeopleToDNC(supabase, allPeople);
+
+    return {
+      ...result,
+      fub_people_fetched: totalFetched,
+      unique_phones: allPeople.length,
+    };
   });
 }
 
