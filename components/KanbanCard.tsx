@@ -71,7 +71,11 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
   const daysSinceClose = closeDate
     ? Math.floor((Date.now() - new Date(closeDate).getTime()) / 86400000)
     : null;
-  const profit = formatProfit(deal.purchase_price, deal.expected_sales_price);
+  const realizedProfit = deal.realized_gross_profit && deal.realized_gross_profit !== 0
+    ? formatPrice(deal.realized_gross_profit)
+    : null;
+  const computedProfit = formatProfit(deal.purchase_price, deal.expected_sales_price);
+  const profit = realizedProfit || computedProfit;
   const deadlineBadge = nearestDeadline ? getDeadlineBadge(nearestDeadline) : null;
   const syncDot = getSyncDot(syncStatus, !!deal.fub_person_id);
 
@@ -194,7 +198,9 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
             {profit && (
               <>
                 <ArrowRight className="h-2.5 w-2.5 text-gray-300" />
-                <span className="text-emerald-600 font-medium">{profit} profit</span>
+                <span className={cn('font-medium', realizedProfit ? 'text-emerald-600' : 'text-emerald-600/70')}>
+                  {profit} {realizedProfit ? 'profit' : 'est.'}
+                </span>
               </>
             )}
           </div>

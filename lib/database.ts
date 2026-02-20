@@ -293,6 +293,14 @@ export async function getPdfAnalysesByDeal(dealId: string): Promise<any[]> {
   return api.pdf.getAnalysesByDeal(dealId);
 }
 
+export async function crawlDealDeadlines(dealId: string): Promise<any> {
+  return api.pdf.crawlDealDeadlines(dealId);
+}
+
+export async function crawlAllDeadlines(): Promise<any> {
+  return api.pdf.crawlAllDeadlines();
+}
+
 // ---- AI Deal Analysis ----
 
 export async function analyzeDeal(dealId: string): Promise<any> {

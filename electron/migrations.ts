@@ -787,6 +787,16 @@ const migrations: Migration[] = [
       console.log('[Migration v17] AI Dialer settings seeded');
     },
   },
+  {
+    version: 18,
+    description: 'Add realized_gross_profit column to deals',
+    up(db: Database.Database) {
+      try {
+        db.exec(`ALTER TABLE deals ADD COLUMN realized_gross_profit REAL DEFAULT 0`);
+      } catch { /* Column already exists */ }
+      console.log('[Migration v18] realized_gross_profit column added');
+    },
+  },
 ];
 
 /**

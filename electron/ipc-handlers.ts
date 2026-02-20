@@ -1198,21 +1198,36 @@ Instructions:
       tokenCount: chunk.tokenCount,
     })));
 
-    // Generate summary via Claude
+    // Generate summary, key findings, and deadlines via Claude
     const truncatedText = pdfText.slice(0, 15000);
     let summary = '';
     let keyFindings: string[] = [];
+    let extractedDeadlines: Array<{ label: string; due_date: string }> = [];
 
     try {
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1500,
+        max_tokens: 2000,
         messages: [{
           role: 'user',
           content: `Analyze this real estate document and provide:
 
 1. A concise summary (2-3 paragraphs)
 2. Key findings as a JSON array of strings
+3. Important deadlines/dates as a JSON array
+
+For deadlines, extract:
+- Closing dates
+- Contract expiration dates
+- Inspection/contingency deadlines
+- Option period end dates
+- Due diligence deadlines
+- Title commitment deadlines
+- Financing contingency deadlines
+- Any other time-sensitive obligations
+
+Only include dates that appear to be in the future. Use ISO format YYYY-MM-DD.
+If no deadlines are found, return an empty array.
 
 Document text:
 ${truncatedText}
@@ -1222,7 +1237,10 @@ SUMMARY:
 [Your summary here]
 
 KEY_FINDINGS:
-["finding 1", "finding 2", ...]`
+["finding 1", "finding 2", ...]
+
+DEADLINES:
+[{"label": "Closing Date", "due_date": "2026-03-15"}, ...]`
         }],
       });
 
@@ -1235,6 +1253,12 @@ KEY_FINDINGS:
       if (findingsMatch) {
         try { keyFindings = JSON.parse(findingsMatch[1]); } catch { /* ignore */ }
       }
+
+      const deadlinesMatch = responseText.match(/DEADLINES:\s*(\[[\s\S]*?\])/);
+      if (deadlinesMatch) {
+        try { extractedDeadlines = JSON.parse(deadlinesMatch[1]); } catch { /* ignore */ }
+        if (!Array.isArray(extractedDeadlines)) extractedDeadlines = [];
+      }
     } catch (e) {
       console.error('Claude analysis error:', e);
       summary = 'Analysis generation failed. Text was extracted and stored for search.';
@@ -1246,7 +1270,53 @@ KEY_FINDINGS:
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(dealId, fileName, filePath, category, pdfText, summary, JSON.stringify(keyFindings), pageCount);
 
-    return { summary, keyFindings, pageCount, wordCount: pdfText.split(/\s+/).length };
+    // Auto-create/update deadlines from extracted dates (match by label so addendums update dates)
+    let deadlinesCreated = 0;
+    let deadlinesUpdated = 0;
+    const defaultSchedule = JSON.stringify([
+      { offset_days: 14, fired: false },
+      { offset_days: 7, fired: false },
+      { offset_days: 3, fired: false },
+      { offset_days: 1, fired: false },
+      { offset_days: 0, fired: false },
+    ]);
+
+    for (const dl of extractedDeadlines) {
+      if (!dl.label || !dl.due_date || !/^\d{4}-\d{2}-\d{2}$/.test(dl.due_date)) continue;
+
+      const existing = db.prepare(
+        'SELECT id, due_date FROM deadlines WHERE deal_id = ? AND label = ?'
+      ).get(dealId, dl.label) as any;
+
+      if (existing) {
+        if (existing.due_date !== dl.due_date) {
+          // Addendum changed the date — update and reset alerts
+          db.prepare('UPDATE deadlines SET due_date = ?, alert_schedule = ?, is_acknowledged = 0 WHERE id = ?')
+            .run(dl.due_date, defaultSchedule, existing.id);
+          db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+            dealId, 'deadline_updated_by_scan',
+            JSON.stringify({ deadline_id: existing.id, label: dl.label, old_date: existing.due_date, new_date: dl.due_date, source_file: fileName })
+          );
+          deadlinesUpdated++;
+        }
+      } else {
+        const deadlineId = generateUUID();
+        db.prepare(
+          'INSERT INTO deadlines (id, deal_id, label, due_date, alert_schedule, is_acknowledged) VALUES (?, ?, ?, ?, ?, 0)'
+        ).run(deadlineId, dealId, dl.label, dl.due_date, defaultSchedule);
+        db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+          dealId, 'deadline_auto_created',
+          JSON.stringify({ deadline_id: deadlineId, label: dl.label, due_date: dl.due_date, source_file: fileName })
+        );
+        deadlinesCreated++;
+      }
+    }
+
+    if (deadlinesCreated > 0 || deadlinesUpdated > 0) {
+      console.log(`[PDF Analysis] "${fileName}": ${deadlinesCreated} deadline(s) created, ${deadlinesUpdated} updated`);
+    }
+
+    return { summary, keyFindings, pageCount, wordCount: pdfText.split(/\s+/).length, deadlines: extractedDeadlines };
   });
 
   ipcMain.handle('pdf:getAnalysis', (_event, dealId: string, filePath: string) => {
@@ -1263,6 +1333,158 @@ KEY_FINDINGS:
       if (row.key_findings) row.key_findings = parseJsonField(row.key_findings);
       return row;
     });
+  });
+
+  // ===== DEADLINE CRAWLER =====
+
+  /**
+   * Core crawl function: reads ALL pdf_extractions for a deal, sends them
+   * together to Claude with addendum-aware instructions, and upserts deadlines.
+   */
+  async function crawlDealDeadlinesCore(dealId: string): Promise<{
+    deadlines: Array<{ label: string; due_date: string; source?: string }>;
+    created: number;
+    updated: number;
+    docsScanned: number;
+  }> {
+    const extractions = db.prepare(
+      'SELECT file_name, category, extracted_text FROM pdf_extractions WHERE deal_id = ? ORDER BY analyzed_at ASC'
+    ).all(dealId) as Array<{ file_name: string; category: string; extracted_text: string }>;
+
+    if (extractions.length === 0) {
+      return { deadlines: [], created: 0, updated: 0, docsScanned: 0 };
+    }
+
+    // Build combined document text, labeled by file and ordered chronologically
+    let combinedText = '';
+    for (const ext of extractions) {
+      const label = `\n--- [${ext.category?.toUpperCase() || 'DOCUMENT'}: ${ext.file_name}] ---`;
+      const text = (ext.extracted_text || '').slice(0, 8000);
+      combinedText += `${label}\n${text}\n`;
+    }
+    combinedText = combinedText.slice(0, 30000);
+
+    let anthropic: Anthropic;
+    try {
+      anthropic = getAnthropicClient();
+    } catch {
+      throw new Error('ANTHROPIC_API_KEY not configured');
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: `You are analyzing all documents for a single land transaction deal. Multiple documents may exist — purchase agreements, addendums, amendments, inspection reports, title commitments, etc.
+
+CRITICAL: Addendums and amendments OVERRIDE earlier documents. If an addendum changes a closing date, use the AMENDED date, not the original. Always use the most recent/authoritative version of each deadline.
+
+Extract ALL important deadlines that are still relevant. For each deadline, provide:
+- label: Short descriptive name (e.g. "Closing Date", "Inspection Deadline", "Option Period Ends")
+- due_date: ISO format YYYY-MM-DD
+- source: Which document it comes from
+
+Only include future dates (after today ${today}).
+If an addendum supersedes an earlier date, only include the amended date.
+If no deadlines are found, return an empty array.
+
+Documents:
+${combinedText}
+
+Respond in this exact JSON format only, no other text:
+[{"label": "Closing Date", "due_date": "2026-04-01", "source": "Addendum 1.pdf"}, ...]`,
+      }],
+    });
+
+    const responseText = message.content[0]?.type === 'text' ? message.content[0].text : '[]';
+    let deadlines: Array<{ label: string; due_date: string; source?: string }> = [];
+    try {
+      const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+      if (jsonMatch) deadlines = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(deadlines)) deadlines = [];
+    } catch {
+      deadlines = [];
+    }
+
+    // Upsert: match by label so addendums update the date rather than create duplicates
+    let created = 0;
+    let updated = 0;
+    const defaultSchedule = JSON.stringify([
+      { offset_days: 14, fired: false },
+      { offset_days: 7, fired: false },
+      { offset_days: 3, fired: false },
+      { offset_days: 1, fired: false },
+      { offset_days: 0, fired: false },
+    ]);
+
+    for (const dl of deadlines) {
+      if (!dl.label || !dl.due_date || !/^\d{4}-\d{2}-\d{2}$/.test(dl.due_date)) continue;
+
+      const existing = db.prepare(
+        'SELECT id, due_date FROM deadlines WHERE deal_id = ? AND label = ?'
+      ).get(dealId, dl.label) as any;
+
+      if (existing) {
+        if (existing.due_date !== dl.due_date) {
+          db.prepare('UPDATE deadlines SET due_date = ?, alert_schedule = ?, is_acknowledged = 0 WHERE id = ?')
+            .run(dl.due_date, defaultSchedule, existing.id);
+          db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+            dealId, 'deadline_updated_by_scan',
+            JSON.stringify({ deadline_id: existing.id, label: dl.label, old_date: existing.due_date, new_date: dl.due_date, source: dl.source })
+          );
+          updated++;
+        }
+      } else {
+        const deadlineId = generateUUID();
+        db.prepare(
+          'INSERT INTO deadlines (id, deal_id, label, due_date, alert_schedule, is_acknowledged) VALUES (?, ?, ?, ?, ?, 0)'
+        ).run(deadlineId, dealId, dl.label, dl.due_date, defaultSchedule);
+        db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+          dealId, 'deadline_auto_created',
+          JSON.stringify({ deadline_id: deadlineId, label: dl.label, due_date: dl.due_date, source: dl.source || 'document_scan' })
+        );
+        created++;
+      }
+    }
+
+    if (created > 0 || updated > 0) {
+      console.log(`[DeadlineCrawler] Deal ${dealId}: scanned ${extractions.length} docs → ${created} created, ${updated} updated`);
+    }
+
+    return { deadlines, created, updated, docsScanned: extractions.length };
+  }
+
+  // Crawl deadlines for a single deal
+  ipcMain.handle('pdf:crawlDealDeadlines', async (_event, dealId: string) => {
+    return crawlDealDeadlinesCore(dealId);
+  });
+
+  // Crawl deadlines for ALL deals that have PDF extractions
+  ipcMain.handle('pdf:crawlAllDeadlines', async () => {
+    const deals = db.prepare(
+      'SELECT DISTINCT deal_id FROM pdf_extractions'
+    ).all() as Array<{ deal_id: string }>;
+
+    let totalCreated = 0;
+    let totalUpdated = 0;
+    let errors = 0;
+
+    for (const { deal_id } of deals) {
+      try {
+        const result = await crawlDealDeadlinesCore(deal_id);
+        totalCreated += result.created;
+        totalUpdated += result.updated;
+      } catch (e) {
+        console.error(`[DeadlineCrawler] Failed for deal ${deal_id}:`, e);
+        errors++;
+      }
+    }
+
+    console.log(`[DeadlineCrawler] Bulk scan complete: ${deals.length} deals, ${totalCreated} created, ${totalUpdated} updated, ${errors} errors`);
+    return { dealsScanned: deals.length, totalCreated, totalUpdated, errors };
   });
 
   // ===== AI DEAL ANALYZER =====

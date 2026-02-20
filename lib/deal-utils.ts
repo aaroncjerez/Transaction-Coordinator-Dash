@@ -52,6 +52,7 @@ export interface DealViewData {
   realtor_fee_amount?: number;
   improvement_costs?: number;
   misc_fees?: number;
+  realized_gross_profit?: number;
   // Jerez Land share (v14)
   jl_share_percent?: number;
   jl_share_amount?: number;
@@ -111,6 +112,7 @@ export function mapDealData(raw: Record<string, any>): DealViewData {
     realtor_fee_amount: raw.realtor_fee_amount || 0,
     improvement_costs: raw.improvement_costs || 0,
     misc_fees: raw.misc_fees || 0,
+    realized_gross_profit: raw.realized_gross_profit || 0,
     // JL share
     jl_share_percent: raw.jl_share_percent || 0,
     jl_share_amount: raw.jl_share_amount || 0,

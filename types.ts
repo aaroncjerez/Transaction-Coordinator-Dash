@@ -108,6 +108,7 @@ export interface Deal {
   realtor_fee_amount?: number;
   improvement_costs?: number;
   misc_fees?: number;
+  realized_gross_profit?: number;
   // Jerez Land share (v14)
   jl_share_percent?: number;
   jl_share_amount?: number;

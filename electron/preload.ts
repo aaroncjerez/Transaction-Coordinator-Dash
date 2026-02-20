@@ -83,6 +83,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('pdf:getAnalysis', dealId, filePath),
     getAnalysesByDeal: (dealId: string) =>
       ipcRenderer.invoke('pdf:getAnalysesByDeal', dealId),
+    crawlDealDeadlines: (dealId: string) =>
+      ipcRenderer.invoke('pdf:crawlDealDeadlines', dealId),
+    crawlAllDeadlines: () =>
+      ipcRenderer.invoke('pdf:crawlAllDeadlines'),
   },
 
   files: {

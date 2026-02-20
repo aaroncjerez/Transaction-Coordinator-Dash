@@ -119,6 +119,16 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
     }
   }, []);
 
+  const refreshDeadlines = useCallback(async () => {
+    if (!dealId) return;
+    try {
+      const dlData = await getDeadlinesByDeal(dealId);
+      setDeadlines((dlData || []) as Deadline[]);
+    } catch (e) {
+      console.error('Failed to refresh deadlines:', e);
+    }
+  }, [dealId]);
+
   useEffect(() => {
     if (dealId) {
       fetchDeal(dealId);
@@ -299,7 +309,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                   <div className="flex-1 flex overflow-hidden min-h-0">
                     {/* Left column — Overview */}
                     <div className="w-[58%] overflow-y-auto scrollbar-thin px-5 py-4 border-r border-gray-100">
-                      <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} />
+                      <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} onDeadlinesRefresh={refreshDeadlines} />
                     </div>
                     {/* Right column — Tasks */}
                     <div className="w-[42%] overflow-y-auto scrollbar-thin px-4 py-4">
@@ -322,7 +332,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                 /* Single-column layout (<1280px) */
                 <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
                   {activeTab === 'summary' && (
-                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} />
+                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} onDeadlinesRefresh={refreshDeadlines} />
                   )}
                   {activeTab === 'tasks' && stageColor && (
                     <DealTasks dealId={deal.id} stageHex={stageColor.hex} onUndoableAction={onUndoableAction} />

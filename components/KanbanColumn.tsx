@@ -120,9 +120,10 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
     <div
       ref={setNodeRef}
       className={cn(
-        'w-[280px] flex-shrink-0 flex flex-col max-h-full transition-colors duration-150',
+        'w-[280px] flex-shrink-0 flex flex-col transition-colors duration-150',
         isOver && 'ring-2 ring-primary/30 ring-offset-2 ring-offset-background rounded-card'
       )}
+      style={{ maxHeight: 'calc(100vh - 220px)' }}
     >
       {/* Column Header — thin colored top border, white bg */}
       <div className={cn('border-t-2 bg-white rounded-t-card border border-gray-200 px-3 py-2.5', sc.topBorder)}>

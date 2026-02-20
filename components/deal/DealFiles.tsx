@@ -84,8 +84,19 @@ export const DealFiles: React.FC<DealFilesProps> = ({ dealId, fubPersonId }) => 
     if (!event.target.files || event.target.files.length === 0) return;
     const file = event.target.files[0];
     try {
-      await uploadFileLocal(dealId, file, categoryKey, (msg) => console.log(msg));
-      fetchData();
+      const result = await uploadFileLocal(dealId, file, categoryKey, (msg) => console.log(msg));
+      await fetchData();
+
+      // Auto-analyze PDFs on upload
+      if (file.name.toLowerCase().endsWith('.pdf') && result?.file_path) {
+        handleAnalyze({
+          id: result.id,
+          name: result.file_name,
+          url: `file://${result.file_path}`,
+          categoryKey: result.category || categoryKey,
+          source: 'local',
+        });
+      }
     } catch (error: any) {
       console.error('Error uploading file:', error);
       alert(error.message || 'Failed to upload file.');

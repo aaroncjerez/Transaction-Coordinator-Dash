@@ -829,10 +829,10 @@ export const Pipeline: React.FC = () => {
         </div>
       )}
 
-      {/* Kanban Board */}
-      <div className="flex-1 overflow-hidden">
+      {/* Kanban Board + Cancelled Deals */}
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
-          <div className="kanban-scroll flex-1 items-start p-4">
+          <div className="kanban-scroll items-start p-4">
             {PIPELINE_STAGES.map(s => (
               <SkeletonColumn key={s} />
             ))}
@@ -849,7 +849,7 @@ export const Pipeline: React.FC = () => {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="kanban-scroll flex-1 items-start p-4">
+            <div className="kanban-scroll items-start p-4">
               {PIPELINE_STAGES.map(stage => (
                 <KanbanColumn
                   key={stage}
@@ -886,54 +886,54 @@ export const Pipeline: React.FC = () => {
             </DragOverlay>
           </DndContext>
         )}
-      </div>
 
-      {/* Cancelled Deals Dropdown */}
-      {cancelledDeals.length > 0 && (
-        <div className="px-4 pb-3">
-          <button
-            onClick={() => setShowCancelled(!showCancelled)}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-card hover:bg-gray-50 transition-colors"
-          >
-            <ChevronRight
-              size={14}
-              className={cn('text-gray-400 transition-transform', showCancelled && 'rotate-90')}
-            />
-            <span className="text-caption font-semibold text-gray-500">
-              {cancelledDeals.length} Cancelled Deal{cancelledDeals.length !== 1 ? 's' : ''}
-            </span>
-            <span className="flex-1" />
-          </button>
+        {/* Cancelled Deals Dropdown */}
+        {cancelledDeals.length > 0 && (
+          <div className="px-4 pb-3">
+            <button
+              onClick={() => setShowCancelled(!showCancelled)}
+              className="w-full flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-card hover:bg-gray-50 transition-colors"
+            >
+              <ChevronRight
+                size={14}
+                className={cn('text-gray-400 transition-transform', showCancelled && 'rotate-90')}
+              />
+              <span className="text-caption font-semibold text-gray-500">
+                {cancelledDeals.length} Cancelled Deal{cancelledDeals.length !== 1 ? 's' : ''}
+              </span>
+              <span className="flex-1" />
+            </button>
 
-          {showCancelled && (
-            <div className="mt-2 bg-white border border-gray-200 rounded-card divide-y divide-gray-100 max-h-60 overflow-y-auto scrollbar-thin animate-fade-in">
-              {cancelledDeals.map(deal => (
-                <div
-                  key={deal.id}
-                  className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors group"
-                  onClick={() => setSelectedDealId(deal.id)}
-                >
-                  <span className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
-                  <span className="text-sm font-medium text-gray-600 truncate flex-1">
-                    {deal.deal_name}
-                  </span>
-                  {(deal.county || deal.state) && (
-                    <span className="text-micro text-gray-400">
-                      {[deal.county, deal.state].filter(Boolean).join(', ')}
-                    </span>
-                  )}
-                  <button
-                    onClick={e => { e.stopPropagation(); handleRestoreDeal(deal.id); }}
-                    className="opacity-0 group-hover:opacity-100 text-micro text-primary hover:text-primary/80 font-medium transition-all"
+            {showCancelled && (
+              <div className="mt-2 bg-white border border-gray-200 rounded-card divide-y divide-gray-100 max-h-60 overflow-y-auto scrollbar-thin animate-fade-in">
+                {cancelledDeals.map(deal => (
+                  <div
+                    key={deal.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors group"
+                    onClick={() => setSelectedDealId(deal.id)}
                   >
-                    Restore
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                    <span className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-medium text-gray-600 truncate flex-1">
+                      {deal.deal_name}
+                    </span>
+                    {(deal.county || deal.state) && (
+                      <span className="text-micro text-gray-400">
+                        {[deal.county, deal.state].filter(Boolean).join(', ')}
+                      </span>
+                    )}
+                    <button
+                      onClick={e => { e.stopPropagation(); handleRestoreDeal(deal.id); }}
+                      className="opacity-0 group-hover:opacity-100 text-micro text-primary hover:text-primary/80 font-medium transition-all"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Deal Modal */}
       <DealModal

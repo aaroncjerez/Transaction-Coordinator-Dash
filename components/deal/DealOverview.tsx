@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import {
   DollarSign, Calendar, Phone, MapPin, ChevronDown, ChevronRight,
   Mail, Building2, FileText, User, Link as LinkIcon, AlertTriangle, Clock, Receipt,
+  Loader2, Search,
 } from 'lucide-react';
 import { Deadline } from '../../types';
 import { DealViewData } from '../../lib/deal-utils';
 import { DEAL_STAGES, DEAL_TYPES, getStageColor } from '../../constants';
 import { cn } from '../../lib/utils';
-import { updateDealFields } from '../../lib/database';
+import { updateDealFields, crawlDealDeadlines } from '../../lib/database';
 
 interface DealOverviewProps {
   deal: DealViewData;
@@ -15,9 +16,10 @@ interface DealOverviewProps {
   onDealPersisted?: (fubPush?: { queued: boolean; success?: boolean; error?: string }) => void;
   queueSave?: (field: string, value: any) => void;
   deadlines?: Deadline[];
+  onDeadlinesRefresh?: () => void;
 }
 
-export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, onDealPersisted, queueSave, deadlines }) => {
+export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, onDealPersisted, queueSave, deadlines, onDeadlinesRefresh }) => {
   const stageColor = getStageColor(deal.stage);
   const spread = deal.expected_sales_price - deal.purchase_price;
 
@@ -83,39 +85,82 @@ export const DealOverview: React.FC<DealOverviewProps> = ({ deal, onDealChange, 
         </div>
       </div>
 
-      {/* Deadline Preview — top 3 upcoming, inline */}
-      {deadlines && deadlines.length > 0 && (() => {
+      {/* Deadline Preview — top 3 upcoming + scan button */}
+      {(() => {
         const now = Date.now();
-        const urgent = deadlines
+        const urgent = (deadlines || [])
           .filter(d => !d.is_acknowledged)
           .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
           .slice(0, 3);
-        if (urgent.length === 0) return null;
+        const [scanning, setScanning] = useState(false);
+        const [scanResult, setScanResult] = useState<string | null>(null);
+
+        const handleScan = async () => {
+          setScanning(true);
+          setScanResult(null);
+          try {
+            const result = await crawlDealDeadlines(deal.id);
+            if (result.created > 0 || result.updated > 0) {
+              setScanResult(`${result.created} found, ${result.updated} updated`);
+            } else if (result.docsScanned === 0) {
+              setScanResult('No documents to scan');
+            } else {
+              setScanResult('No new deadlines');
+            }
+            onDeadlinesRefresh?.();
+          } catch (e: any) {
+            setScanResult('Scan failed');
+            console.error('Deadline scan failed:', e);
+          } finally {
+            setScanning(false);
+          }
+        };
+
         return (
           <div className="bg-white rounded-lg border border-gray-200 p-3">
-            <span className="text-caption font-semibold text-gray-700 block mb-2">Upcoming Deadlines</span>
-            <div className="space-y-1.5">
-              {urgent.map(d => {
-                const days = Math.ceil((new Date(d.due_date).getTime() - now) / 86_400_000);
-                const isOverdue = days < 0;
-                return (
-                  <div key={d.id} className="flex items-center gap-2 text-sm">
-                    {isOverdue ? (
-                      <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
-                    ) : (
-                      <Clock size={13} className={cn('flex-shrink-0', days <= 3 ? 'text-amber-500' : 'text-gray-400')} />
-                    )}
-                    <span className="flex-1 truncate text-gray-700">{d.label}</span>
-                    <span className={cn(
-                      'text-micro font-semibold px-1.5 py-0.5 rounded',
-                      isOverdue ? 'bg-red-50 text-red-700' : days <= 3 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600',
-                    )}>
-                      {isOverdue ? `${Math.abs(days)}d overdue` : days === 0 ? 'Today' : `${days}d`}
-                    </span>
-                  </div>
-                );
-              })}
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-caption font-semibold text-gray-700">Upcoming Deadlines</span>
+              <button
+                onClick={handleScan}
+                disabled={scanning}
+                className="flex items-center gap-1 text-micro font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+                title="Scan all documents for deadlines"
+              >
+                {scanning ? <Loader2 size={11} className="animate-spin" /> : <Search size={11} />}
+                {scanning ? 'Scanning...' : 'Scan Docs'}
+              </button>
             </div>
+            {scanResult && (
+              <div className="text-micro text-gray-500 mb-1.5">{scanResult}</div>
+            )}
+            {urgent.length > 0 ? (
+              <div className="space-y-1.5">
+                {urgent.map(d => {
+                  const days = Math.ceil((new Date(d.due_date).getTime() - now) / 86_400_000);
+                  const isOverdue = days < 0;
+                  return (
+                    <div key={d.id} className="flex items-center gap-2 text-sm">
+                      {isOverdue ? (
+                        <AlertTriangle size={13} className="text-red-500 flex-shrink-0" />
+                      ) : (
+                        <Clock size={13} className={cn('flex-shrink-0', days <= 3 ? 'text-amber-500' : 'text-gray-400')} />
+                      )}
+                      <span className="flex-1 truncate text-gray-700">{d.label}</span>
+                      <span className={cn(
+                        'text-micro font-semibold px-1.5 py-0.5 rounded',
+                        isOverdue ? 'bg-red-50 text-red-700' : days <= 3 ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600',
+                      )}>
+                        {isOverdue ? `${Math.abs(days)}d overdue` : days === 0 ? 'Today' : `${days}d`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-micro text-gray-400 text-center py-1">
+                {scanning ? 'Scanning documents...' : 'No deadlines yet — click Scan Docs'}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -366,7 +411,7 @@ const FeesAndProfit: React.FC<{
   const jlShareAmount = deal.jl_share_amount || 0;
 
   const totalFees = transactionalFundingFee + realtorFeeAmount + improvementCosts + miscFees;
-  const realizedGrossProfit = spread - totalFees;
+  const realizedGrossProfit = deal.realized_gross_profit || 0;
 
   /** Debounced save helper for fee fields */
   const handleFeeChange = (field: string, value: any) => {
@@ -385,7 +430,7 @@ const FeesAndProfit: React.FC<{
 
   const handleJlPercentChange = (percent: number) => {
     onDealChange('jl_share_percent', percent);
-    const calculatedAmount = Math.round((realizedGrossProfit * (percent / 100)) * 100) / 100;
+    const calculatedAmount = Math.round(((deal.realized_gross_profit || 0) * (percent / 100)) * 100) / 100;
     onDealChange('jl_share_amount', calculatedAmount);
     queueSave?.('jl_share_percent', percent);
     queueSave?.('jl_share_amount', calculatedAmount);
@@ -465,26 +510,32 @@ const FeesAndProfit: React.FC<{
               −${totalFees.toLocaleString()}
             </span>
           </div>
-          <div className={cn(
-            'flex items-center justify-between rounded-md px-3 py-2 border',
-            realizedGrossProfit > 0 ? 'bg-emerald-50 border-emerald-200' :
-            realizedGrossProfit < 0 ? 'bg-red-50 border-red-200' :
-            'bg-subtle border-gray-200'
-          )}>
-            <span className={cn(
-              'text-caption font-medium',
-              realizedGrossProfit > 0 ? 'text-emerald-700' :
-              realizedGrossProfit < 0 ? 'text-red-700' :
-              'text-gray-500'
-            )}>Realized Gross Profit</span>
-            <span className={cn(
-              'text-sm font-bold',
-              realizedGrossProfit > 0 ? 'text-emerald-700' :
-              realizedGrossProfit < 0 ? 'text-red-700' :
-              'text-gray-500'
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label className="text-caption text-gray-500">Realized Gross Profit</label>
+              <input
+                type="number"
+                value={realizedGrossProfit || ''}
+                placeholder="0"
+                onChange={e => handleFeeChange('realized_gross_profit', Number(e.target.value))}
+                className={inputClasses}
+              />
+            </div>
+            <div className={cn(
+              'flex items-center justify-center rounded-md px-3 py-1.5 border',
+              realizedGrossProfit > 0 ? 'bg-emerald-50 border-emerald-200' :
+              realizedGrossProfit < 0 ? 'bg-red-50 border-red-200' :
+              'bg-subtle border-gray-200'
             )}>
-              ${realizedGrossProfit.toLocaleString()}
-            </span>
+              <span className={cn(
+                'text-sm font-bold',
+                realizedGrossProfit > 0 ? 'text-emerald-700' :
+                realizedGrossProfit < 0 ? 'text-red-700' :
+                'text-gray-500'
+              )}>
+                ${realizedGrossProfit.toLocaleString()}
+              </span>
+            </div>
           </div>
         </div>
 

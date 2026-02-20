@@ -2,12 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, Clock, CheckSquare, TrendingUp, DollarSign,
-  ArrowRight, Calendar, LayoutGrid,
+  ArrowRight, Calendar, LayoutGrid, Search, Loader2,
 } from 'lucide-react';
 import { Deal, Task, Deadline, DealStage } from '../types';
 import { PIPELINE_STAGES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
-import { fetchAllDeals, fetchAllTasks, getAllDeadlines } from '../lib/database';
+import { fetchAllDeals, fetchAllTasks, getAllDeadlines, crawlAllDeadlines } from '../lib/database';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
 import { usePreferences } from '../contexts/PreferencesContext';
@@ -40,6 +40,8 @@ export const Dashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [scanningAll, setScanningAll] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -56,6 +58,23 @@ export const Dashboard: React.FC = () => {
     };
     load();
   }, []);
+
+  const handleScanAll = async () => {
+    setScanningAll(true);
+    setScanResult(null);
+    try {
+      const result = await crawlAllDeadlines();
+      setScanResult(`${result.dealsScanned} deals scanned: ${result.totalCreated} deadlines found, ${result.totalUpdated} updated`);
+      // Refresh deadlines
+      const dl = await getAllDeadlines();
+      setDeadlines(dl as Deadline[]);
+    } catch (e) {
+      setScanResult('Scan failed');
+      console.error('Bulk deadline scan failed:', e);
+    } finally {
+      setScanningAll(false);
+    }
+  };
 
   // ---- Derived data ----
 
@@ -309,8 +328,28 @@ export const Dashboard: React.FC = () => {
             </SectionCard>
           )}
 
+          {/* ---- Scan All Documents for Deadlines ---- */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleScanAll}
+              disabled={scanningAll}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-caption font-medium transition-colors',
+                scanningAll
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-primary/10 text-primary hover:bg-primary/20',
+              )}
+            >
+              {scanningAll ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+              {scanningAll ? 'Scanning documents...' : 'Scan All Documents for Deadlines'}
+            </button>
+            {scanResult && (
+              <span className="text-micro text-gray-500">{scanResult}</span>
+            )}
+          </div>
+
           {/* ---- All Clear Message ---- */}
-          {needsAttentionCount === 0 && comingUpCount === 0 && activeDeals.length > 0 && (
+          {needsAttentionCount === 0 && comingUpCount === 0 && activeDeals.length > 0 && !scanningAll && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-card p-6 text-center">
               <CheckSquare size={24} className="text-emerald-500 mx-auto mb-2" />
               <p className="text-sm font-medium text-emerald-800">All clear</p>

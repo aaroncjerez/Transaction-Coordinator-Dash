@@ -27,6 +27,8 @@ export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
     return sum + (profit > 0 ? profit : 0);
   }, 0);
 
+  const totalRealizedProfit = activeDeals.reduce((sum, d) => sum + (d.realized_gross_profit || 0), 0);
+
   const now = Date.now();
   const overdueCount = deadlines.filter(d =>
     !d.is_acknowledged && new Date(d.due_date).getTime() < now
@@ -51,6 +53,12 @@ export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
         label="Est. Profit"
         value={formatValue(totalProfit)}
         valueClass="text-emerald-600"
+      />
+      <Metric
+        icon={<DollarSign size={12} />}
+        label="Realized"
+        value={formatValue(totalRealizedProfit)}
+        valueClass={totalRealizedProfit > 0 ? 'text-emerald-600' : undefined}
       />
       <Metric
         icon={<AlertTriangle size={12} />}
