@@ -176,6 +176,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('kpi:getCeoBrief', dashboardState),
   },
 
+  cfo: {
+    getInsights: (data: any) =>
+      ipcRenderer.invoke('cfo:getInsights', data),
+  },
+
   reminders: {
     create: (taskId: string, remindAt: string) =>
       ipcRenderer.invoke('reminders:create', taskId, remindAt),

@@ -20,14 +20,20 @@ const formatValue = (value: number): string => {
 export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
   deals, tasks, deadlines, onFilterOverdue, onFilterStale,
 }) => {
-  const activeDeals = deals.filter(d => d.stage !== 'Cancelled');
+  const activeDeals = deals.filter(d => d.stage !== 'Cancelled' && d.stage !== 'Sold');
+  const soldDeals = deals.filter(d => d.stage === 'Sold');
   const totalPurchase = activeDeals.reduce((sum, d) => sum + (d.purchase_price || 0), 0);
-  const totalProfit = activeDeals.reduce((sum, d) => {
+
+  // My projected share: sum jl_share_amount for active deals, fallback to spread * pct
+  const myProjected = activeDeals.reduce((sum, d) => {
+    if (d.jl_share_amount && d.jl_share_amount > 0) return sum + d.jl_share_amount;
     const profit = (d.expected_sales_price || 0) - (d.purchase_price || 0);
-    return sum + (profit > 0 ? profit : 0);
+    const pct = d.jl_share_percent || 0;
+    return sum + (profit > 0 ? profit * pct / 100 : 0);
   }, 0);
 
-  const totalRealizedProfit = activeDeals.reduce((sum, d) => sum + (d.realized_gross_profit || 0), 0);
+  // My realized share: sum jl_share_amount for sold deals
+  const myRealized = soldDeals.reduce((sum, d) => sum + (d.jl_share_amount || 0), 0);
 
   const now = Date.now();
   const overdueCount = deadlines.filter(d =>
@@ -50,15 +56,15 @@ export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
       />
       <Metric
         icon={<TrendingUp size={12} />}
-        label="Est. Profit"
-        value={formatValue(totalProfit)}
+        label="My Projected"
+        value={formatValue(myProjected)}
         valueClass="text-emerald-600"
       />
       <Metric
         icon={<DollarSign size={12} />}
-        label="Realized"
-        value={formatValue(totalRealizedProfit)}
-        valueClass={totalRealizedProfit > 0 ? 'text-emerald-600' : undefined}
+        label="My Realized"
+        value={formatValue(myRealized)}
+        valueClass={myRealized > 0 ? 'text-emerald-600' : undefined}
       />
       <Metric
         icon={<AlertTriangle size={12} />}

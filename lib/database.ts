@@ -321,6 +321,12 @@ export async function fetchKpiCeoBrief(dashboardState: any): Promise<any> {
   return api.kpi.getCeoBrief(dashboardState);
 }
 
+// ---- CFO Insights ----
+
+export async function getCfoInsights(data: any): Promise<any> {
+  return api.cfo.getInsights(data);
+}
+
 // ---- AI Dialer (Supabase) ----
 
 export async function fetchDialerCallQueue(limit?: number): Promise<any[]> {

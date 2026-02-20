@@ -1685,6 +1685,21 @@ Provide your analysis in JSON format:
     }
   });
 
+  // ===== CFO INSIGHTS =====
+
+  ipcMain.handle('cfo:getInsights', async (_event, data: any) => {
+    try {
+      const { generateCFOInsights } = await import('./cfo-insights.js');
+      const setting = db.prepare("SELECT value FROM settings WHERE key = 'anthropic_api_key'").get() as any;
+      const apiKey = setting?.value || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured. Set it in Settings.');
+      return await generateCFOInsights(data, apiKey);
+    } catch (error: any) {
+      console.error('[CFO] Error generating insights:', error);
+      throw new Error(error?.message || 'Failed to generate CFO insights');
+    }
+  });
+
   // ===== TASK REMINDERS =====
 
   ipcMain.handle('reminders:create', (_event, taskId: string, remindAt: string) => {

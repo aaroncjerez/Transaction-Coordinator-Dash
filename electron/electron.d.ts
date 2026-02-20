@@ -109,6 +109,15 @@ export interface ElectronAPI {
     getCeoBrief: (dashboardState: any) => Promise<any>;
   };
 
+  cfo: {
+    getInsights: (data: any) => Promise<{
+      summary: string;
+      insights: { title: string; detail: string }[];
+      monthlyTrend: string;
+      generatedAt: string;
+    }>;
+  };
+
   reminders: {
     create: (taskId: string, remindAt: string) => Promise<any>;
     getByTask: (taskId: string) => Promise<any[]>;

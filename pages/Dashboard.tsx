@@ -2,12 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, Clock, CheckSquare, TrendingUp, DollarSign,
-  ArrowRight, Calendar, LayoutGrid, Search, Loader2,
+  ArrowRight, Calendar, LayoutGrid, Search, Loader2, Sparkles,
 } from 'lucide-react';
-import { Deal, Task, Deadline, DealStage } from '../types';
+import { Deal, Task, Deadline } from '../types';
 import { PIPELINE_STAGES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
-import { fetchAllDeals, fetchAllTasks, getAllDeadlines, crawlAllDeadlines } from '../lib/database';
+import { fetchAllDeals, fetchAllTasks, getAllDeadlines, crawlAllDeadlines, getCfoInsights } from '../lib/database';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
 import { usePreferences } from '../contexts/PreferencesContext';
@@ -42,6 +42,14 @@ export const Dashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [scanningAll, setScanningAll] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [cfoInsights, setCfoInsights] = useState<{
+    summary: string;
+    insights: { title: string; detail: string }[];
+    monthlyTrend: string;
+    generatedAt: string;
+  } | null>(null);
+  const [cfoLoading, setCfoLoading] = useState(false);
+  const [cfoError, setCfoError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -152,11 +160,61 @@ export const Dashboard: React.FC = () => {
   // Financials
   const totalPipeline = useMemo(() =>
     activeDeals.reduce((sum, d) => sum + (d.purchase_price || 0), 0), [activeDeals]);
-  const totalProfit = useMemo(() =>
+
+  // Sold deals
+  const soldDeals = useMemo(() => deals.filter(d => d.stage === 'Sold'), [deals]);
+
+  // My projected share: sum jl_share_amount for active deals, fallback to spread * pct
+  const myProjectedProfit = useMemo(() =>
     activeDeals.reduce((sum, d) => {
+      if (d.jl_share_amount && d.jl_share_amount > 0) return sum + d.jl_share_amount;
       const profit = (d.expected_sales_price || 0) - (d.purchase_price || 0);
-      return sum + (profit > 0 ? profit : 0);
+      const pct = d.jl_share_percent || 0;
+      return sum + (profit > 0 ? profit * pct / 100 : 0);
     }, 0), [activeDeals]);
+
+  // My realized share: sum jl_share_amount for sold deals
+  const myRealizedProfit = useMemo(() =>
+    soldDeals.reduce((sum, d) => sum + (d.jl_share_amount || 0), 0), [soldDeals]);
+
+  // Month-to-month profit (My Share) grouped by close_date
+  interface MonthlyProfit {
+    month: string;
+    label: string;
+    dealCount: number;
+    realizedGrossProfit: number;
+    myShare: number;
+  }
+
+  const monthlyProfits = useMemo((): MonthlyProfit[] => {
+    const byMonth: Record<string, MonthlyProfit> = {};
+    soldDeals.forEach(d => {
+      const dateStr = d.close_date || d.updated_at || d.created_at;
+      if (!dateStr || dateStr === 'TBD') return;
+      const dt = new Date(dateStr);
+      if (isNaN(dt.getTime())) return;
+      const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      if (!byMonth[key]) {
+        byMonth[key] = {
+          month: key,
+          label: dt.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          dealCount: 0,
+          realizedGrossProfit: 0,
+          myShare: 0,
+        };
+      }
+      byMonth[key].dealCount++;
+      byMonth[key].realizedGrossProfit += d.realized_gross_profit || 0;
+      byMonth[key].myShare += d.jl_share_amount || 0;
+    });
+    return Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month));
+  }, [soldDeals]);
+
+  const trailingAverage = useMemo(() => {
+    const recent = monthlyProfits.slice(0, 6);
+    if (recent.length === 0) return 0;
+    return recent.reduce((s, m) => s + m.myShare, 0) / recent.length;
+  }, [monthlyProfits]);
 
   // Deal name lookup helper
   const dealNameMap = useMemo(() => {
@@ -167,6 +225,36 @@ export const Dashboard: React.FC = () => {
 
   const needsAttentionCount = overdueDeadlines.length + staleDeals.length;
   const comingUpCount = upcomingDeadlines.length + approachingClose.length;
+
+  // ---- CFO Insights handler ----
+  const handleGetCfoInsights = async () => {
+    setCfoLoading(true);
+    setCfoError(null);
+    try {
+      const stageBreakdown: Record<string, number> = {};
+      activeDeals.forEach(d => {
+        stageBreakdown[d.stage] = (stageBreakdown[d.stage] || 0) + 1;
+      });
+      const result = await getCfoInsights({
+        activeDeals: { count: activeDeals.length, stages: stageBreakdown },
+        totalPipelineValue: totalPipeline,
+        myProjectedProfit,
+        myRealizedProfit,
+        totalRealizedGross: soldDeals.reduce((s, d) => s + (d.realized_gross_profit || 0), 0),
+        monthlyProfits,
+        trailingAverage,
+        overdueDeadlineCount: overdueDeadlines.length,
+        staleDealsCount: staleDeals.length,
+        pendingTaskCount: pendingTasks.length,
+        soldDealCount: soldDeals.length,
+      });
+      setCfoInsights(result);
+    } catch (err: any) {
+      setCfoError(err?.message || 'Failed to get CFO insights');
+    } finally {
+      setCfoLoading(false);
+    }
+  };
 
   // ---- Render ----
 
@@ -193,10 +281,11 @@ export const Dashboard: React.FC = () => {
         <div className="max-w-5xl mx-auto px-5 py-6 space-y-6">
 
           {/* ---- Quick Stats Row ---- */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <StatCard icon={<LayoutGrid size={16} />} label="Active Deals" value={String(activeDeals.length)} />
             <StatCard icon={<DollarSign size={16} />} label="Pipeline Value" value={formatCurrency(totalPipeline)} />
-            <StatCard icon={<TrendingUp size={16} />} label="Est. Profit" value={formatCurrency(totalProfit)} valueClass="text-emerald-600" />
+            <StatCard icon={<TrendingUp size={16} />} label="My Projected" value={formatCurrency(myProjectedProfit)} valueClass="text-emerald-600" />
+            <StatCard icon={<DollarSign size={16} />} label="My Realized" value={formatCurrency(myRealizedProfit)} valueClass="text-emerald-600" />
             <StatCard icon={<CheckSquare size={16} />} label="Pending Tasks" value={String(pendingTasks.length)} />
           </div>
 
@@ -256,6 +345,95 @@ export const Dashboard: React.FC = () => {
                   <span className="text-gray-500">Done <span className="font-semibold text-emerald-600">{taskBreakdown.done}</span></span>
                 </div>
               </>
+            )}
+          </div>
+
+          {/* ---- Month-to-Month Profit ---- */}
+          {monthlyProfits.length > 0 && (
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-900">Monthly Profit (My Share)</h3>
+                <span className="text-caption text-gray-500">
+                  Avg: <span className="font-semibold text-emerald-600">{formatCurrency(trailingAverage)}</span>/mo
+                </span>
+              </div>
+              <div className="space-y-2">
+                {(() => {
+                  const display = monthlyProfits.slice(0, 6);
+                  const maxShare = Math.max(1, ...display.map(x => x.myShare));
+                  return display.map(m => (
+                    <div key={m.month} className="flex items-center gap-3">
+                      <span className="text-caption text-gray-500 w-16 flex-shrink-0">{m.label}</span>
+                      <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          style={{ width: `${maxShare > 0 ? (m.myShare / maxShare) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <span className="text-caption font-semibold text-gray-800 w-16 text-right">
+                        {formatCurrency(m.myShare)}
+                      </span>
+                      <span className="text-micro text-gray-400 w-14 text-right">
+                        {m.dealCount} deal{m.dealCount !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* ---- AI CFO Insights ---- */}
+          <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-amber-500" />
+                <h3 className="text-sm font-semibold text-gray-900">AI CFO Insights</h3>
+              </div>
+              <button
+                onClick={handleGetCfoInsights}
+                disabled={cfoLoading}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-caption font-medium transition-colors',
+                  cfoLoading
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-amber-50 text-amber-700 hover:bg-amber-100',
+                )}
+              >
+                {cfoLoading ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                {cfoLoading ? 'Analyzing...' : cfoInsights ? 'Refresh' : 'Get CFO Insights'}
+              </button>
+            </div>
+
+            {cfoError && (
+              <p className="text-caption text-red-500 mb-2">{cfoError}</p>
+            )}
+
+            {cfoInsights && (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-700">{cfoInsights.summary}</p>
+                <div className="space-y-2">
+                  {cfoInsights.insights.map((insight, i) => (
+                    <div key={i} className="flex gap-2">
+                      <span className="text-caption font-bold text-amber-600 flex-shrink-0">{i + 1}.</span>
+                      <div>
+                        <p className="text-caption font-semibold text-gray-900">{insight.title}</p>
+                        <p className="text-caption text-gray-600">{insight.detail}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-caption text-gray-500 italic">{cfoInsights.monthlyTrend}</p>
+                <p className="text-micro text-gray-300">
+                  Generated {new Date(cfoInsights.generatedAt).toLocaleString()}
+                </p>
+              </div>
+            )}
+
+            {!cfoInsights && !cfoLoading && !cfoError && (
+              <p className="text-caption text-gray-400 italic">
+                Click the button above to generate CFO-level financial insights for your portfolio.
+              </p>
             )}
           </div>
 
