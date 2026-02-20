@@ -1,10 +1,17 @@
 /**
- * Dialer Queries — All Supabase query functions for the AI Dialer feature.
- * Ported from /Autodialer/dashboard/lib/supabase/queries.ts
+ * Dialer Queries — All Supabase query functions + local SQLite cache for the AI Dialer.
  * Called by IPC handlers in ipc-handlers.ts
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type Database from 'better-sqlite3';
+
+// ── Helpers ──
+
+function getSetting(db: Database.Database, key: string, envFallback: string): string {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as any;
+  return (row?.value?.trim() || process.env[envFallback] || '').trim();
+}
 
 // ── Call Queue ──
 
@@ -25,7 +32,7 @@ export async function getCallQueue(supabase: SupabaseClient, limit = 20) {
 export async function getCallHistory(
   supabase: SupabaseClient,
   limit = 50,
-  filters?: { search?: string; status?: string; sentiment?: string }
+  filters?: { search?: string; status?: string; sentiment?: string; direction?: string }
 ) {
   let query = supabase
     .from('call_records')
@@ -46,6 +53,9 @@ export async function getCallHistory(
   }
   if (filters?.sentiment) {
     query = query.eq('sentiment', filters.sentiment);
+  }
+  if (filters?.direction) {
+    query = query.eq('call_direction', filters.direction);
   }
 
   const { data, error } = await query;
@@ -104,7 +114,7 @@ export async function getDNCList(supabase: SupabaseClient) {
   return data || [];
 }
 
-// ── DNC Stats ──
+// ── DNC Stats (3 sources: AI-detected, FUB, Manual — Airtable dropped) ──
 
 export async function getDNCStats(supabase: SupabaseClient) {
   const { data, error } = await supabase
@@ -116,8 +126,7 @@ export async function getDNCStats(supabase: SupabaseClient) {
   const entries = data || [];
   return {
     total: entries.length,
-    autoDetected: entries.filter((d: any) => d.source === 'Auto-Detected').length,
-    airtable: entries.filter((d: any) => d.source === 'Airtable DNC').length,
+    autoDetected: entries.filter((d: any) => d.source === 'Auto-Detected' || d.source === 'Not Interested').length,
     fub: entries.filter((d: any) => d.source === 'Follow Up Boss').length,
     manual: entries.filter((d: any) => d.source === 'Manually Uploaded').length,
   };
@@ -264,6 +273,28 @@ export async function getTodayCallCount(supabase: SupabaseClient) {
   return count || 0;
 }
 
+// ── Inbound Calls ──
+
+export async function getInboundCalls(supabase: SupabaseClient, limit = 20) {
+  const { data, error } = await supabase
+    .from('call_records')
+    .select(`
+      *,
+      leads_cache!left (
+        first_name,
+        last_name,
+        county,
+        state
+      )
+    `)
+    .eq('call_direction', 'inbound')
+    .order('call_started_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return data || [];
+}
+
 // ── Upload Leads (CSV bulk import) ──
 
 export async function uploadLeadsBatch(
@@ -335,10 +366,6 @@ export async function uploadLeadsBatch(
     }
 
     try {
-      // Use the existing sync_lead_from_airtable RPC which handles:
-      // - Phone normalization & E.164 formatting
-      // - Duplicate detection by phone_normalized
-      // - Skipping finalized leads (DNC, Deal Made, etc.)
       const { data, error } = await supabase.rpc('sync_lead_from_airtable', {
         p_airtable_record_id: `csv_upload_${batchId}_${i}`,
         p_batch_id: batchId,
@@ -360,7 +387,6 @@ export async function uploadLeadsBatch(
         continue;
       }
 
-      // RPC returns { lead_id, action, reason }
       const result = Array.isArray(data) ? data[0] : data;
       const action = result?.action || 'inserted';
       const leadId = result?.lead_id || null;
@@ -397,14 +423,9 @@ export async function uploadLeadsBatch(
 // ── Upload Batch Management ──
 
 export async function getUploadBatches(supabase: SupabaseClient) {
-  // batch_id is embedded in airtable_record_id as: csv_upload_{batchId}_{rowIndex}
-  // batchId format: {timestamp}_{random6} e.g. "1707123456789_abc123"
-  // So we extract parts 3 and 4 (0-indexed: csv=0, upload=1, timestamp=2, random=3)
   const { data, error } = await supabase.rpc('get_upload_batches');
 
-  // If RPC doesn't exist, fall back to raw query
   if (error && error.code === 'PGRST202') {
-    // Fallback: query leads_cache directly
     const { data: leads, error: err2 } = await supabase
       .from('leads_cache')
       .select('airtable_record_id, created_at')
@@ -412,11 +433,9 @@ export async function getUploadBatches(supabase: SupabaseClient) {
 
     if (err2) throw err2;
 
-    // Group by batch_id in JS
     const batches = new Map<string, { batch_id: string; lead_count: number; uploaded_at: string }>();
     for (const lead of (leads || [])) {
       const parts = (lead.airtable_record_id as string).split('_');
-      // csv_upload_{timestamp}_{random}_{rowIndex}
       const batchId = parts.length >= 4 ? `${parts[2]}_${parts[3]}` : 'unknown';
       if (batchId === 'unknown' || !/^\d+_[a-z0-9]+$/i.test(batchId)) continue;
       if (!batches.has(batchId)) {
@@ -460,10 +479,11 @@ export async function deleteUploadBatch(supabase: SupabaseClient, batchId: strin
   return { deleted: (data || []).length };
 }
 
-// ── Call a specific lead via Retell API ──
+// ── Call a specific lead via Retell API (credentials from Settings + .env) ──
 
 export async function callLead(
   supabase: SupabaseClient,
+  db: Database.Database,
   lead: {
     id: string;
     phone_number?: string;
@@ -478,9 +498,12 @@ export async function callLead(
     from_number?: string;
   }
 ) {
-  const RETELL_API_KEY = 'key_1e62391fcbf2609d742c6df304ab';
-  const DEFAULT_AGENT_ID = 'agent_156846b4f169b260d362066666';
-  const DEFAULT_FROM_NUMBER = '+16402320908';
+  const RETELL_API_KEY = getSetting(db, 'retell_api_key', 'RETELL_API_KEY');
+  const DEFAULT_AGENT_ID = getSetting(db, 'retell_agent_id', 'RETELL_AGENT_ID');
+  const DEFAULT_FROM_NUMBER = getSetting(db, 'retell_from_number', 'RETELL_FROM_NUMBER');
+
+  if (!RETELL_API_KEY) throw new Error('Retell API key not configured — set it in Settings.');
+  if (!DEFAULT_AGENT_ID) throw new Error('Retell Agent ID not configured — set it in Settings.');
 
   // Normalize phone to E.164 format (+1XXXXXXXXXX) — Retell requires this
   const rawPhone = lead.phone_number || lead.phone_normalized || '';
@@ -501,7 +524,7 @@ export async function callLead(
     },
     body: JSON.stringify({
       agent_id: lead.retell_agent_id || DEFAULT_AGENT_ID,
-      from_number: lead.from_number || DEFAULT_FROM_NUMBER,
+      from_number: lead.from_number || DEFAULT_FROM_NUMBER || undefined,
       to_number: e164Phone,
       metadata: {
         lead_id: lead.id,
@@ -534,6 +557,128 @@ export async function callLead(
   return { call_id: result.call_id, status: result.call_status || 'initiated' };
 }
 
+// ── Batch Auto-Dial ──
+
+export async function batchDialLeads(
+  supabase: SupabaseClient,
+  db: Database.Database,
+  leadIds: string[],
+  batchSize: number = 10,
+  delayMs: number = 30000,
+  onProgress: (status: any) => void
+): Promise<any> {
+  if (leadIds.length > 50) throw new Error('Maximum 50 leads per batch');
+  if (batchSize > 10) batchSize = 10; // Retell limit
+
+  const sessionId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const startTime = Date.now();
+  const totalBatches = Math.ceil(leadIds.length / batchSize);
+  const details: any[] = [];
+  let dialedCount = 0;
+  let errors = 0;
+  let skippedDnc = 0;
+
+  // Save batch state
+  db.prepare(`
+    INSERT INTO dialer_batch_dial_state (id, status, total_leads, batch_size, delay_seconds, lead_ids, started_at)
+    VALUES (?, 'running', ?, ?, ?, ?, datetime('now'))
+  `).run(sessionId, leadIds.length, batchSize, Math.round(delayMs / 1000), JSON.stringify(leadIds));
+
+  // Get DNC phones for pre-check
+  const dncPhones = new Set<string>();
+  const dncRows = db.prepare('SELECT phone_normalized FROM dialer_dnc_cache').all() as any[];
+  for (const row of dncRows) {
+    dncPhones.add(row.phone_normalized);
+  }
+
+  // Fetch lead details from local cache
+  const placeholders = leadIds.map(() => '?').join(',');
+  const leads = db.prepare(`SELECT * FROM dialer_leads_cache WHERE id IN (${placeholders})`).all(...leadIds) as any[];
+  const leadMap = new Map(leads.map(l => [l.id, l]));
+
+  for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+    const batchStart = batchIdx * batchSize;
+    const batchLeadIds = leadIds.slice(batchStart, batchStart + batchSize);
+
+    // Dial all leads in this batch concurrently
+    const promises = batchLeadIds.map(async (leadId) => {
+      const lead = leadMap.get(leadId);
+      if (!lead) {
+        errors++;
+        details.push({ leadId, phone: '', status: 'error', error: 'Lead not found in cache' });
+        return;
+      }
+
+      // DNC pre-check
+      if (dncPhones.has(lead.phone_normalized)) {
+        skippedDnc++;
+        details.push({ leadId, phone: lead.phone_normalized, status: 'dnc_skipped' });
+        return;
+      }
+
+      try {
+        const result = await callLead(supabase, db, {
+          id: lead.id,
+          phone_normalized: lead.phone_normalized,
+          phone_number: lead.phone_number,
+          first_name: lead.first_name,
+          last_name: lead.last_name,
+          county: lead.county,
+          state: lead.state,
+          parcel_acres: lead.parcel_acres,
+          market_value: lead.market_value,
+        });
+        dialedCount++;
+        details.push({ leadId, phone: lead.phone_normalized, status: 'dialed', callId: result.call_id });
+      } catch (err: any) {
+        errors++;
+        details.push({ leadId, phone: lead.phone_normalized, status: 'error', error: err.message });
+      }
+    });
+
+    await Promise.all(promises);
+
+    // Report progress
+    onProgress({
+      sessionId,
+      status: 'running' as const,
+      totalLeads: leadIds.length,
+      dialedCount,
+      currentBatch: batchIdx + 1,
+      totalBatches,
+      currentLeadName: null,
+      errors,
+      skippedDnc,
+    });
+
+    // Update batch state
+    db.prepare('UPDATE dialer_batch_dial_state SET dialed_count = ?, current_batch = ? WHERE id = ?')
+      .run(dialedCount + skippedDnc, batchIdx + 1, sessionId);
+
+    // Wait between batches (except after the last one)
+    if (batchIdx < totalBatches - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+
+  // Finalize batch state
+  db.prepare("UPDATE dialer_batch_dial_state SET status = 'completed', dialed_count = ?, results = ?, completed_at = datetime('now') WHERE id = ?")
+    .run(dialedCount + skippedDnc, JSON.stringify(details), sessionId);
+
+  return {
+    sessionId,
+    totalLeads: leadIds.length,
+    dialed: dialedCount,
+    connected: 0, // We don't know yet — calls are async
+    failed: errors,
+    skippedDnc,
+    durationSeconds,
+    details,
+  };
+}
+
 // ── Sync FUB People → DNC (crm_exclusions) ──
 
 export async function syncFubPeopleToDNC(
@@ -557,7 +702,6 @@ export async function syncFubPeopleToDNC(
 
   for (const person of people) {
     try {
-      // Upsert into crm_exclusions — skip if phone already exists
       const { error } = await supabase
         .from('crm_exclusions')
         .upsert(
@@ -573,7 +717,6 @@ export async function syncFubPeopleToDNC(
 
       if (error) {
         if (error.code === '23505') {
-          // Unique constraint violation — already exists
           duplicates++;
         } else {
           errors++;
@@ -589,4 +732,227 @@ export async function syncFubPeopleToDNC(
   }
 
   return { total: people.length, added, duplicates, errors };
+}
+
+// ════════════════════════════════════════════════════
+// LOCAL SQLITE CACHE — Write-through sync functions
+// ════════════════════════════════════════════════════
+
+export function syncCallQueueToLocal(db: Database.Database, leads: any[]): void {
+  const upsert = db.prepare(`
+    INSERT OR REPLACE INTO dialer_leads_cache (
+      id, phone_normalized, phone_number, first_name, last_name, email,
+      county, state, parcel_acres, property_address, market_value,
+      final_outcome, ai_cadence_on, attempt_count, max_attempts,
+      rapport_level, cadence_stage, cadence_sequence, next_call_date,
+      callback_requested, callback_datetime, priority_score, priority_reason,
+      can_call_now, has_market_value, in_follow_up_boss,
+      last_contact_at, last_outbound_at,
+      seller_asking_price, our_last_offer, agreed_price,
+      synced_at, created_at, updated_at
+    ) VALUES (
+      @id, @phone_normalized, @phone_number, @first_name, @last_name, @email,
+      @county, @state, @parcel_acres, @property_address, @market_value,
+      @final_outcome, @ai_cadence_on, @attempt_count, @max_attempts,
+      @rapport_level, @cadence_stage, @cadence_sequence, @next_call_date,
+      @callback_requested, @callback_datetime, @priority_score, @priority_reason,
+      @can_call_now, @has_market_value, @in_follow_up_boss,
+      @last_contact_at, @last_outbound_at,
+      @seller_asking_price, @our_last_offer, @agreed_price,
+      datetime('now'), @created_at, @updated_at
+    )
+  `);
+
+  const tx = db.transaction(() => {
+    for (const lead of leads) {
+      upsert.run({
+        id: lead.id,
+        phone_normalized: lead.phone_normalized || '',
+        phone_number: lead.phone_number || null,
+        first_name: lead.first_name || null,
+        last_name: lead.last_name || null,
+        email: lead.email || null,
+        county: lead.county || null,
+        state: lead.state || null,
+        parcel_acres: lead.parcel_acres || null,
+        property_address: lead.property_address || null,
+        market_value: lead.market_value || null,
+        final_outcome: lead.final_outcome || null,
+        ai_cadence_on: lead.ai_cadence_on ? 1 : 0,
+        attempt_count: lead.attempt_count || 0,
+        max_attempts: lead.max_attempts || 14,
+        rapport_level: lead.rapport_level || 'cold',
+        cadence_stage: lead.cadence_stage ?? null,
+        cadence_sequence: lead.cadence_sequence || null,
+        next_call_date: lead.next_call_date || null,
+        callback_requested: lead.callback_requested ? 1 : 0,
+        callback_datetime: lead.callback_datetime || null,
+        priority_score: lead.priority_score || 0,
+        priority_reason: lead.priority_reason || null,
+        can_call_now: lead.can_call_now ? 1 : 0,
+        has_market_value: lead.has_market_value ? 1 : 0,
+        in_follow_up_boss: lead.in_follow_up_boss ? 1 : 0,
+        last_contact_at: lead.last_contact_at || null,
+        last_outbound_at: lead.last_outbound_at || null,
+        seller_asking_price: lead.seller_asking_price || null,
+        our_last_offer: lead.our_last_offer || null,
+        agreed_price: lead.agreed_price || null,
+        created_at: lead.created_at || null,
+        updated_at: lead.updated_at || null,
+      });
+    }
+  });
+  tx();
+}
+
+export function syncCallHistoryToLocal(db: Database.Database, calls: any[]): void {
+  const upsert = db.prepare(`
+    INSERT OR REPLACE INTO dialer_call_records (
+      id, lead_id, phone_normalized, seller_phone_normalized, our_phone,
+      call_direction, retell_call_id, call_started_at, call_ended_at,
+      duration_seconds, call_status, call_successful, sentiment,
+      disconnection_reason, transcript, summary, custom_analysis,
+      extracted_data, cost_cents,
+      lead_first_name, lead_last_name, lead_county, lead_state,
+      synced_at, created_at
+    ) VALUES (
+      @id, @lead_id, @phone_normalized, @seller_phone_normalized, @our_phone,
+      @call_direction, @retell_call_id, @call_started_at, @call_ended_at,
+      @duration_seconds, @call_status, @call_successful, @sentiment,
+      @disconnection_reason, @transcript, @summary, @custom_analysis,
+      @extracted_data, @cost_cents,
+      @lead_first_name, @lead_last_name, @lead_county, @lead_state,
+      datetime('now'), @created_at
+    )
+  `);
+
+  const tx = db.transaction(() => {
+    for (const call of calls) {
+      const lc = call.leads_cache;
+      upsert.run({
+        id: call.id,
+        lead_id: call.lead_id || null,
+        phone_normalized: call.phone_normalized || null,
+        seller_phone_normalized: call.seller_phone_normalized || null,
+        our_phone: call.our_phone || null,
+        call_direction: call.call_direction || 'outbound',
+        retell_call_id: call.retell_call_id || null,
+        call_started_at: call.call_started_at || null,
+        call_ended_at: call.call_ended_at || null,
+        duration_seconds: call.duration_seconds || null,
+        call_status: call.call_status || null,
+        call_successful: call.call_successful ? 1 : 0,
+        sentiment: call.sentiment || null,
+        disconnection_reason: call.disconnection_reason || null,
+        transcript: call.transcript || null,
+        summary: call.summary || null,
+        custom_analysis: call.custom_analysis ? JSON.stringify(call.custom_analysis) : null,
+        extracted_data: call.extracted_data ? JSON.stringify(call.extracted_data) : null,
+        cost_cents: call.cost_cents || null,
+        lead_first_name: lc?.first_name || null,
+        lead_last_name: lc?.last_name || null,
+        lead_county: lc?.county || null,
+        lead_state: lc?.state || null,
+        created_at: call.created_at || null,
+      });
+    }
+
+    // Prune to 200 most recent
+    db.prepare(`
+      DELETE FROM dialer_call_records
+      WHERE id NOT IN (
+        SELECT id FROM dialer_call_records
+        ORDER BY call_started_at DESC
+        LIMIT 200
+      )
+    `).run();
+  });
+  tx();
+}
+
+export function syncDNCToLocal(db: Database.Database, entries: any[]): void {
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM dialer_dnc_cache').run();
+
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO dialer_dnc_cache (
+        id, phone_normalized, first_name, last_name,
+        source, reason, dnc_type, dnc_expires_at, added_at, synced_at
+      ) VALUES (
+        @id, @phone_normalized, @first_name, @last_name,
+        @source, @reason, @dnc_type, @dnc_expires_at, @added_at, datetime('now')
+      )
+    `);
+
+    for (const entry of entries) {
+      insert.run({
+        id: entry.id || `dnc_${entry.phone_normalized}`,
+        phone_normalized: entry.phone_normalized,
+        first_name: entry.first_name || null,
+        last_name: entry.last_name || null,
+        source: entry.source || 'Unknown',
+        reason: entry.reason || null,
+        dnc_type: entry.dnc_type || 'permanent',
+        dnc_expires_at: entry.dnc_expires_at || null,
+        added_at: entry.added_at || null,
+      });
+    }
+  });
+  tx();
+}
+
+// ════════════════════════════════════════════════════
+// LOCAL SQLITE CACHE — Read functions (instant UI)
+// ════════════════════════════════════════════════════
+
+export function getLocalCallQueue(db: Database.Database, limit = 50): any[] {
+  return db.prepare(`
+    SELECT * FROM dialer_leads_cache
+    WHERE can_call_now = 1
+    ORDER BY priority_score DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+export function getLocalCallHistory(
+  db: Database.Database,
+  limit = 100,
+  filters?: { status?: string; sentiment?: string; direction?: string }
+): any[] {
+  let sql = 'SELECT * FROM dialer_call_records';
+  const conditions: string[] = [];
+  const params: any[] = [];
+
+  if (filters?.status) { conditions.push('call_status = ?'); params.push(filters.status); }
+  if (filters?.sentiment) { conditions.push('sentiment = ?'); params.push(filters.sentiment); }
+  if (filters?.direction) { conditions.push('call_direction = ?'); params.push(filters.direction); }
+
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
+  sql += ' ORDER BY call_started_at DESC LIMIT ?';
+  params.push(limit);
+
+  return db.prepare(sql).all(...params);
+}
+
+export function getLocalDNCList(db: Database.Database): any[] {
+  return db.prepare('SELECT * FROM dialer_dnc_cache ORDER BY added_at DESC').all();
+}
+
+export function getLocalDNCStats(db: Database.Database): any {
+  const entries = db.prepare('SELECT source FROM dialer_dnc_cache').all() as any[];
+  return {
+    total: entries.length,
+    autoDetected: entries.filter(d => d.source === 'Auto-Detected' || d.source === 'Not Interested').length,
+    fub: entries.filter(d => d.source === 'Follow Up Boss').length,
+    manual: entries.filter(d => d.source === 'Manually Uploaded').length,
+  };
+}
+
+export function getLocalInboundCalls(db: Database.Database, limit = 20): any[] {
+  return db.prepare(`
+    SELECT * FROM dialer_call_records
+    WHERE call_direction = 'inbound'
+    ORDER BY call_started_at DESC
+    LIMIT ?
+  `).all(limit);
 }

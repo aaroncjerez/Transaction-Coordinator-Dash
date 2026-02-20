@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { PhoneIncoming, PhoneOutgoing, Clock, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { SentimentBadge } from './SentimentBadge';
 import { AIReviewBadge } from './AIReviewBadge';
+import { SentimentSummaryCard } from './SentimentSummaryCard';
 import { cn } from '../../lib/utils';
 import { formatPhone } from '../../lib/utils/phone';
 import type { DialerCallRecord } from '../../types';
@@ -36,12 +37,18 @@ function formatTime(iso: string): string {
 export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
   const [expanded, setExpanded] = useState(false);
 
-  const leadName = call.leads_cache
-    ? [call.leads_cache.first_name, call.leads_cache.last_name].filter(Boolean).join(' ') || 'Unknown'
+  // Support both Supabase join (leads_cache) and local cache (flat lead_ columns)
+  const firstName = (call as any).lead_first_name || call.leads_cache?.first_name;
+  const lastName = (call as any).lead_last_name || call.leads_cache?.last_name;
+  const leadCounty = (call as any).lead_county || call.leads_cache?.county;
+  const leadState = (call as any).lead_state || call.leads_cache?.state;
+
+  const leadName = (firstName || lastName)
+    ? [firstName, lastName].filter(Boolean).join(' ')
     : formatPhone(call.seller_phone_normalized || call.phone_normalized);
 
-  const leadLocation = call.leads_cache
-    ? [call.leads_cache.county, call.leads_cache.state].filter(Boolean).join(', ')
+  const leadLocation = (leadCounty || leadState)
+    ? [leadCounty, leadState].filter(Boolean).join(', ')
     : null;
 
   const DirectionIcon = call.call_direction === 'inbound' ? PhoneIncoming : PhoneOutgoing;
@@ -90,6 +97,11 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
 
         {/* Badges */}
         <div className="flex items-center gap-1.5">
+          {call.call_direction === 'inbound' && (
+            <span className="px-1.5 py-0.5 rounded-full text-micro font-medium bg-blue-50 text-blue-700">
+              Inbound
+            </span>
+          )}
           <AIReviewBadge review={aiReview} />
           <SentimentBadge sentiment={call.sentiment} />
           {call.call_status && (
@@ -115,23 +127,7 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
             </div>
           )}
 
-          {aiReview?.key_insights && aiReview.key_insights.length > 0 && (
-            <div>
-              <p className="text-micro text-gray-500 font-medium mb-1">AI Insights</p>
-              <ul className="list-disc list-inside text-caption text-gray-600 space-y-0.5">
-                {aiReview.key_insights.map((insight: string, i: number) => (
-                  <li key={i}>{insight}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {aiReview?.recommended_next_action && (
-            <div>
-              <p className="text-micro text-gray-500 font-medium mb-1">Recommended Action</p>
-              <p className="text-caption text-gray-700">{aiReview.recommended_next_action}</p>
-            </div>
-          )}
+          {aiReview && <SentimentSummaryCard review={aiReview} />}
 
           {call.transcript && (
             <div>

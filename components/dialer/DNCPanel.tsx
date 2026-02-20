@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Loader2, ShieldOff, ShieldAlert, Plus, Trash2, RefreshCw } from 'lucide-react';
-import { fetchDialerDNCList, fetchDialerDNCStats, addDialerManualDNC, removeDialerDNC, syncDialerFubDNC, onDialerFubSyncProgress } from '../../lib/database';
+import { fetchLocalDialerDNCList, fetchLocalDialerDNCStats, addDialerManualDNC, removeDialerDNC, syncDialerFubDNC, onDialerFubSyncProgress, onDialerCacheUpdated } from '../../lib/database';
 import { formatPhone, normalizePhone } from '../../lib/utils/phone';
 import { useToast } from '../ui/Toast';
 import { cn } from '../../lib/utils';
@@ -23,8 +23,8 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
   const loadData = useCallback(async () => {
     try {
       const [list, dncStats] = await Promise.all([
-        fetchDialerDNCList(),
-        fetchDialerDNCStats(),
+        fetchLocalDialerDNCList(),
+        fetchLocalDialerDNCStats(),
       ]);
       setEntries(list);
       setStats(dncStats);
@@ -39,7 +39,10 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
 
   useEffect(() => {
     onDialerFubSyncProgress((data) => setSyncProgress(data));
-  }, []);
+    onDialerCacheUpdated((data) => {
+      if (data.type === 'dnc') loadData();
+    });
+  }, [loadData]);
 
   const handleSyncFub = async () => {
     setSyncing(true);
@@ -108,7 +111,6 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
 
   const sourceColors: Record<string, string> = {
     'Auto-Detected': 'bg-red-50 text-red-700',
-    'Airtable DNC': 'bg-purple-50 text-purple-700',
     'Follow Up Boss': 'bg-blue-50 text-blue-700',
     'Manually Uploaded': 'bg-gray-100 text-gray-600',
     'Not Interested': 'bg-yellow-50 text-yellow-700',
@@ -118,11 +120,10 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
     <div className="space-y-4">
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           {[
             { label: 'Total', value: stats.total },
             { label: 'Auto-Detected', value: stats.autoDetected, color: 'text-red-600' },
-            { label: 'Airtable', value: stats.airtable, color: 'text-purple-600' },
             { label: 'FUB', value: stats.fub, color: 'text-blue-600' },
             { label: 'Manual', value: stats.manual },
           ].map((s) => (

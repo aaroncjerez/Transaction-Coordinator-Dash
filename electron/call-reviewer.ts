@@ -190,6 +190,13 @@ export async function reviewCall(
   // Write review back to Supabase
   await updateCallReview(supabase, callId, review);
 
+  // Also update local cache
+  try {
+    db.prepare(`
+      UPDATE dialer_call_records SET custom_analysis = ? WHERE id = ?
+    `).run(JSON.stringify(review), callId);
+  } catch (_) { /* table may not exist yet */ }
+
   // Handle DNC detection — auto-protect the lead
   if (review.dnc_detected) {
     const phone = call.seller_phone_normalized || call.phone_normalized;
@@ -261,6 +268,14 @@ export async function reviewRecentCalls(
       const review = await callClaudeWithRetry(anthropic, prompt);
 
       await updateCallReview(supabase, call.id, review);
+
+      // Also update local cache
+      try {
+        db.prepare(`
+          UPDATE dialer_call_records SET custom_analysis = ? WHERE id = ?
+        `).run(JSON.stringify(review), call.id);
+      } catch (_) { /* table may not exist yet */ }
+
       reviewed++;
 
       // Handle DNC

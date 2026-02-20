@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { X, Phone, MapPin, Clock, Loader2, Copy, Check } from 'lucide-react';
 import { CallCard } from './CallCard';
 import { CadenceStageIndicator } from './CadenceStageIndicator';
+import { CadenceTimeline } from './CadenceVisualization';
 import { SentimentBadge } from './SentimentBadge';
+import { SentimentSummaryCard } from './SentimentSummaryCard';
 import { cn } from '../../lib/utils';
 import { formatPhone } from '../../lib/utils/phone';
 import {
@@ -128,6 +130,24 @@ export const DialerLeadModal: React.FC<DialerLeadModalProps> = ({ phoneNormalize
                       </span>
                     </InfoCard>
                   )}
+                </div>
+              )}
+
+              {/* Cadence Timeline */}
+              {leadCache?.cadence_stage != null && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800 mb-2">Cadence Progress</h3>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <CadenceTimeline currentStage={leadCache.cadence_stage} />
+                  </div>
+                </div>
+              )}
+
+              {/* Latest Call AI Review */}
+              {calls.length > 0 && calls[0].custom_analysis && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800 mb-2">Latest Call Analysis</h3>
+                  <SentimentSummaryCard review={calls[0].custom_analysis} />
                 </div>
               )}
 

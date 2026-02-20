@@ -23,6 +23,9 @@ const API_KEYS: ApiKeyConfig[] = [
   { key: 'supabase_url', label: 'Supabase URL (AI Dialer)', placeholder: 'https://xxx.supabase.co', envFallback: 'SUPABASE_URL' },
   { key: 'supabase_anon_key', label: 'Supabase Anon Key (AI Dialer)', placeholder: 'eyJ...', envFallback: 'SUPABASE_ANON_KEY' },
   { key: 'n8n_trigger_webhook', label: 'n8n Cadence Webhook (Railway)', placeholder: 'https://cheerful-kindness-production.up.railway.app/webhook/...', envFallback: 'N8N_TRIGGER_WEBHOOK' },
+  { key: 'retell_api_key', label: 'Retell API Key', placeholder: 'key_...', envFallback: 'RETELL_API_KEY' },
+  { key: 'retell_agent_id', label: 'Retell Agent ID', placeholder: 'agent_...', envFallback: 'RETELL_AGENT_ID' },
+  { key: 'retell_from_number', label: 'Retell From Number', placeholder: '+16401234567', envFallback: 'RETELL_FROM_NUMBER' },
 ];
 
 export const Settings: React.FC = () => {

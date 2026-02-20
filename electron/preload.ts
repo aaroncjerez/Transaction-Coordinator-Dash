@@ -252,5 +252,42 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('dialer:deleteUploadBatch', batchId),
     callLead: (lead: any) =>
       ipcRenderer.invoke('dialer:callLead', lead),
+
+    // Local cache reads
+    getLocalCallQueue: (limit?: number) =>
+      ipcRenderer.invoke('dialer:getLocalCallQueue', limit),
+    getLocalCallHistory: (limit?: number, filters?: any) =>
+      ipcRenderer.invoke('dialer:getLocalCallHistory', limit, filters),
+    getLocalDNCList: () =>
+      ipcRenderer.invoke('dialer:getLocalDNCList'),
+    getLocalDNCStats: () =>
+      ipcRenderer.invoke('dialer:getLocalDNCStats'),
+    getLocalInboundCalls: (limit?: number) =>
+      ipcRenderer.invoke('dialer:getLocalInboundCalls', limit),
+
+    // Inbound calls (Supabase fallback)
+    getInboundCalls: (limit?: number) =>
+      ipcRenderer.invoke('dialer:getInboundCalls', limit),
+
+    // Batch dial
+    batchDial: (leadIds: string[]) =>
+      ipcRenderer.invoke('dialer:batchDial', leadIds),
+    onBatchDialProgress: (callback: (data: any) => void) => {
+      ipcRenderer.on('dialer:batch-dial-progress', (_event: any, data: any) => callback(data));
+    },
+
+    // Inbound call notification
+    onInboundCall: (callback: (data: any) => void) => {
+      ipcRenderer.on('dialer:inbound-call', (_event: any, data: any) => callback(data));
+    },
+
+    // Cache update notification
+    onCacheUpdated: (callback: (data: { type: string }) => void) => {
+      ipcRenderer.on('dialer:cache-updated', (_event: any, data: any) => callback(data));
+    },
+
+    // Force sync
+    forceSync: () =>
+      ipcRenderer.invoke('dialer:forceSync'),
   },
 });

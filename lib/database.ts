@@ -432,3 +432,49 @@ export async function deleteDialerUploadBatch(batchId: string): Promise<{ delete
 export async function dialerCallLead(lead: any): Promise<{ call_id: string; status: string }> {
   return api.dialer.callLead(lead);
 }
+
+// ---- AI Dialer — Local Cache + Batch Dial + Inbound ----
+
+export async function fetchLocalDialerCallQueue(limit?: number): Promise<any[]> {
+  return api.dialer.getLocalCallQueue(limit);
+}
+
+export async function fetchLocalDialerCallHistory(limit?: number, filters?: any): Promise<any[]> {
+  return api.dialer.getLocalCallHistory(limit, filters);
+}
+
+export async function fetchLocalDialerDNCList(): Promise<any[]> {
+  return api.dialer.getLocalDNCList();
+}
+
+export async function fetchLocalDialerDNCStats(): Promise<any> {
+  return api.dialer.getLocalDNCStats();
+}
+
+export async function fetchLocalDialerInboundCalls(limit?: number): Promise<any[]> {
+  return api.dialer.getLocalInboundCalls(limit);
+}
+
+export async function fetchDialerInboundCalls(limit?: number): Promise<any[]> {
+  return api.dialer.getInboundCalls(limit);
+}
+
+export async function startBatchDial(leadIds: string[]): Promise<import('../types').BatchDialResult> {
+  return api.dialer.batchDial(leadIds);
+}
+
+export function onBatchDialProgress(callback: (data: import('../types').BatchDialProgress) => void): void {
+  api.dialer.onBatchDialProgress(callback);
+}
+
+export function onDialerInboundCall(callback: (data: import('../types').InboundCallNotification) => void): void {
+  api.dialer.onInboundCall(callback);
+}
+
+export function onDialerCacheUpdated(callback: (data: { type: string }) => void): void {
+  api.dialer.onCacheUpdated(callback);
+}
+
+export async function forceDialerSync(): Promise<{ success: boolean }> {
+  return api.dialer.forceSync();
+}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Home, LayoutGrid, CheckSquare, BarChart3, TrendingUp, Archive, Settings, Landmark } from 'lucide-react';
+import { Home, LayoutGrid, CheckSquare, BarChart3, TrendingUp, Archive, Settings, Landmark, Phone } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { getFubPersonSyncStatus, fetchAllDeals, fetchAllTasks } from '../lib/database';
+import { getFubPersonSyncStatus, fetchAllDeals, fetchAllTasks, fetchDialerTodayCallCount } from '../lib/database';
 
 interface NavItemProps {
   to: string;
@@ -38,6 +38,7 @@ export const Sidebar: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [dealCount, setDealCount] = useState(0);
   const [pendingTaskCount, setPendingTaskCount] = useState(0);
+  const [dialerCallCount, setDialerCallCount] = useState(0);
 
   useEffect(() => {
     const loadCounts = async () => {
@@ -53,6 +54,11 @@ export const Sidebar: React.FC = () => {
             !cancelledDealIds.has(t.deal_id)
           ).length
         );
+      } catch { /* ignore */ }
+
+      try {
+        const calls = await fetchDialerTodayCallCount();
+        setDialerCallCount(calls);
       } catch { /* ignore */ }
     };
 
@@ -91,6 +97,7 @@ export const Sidebar: React.FC = () => {
         <NavItem to="/" icon={Home} label="Dashboard" />
         <NavItem to="/pipeline" icon={LayoutGrid} label="Pipeline" count={dealCount} />
         <NavItem to="/tasks" icon={CheckSquare} label="Tasks" count={pendingTaskCount} />
+        <NavItem to="/dialer" icon={Phone} label="AI Dialer" count={dialerCallCount} />
         <NavItem to="/analytics" icon={BarChart3} label="Analytics" />
         <NavItem to="/kpis" icon={TrendingUp} label="KPIs" />
         <NavItem to="/archive" icon={Archive} label="Archive" />

@@ -1,4 +1,4 @@
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, BrowserWindow } from 'electron';
 import { getDb, getDataDir } from './database.js';
 import { seedTasksForStage, seedTasksUpToStage } from './rule-engine.js';
 import { chunkTextParagraphAware } from './chunker.js';
@@ -1918,7 +1918,7 @@ Provide your analysis in JSON format:
     const { getSupabaseClient } = await import('./supabase-client.js');
     const supabase = getSupabaseClient(db);
     const { callLead } = await import('./dialer-queries.js');
-    return callLead(supabase, lead);
+    return callLead(supabase, db, lead);
   });
 
   ipcMain.handle('dialer:syncFubDNC', async (_event) => {
@@ -2016,6 +2016,60 @@ Provide your analysis in JSON format:
       fub_people_fetched: totalFetched,
       unique_phones: allPeople.length,
     };
+  });
+
+  // ===== AI DIALER — LOCAL CACHE + BATCH DIAL + INBOUND =====
+
+  ipcMain.handle('dialer:getLocalCallQueue', async (_event, limit?: number) => {
+    const { getLocalCallQueue } = await import('./dialer-queries.js');
+    return getLocalCallQueue(db, limit);
+  });
+
+  ipcMain.handle('dialer:getLocalCallHistory', async (_event, limit?: number, filters?: any) => {
+    const { getLocalCallHistory } = await import('./dialer-queries.js');
+    return getLocalCallHistory(db, limit, filters);
+  });
+
+  ipcMain.handle('dialer:getLocalDNCList', async () => {
+    const { getLocalDNCList } = await import('./dialer-queries.js');
+    return getLocalDNCList(db);
+  });
+
+  ipcMain.handle('dialer:getLocalDNCStats', async () => {
+    const { getLocalDNCStats } = await import('./dialer-queries.js');
+    return getLocalDNCStats(db);
+  });
+
+  ipcMain.handle('dialer:getLocalInboundCalls', async (_event, limit?: number) => {
+    const { getLocalInboundCalls } = await import('./dialer-queries.js');
+    return getLocalInboundCalls(db, limit);
+  });
+
+  ipcMain.handle('dialer:getInboundCalls', async (_event, limit?: number) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { getInboundCalls } = await import('./dialer-queries.js');
+    return getInboundCalls(supabase, limit);
+  });
+
+  ipcMain.handle('dialer:batchDial', async (_event, leadIds: string[]) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
+    const { batchDialLeads } = await import('./dialer-queries.js');
+
+    return batchDialLeads(supabase, db, leadIds, 10, 30000, (progress) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('dialer:batch-dial-progress', progress);
+        }
+      }
+    });
+  });
+
+  ipcMain.handle('dialer:forceSync', async () => {
+    const { fullSync } = await import('./dialer-sync.js');
+    await fullSync();
+    return { success: true };
   });
 }
 

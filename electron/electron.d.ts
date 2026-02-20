@@ -45,6 +45,8 @@ export interface ElectronAPI {
     analyze: (dealId: string, filePath: string, fileName: string, category: string) => Promise<any>;
     getAnalysis: (dealId: string, filePath: string) => Promise<any>;
     getAnalysesByDeal: (dealId: string) => Promise<any[]>;
+    crawlDealDeadlines: (dealId: string) => Promise<any>;
+    crawlAllDeadlines: () => Promise<any>;
   };
 
   files: {
@@ -133,7 +135,7 @@ export interface ElectronAPI {
     getLeadById: (id: string) => Promise<any>;
     getLeadMemory: (phoneNormalized: string) => Promise<any>;
     getDNCList: () => Promise<any[]>;
-    getDNCStats: () => Promise<{ total: number; autoDetected: number; airtable: number; fub: number; manual: number }>;
+    getDNCStats: () => Promise<{ total: number; autoDetected: number; fub: number; manual: number }>;
     addManualDNC: (phone: string, reason: string) => Promise<any>;
     removeFromDNC: (phone: string) => Promise<any>;
     getDailyStats: (days?: number) => Promise<any[]>;
@@ -153,6 +155,29 @@ export interface ElectronAPI {
     getUploadBatchLeads: (batchId: string) => Promise<Array<{ id: string; first_name: string; last_name: string; phone_normalized: string; county: string; state: string; created_at: string }>>;
     deleteUploadBatch: (batchId: string) => Promise<{ deleted: number }>;
     callLead: (lead: any) => Promise<{ call_id: string; status: string }>;
+
+    // Local cache reads
+    getLocalCallQueue: (limit?: number) => Promise<any[]>;
+    getLocalCallHistory: (limit?: number, filters?: any) => Promise<any[]>;
+    getLocalDNCList: () => Promise<any[]>;
+    getLocalDNCStats: () => Promise<any>;
+    getLocalInboundCalls: (limit?: number) => Promise<any[]>;
+
+    // Inbound calls (Supabase fallback)
+    getInboundCalls: (limit?: number) => Promise<any[]>;
+
+    // Batch dial
+    batchDial: (leadIds: string[]) => Promise<import('../types').BatchDialResult>;
+    onBatchDialProgress: (callback: (data: any) => void) => void;
+
+    // Inbound call notification
+    onInboundCall: (callback: (data: any) => void) => void;
+
+    // Cache update notification
+    onCacheUpdated: (callback: (data: { type: string }) => void) => void;
+
+    // Force sync
+    forceSync: () => Promise<{ success: boolean }>;
   };
 }
 

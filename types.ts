@@ -435,7 +435,6 @@ export interface DialerDNCEntry {
 export interface DialerDNCStats {
   total: number;
   autoDetected: number;
-  airtable: number;
   fub: number;
   manual: number;
 }
@@ -539,3 +538,51 @@ export interface UploadBatchResult {
   skipped: number;
   details: UploadLeadResult[];
 }
+
+// ===== Batch Auto-Dial Types =====
+
+export type BatchDialStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed';
+
+export interface BatchDialProgress {
+  sessionId: string;
+  status: BatchDialStatus;
+  totalLeads: number;
+  dialedCount: number;
+  currentBatch: number;
+  totalBatches: number;
+  currentLeadName: string | null;
+  errors: number;
+  skippedDnc: number;
+}
+
+export interface BatchDialResult {
+  sessionId: string;
+  totalLeads: number;
+  dialed: number;
+  connected: number;
+  failed: number;
+  skippedDnc: number;
+  durationSeconds: number;
+  details: Array<{
+    leadId: string;
+    phone: string;
+    status: 'dialed' | 'dnc_skipped' | 'error';
+    callId?: string;
+    error?: string;
+  }>;
+}
+
+// ===== Inbound Call Types =====
+
+export interface InboundCallNotification {
+  callId: string;
+  phone: string;
+  leadName: string | null;
+  leadId: string | null;
+  timestamp: string;
+}
+
+// ===== Cadence Constants =====
+
+export const CADENCE_DAY_SEQUENCE = [1, 2, 4, 6, 9, 12, 16, 20, 24, 28, 32, 36, 39, 42] as const;
+export const CADENCE_TOTAL_STAGES = 14;

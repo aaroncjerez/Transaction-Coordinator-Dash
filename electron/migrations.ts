@@ -797,6 +797,134 @@ const migrations: Migration[] = [
       console.log('[Migration v18] realized_gross_profit column added');
     },
   },
+  {
+    version: 19,
+    description: 'Local dialer cache tables + Retell settings + batch dial state',
+    up(db: Database.Database) {
+      // 1. Local mirror of Supabase call queue
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_leads_cache (
+          id TEXT PRIMARY KEY,
+          phone_normalized TEXT NOT NULL,
+          phone_number TEXT,
+          first_name TEXT,
+          last_name TEXT,
+          email TEXT,
+          county TEXT,
+          state TEXT,
+          parcel_acres REAL,
+          property_address TEXT,
+          market_value REAL,
+          final_outcome TEXT,
+          ai_cadence_on INTEGER DEFAULT 1,
+          attempt_count INTEGER DEFAULT 0,
+          max_attempts INTEGER DEFAULT 14,
+          rapport_level TEXT DEFAULT 'cold',
+          cadence_stage INTEGER,
+          cadence_sequence TEXT,
+          next_call_date TEXT,
+          callback_requested INTEGER DEFAULT 0,
+          callback_datetime TEXT,
+          priority_score REAL DEFAULT 0,
+          priority_reason TEXT,
+          can_call_now INTEGER DEFAULT 0,
+          has_market_value INTEGER DEFAULT 0,
+          in_follow_up_boss INTEGER DEFAULT 0,
+          last_contact_at TEXT,
+          last_outbound_at TEXT,
+          seller_asking_price REAL,
+          our_last_offer REAL,
+          agreed_price REAL,
+          synced_at TEXT DEFAULT (datetime('now')),
+          created_at TEXT,
+          updated_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_dlc_phone ON dialer_leads_cache(phone_normalized);
+        CREATE INDEX IF NOT EXISTS idx_dlc_can_call ON dialer_leads_cache(can_call_now, priority_score DESC);
+        CREATE INDEX IF NOT EXISTS idx_dlc_outcome ON dialer_leads_cache(final_outcome);
+      `);
+
+      // 2. Local mirror of recent call records (capped at 200)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_call_records (
+          id TEXT PRIMARY KEY,
+          lead_id TEXT,
+          phone_normalized TEXT,
+          seller_phone_normalized TEXT,
+          our_phone TEXT,
+          call_direction TEXT DEFAULT 'outbound',
+          retell_call_id TEXT,
+          call_started_at TEXT,
+          call_ended_at TEXT,
+          duration_seconds INTEGER,
+          call_status TEXT,
+          call_successful INTEGER DEFAULT 0,
+          sentiment TEXT,
+          disconnection_reason TEXT,
+          transcript TEXT,
+          summary TEXT,
+          custom_analysis TEXT,
+          extracted_data TEXT,
+          cost_cents INTEGER,
+          lead_first_name TEXT,
+          lead_last_name TEXT,
+          lead_county TEXT,
+          lead_state TEXT,
+          synced_at TEXT DEFAULT (datetime('now')),
+          created_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_dcr_started ON dialer_call_records(call_started_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_dcr_phone ON dialer_call_records(seller_phone_normalized);
+        CREATE INDEX IF NOT EXISTS idx_dcr_direction ON dialer_call_records(call_direction);
+      `);
+
+      // 3. Local mirror of DNC list
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_dnc_cache (
+          id TEXT PRIMARY KEY,
+          phone_normalized TEXT NOT NULL UNIQUE,
+          first_name TEXT,
+          last_name TEXT,
+          source TEXT,
+          reason TEXT,
+          dnc_type TEXT DEFAULT 'permanent',
+          dnc_expires_at TEXT,
+          added_at TEXT,
+          synced_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_ddnc_phone ON dialer_dnc_cache(phone_normalized);
+        CREATE INDEX IF NOT EXISTS idx_ddnc_source ON dialer_dnc_cache(source);
+      `);
+
+      // 4. Batch dial session state
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_batch_dial_state (
+          id TEXT PRIMARY KEY,
+          status TEXT DEFAULT 'pending',
+          total_leads INTEGER DEFAULT 0,
+          dialed_count INTEGER DEFAULT 0,
+          current_batch INTEGER DEFAULT 0,
+          batch_size INTEGER DEFAULT 10,
+          delay_seconds INTEGER DEFAULT 30,
+          lead_ids TEXT,
+          results TEXT,
+          started_at TEXT,
+          completed_at TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // 5. Seed Retell settings (INSERT OR IGNORE so manual values preserved)
+      const seedSettings = db.prepare(
+        "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))"
+      );
+      seedSettings.run('retell_api_key', '');
+      seedSettings.run('retell_agent_id', '');
+      seedSettings.run('retell_from_number', '');
+
+      console.log('[Migration v19] Dialer cache tables + Retell settings created');
+    },
+  },
 ];
 
 /**
