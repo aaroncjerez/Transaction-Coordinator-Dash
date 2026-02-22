@@ -20,7 +20,11 @@ function getSettingValue(db: Database.Database, key: string): string | null {
 
 export function getSupabaseConfig(db: Database.Database): { url: string; anonKey: string } | null {
   const url = getSettingValue(db, 'supabase_url') || process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = getSettingValue(db, 'supabase_anon_key') || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Prefer service role key (bypasses RLS) for server-side operations
+  const anonKey = getSettingValue(db, 'supabase_service_role_key')
+    || getSettingValue(db, 'supabase_anon_key')
+    || process.env.SUPABASE_ANON_KEY
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) return null;
   return { url, anonKey };

@@ -478,3 +478,21 @@ export function onDialerCacheUpdated(callback: (data: { type: string }) => void)
 export async function forceDialerSync(): Promise<{ success: boolean }> {
   return api.dialer.forceSync();
 }
+
+export async function forcePollRetell(): Promise<{ fetched: number; newRecords: number; errors: number }> {
+  return api.dialer.forcePollRetell();
+}
+
+export async function backfillRetellCalls(daysBack: number): Promise<{ fetched: number; newRecords: number; errors: number }> {
+  return api.dialer.backfillRetell(daysBack);
+}
+
+export async function getDialerSyncStatus(): Promise<{
+  running: boolean;
+  supabaseConfigured: boolean;
+  retellConfigured: boolean;
+  fastSync: { ok: boolean; error: string | null; lastRun: string | null };
+  fullSync: { ok: boolean; error: string | null; lastRun: string | null };
+}> {
+  return api.dialer.getSyncStatus();
+}

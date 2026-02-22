@@ -1824,12 +1824,17 @@ Provide your analysis in JSON format:
     return getCallbacksDue(supabase);
   });
 
-  ipcMain.handle('dialer:triggerCadence', async () => {
-    const setting = db.prepare("SELECT value FROM settings WHERE key = 'n8n_trigger_webhook'").get() as any;
-    const webhookUrl = setting?.value || process.env.N8N_TRIGGER_WEBHOOK;
-    if (!webhookUrl) throw new Error('n8n cadence webhook not configured — set it in Settings.');
+  ipcMain.handle('dialer:triggerCadence', async (_event) => {
+    const { getSupabaseClient } = await import('./supabase-client.js');
+    const supabase = getSupabaseClient(db);
     const { triggerCadence } = await import('./dialer-queries.js');
-    return triggerCadence(webhookUrl);
+    return triggerCadence(supabase, db, (progress) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('dialer:batch-dial-progress', progress);
+        }
+      }
+    });
   });
 
   ipcMain.handle('dialer:reviewCall', async (_event, callId: string) => {
@@ -2070,6 +2075,43 @@ Provide your analysis in JSON format:
     const { fullSync } = await import('./dialer-sync.js');
     await fullSync();
     return { success: true };
+  });
+
+  // Force an immediate Retell poll (manual trigger from UI)
+  ipcMain.handle('dialer:forcePollRetell', async () => {
+    const { pollRetellCalls } = await import('./retell-call-poller.js');
+    return pollRetellCalls();
+  });
+
+  // Backfill historical calls from Retell (one-time bulk import)
+  ipcMain.handle('dialer:backfillRetell', async (_event, daysBack: number) => {
+    const { backfillRetellCalls } = await import('./retell-call-poller.js');
+    return backfillRetellCalls(daysBack, (progress) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('dialer:backfill-progress', progress);
+        }
+      }
+    });
+  });
+
+  // Get sync + poller health status
+  ipcMain.handle('dialer:syncStatus', async () => {
+    const { getSyncStatus } = await import('./dialer-sync.js');
+    const syncStatus = getSyncStatus();
+
+    // Also check if Retell poller has prerequisites
+    let retellConfigured = false;
+    try {
+      const retellKey = db.prepare("SELECT value FROM settings WHERE key = 'retell_api_key'").get() as any;
+      const retellAgent = db.prepare("SELECT value FROM settings WHERE key = 'retell_agent_id'").get() as any;
+      retellConfigured = !!(retellKey?.value && retellAgent?.value);
+    } catch { /* ignore */ }
+
+    return {
+      ...syncStatus,
+      retellConfigured,
+    };
   });
 }
 

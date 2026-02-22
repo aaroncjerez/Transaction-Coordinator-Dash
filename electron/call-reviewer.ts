@@ -303,6 +303,36 @@ export async function reviewRecentCalls(
           } catch (err) {
             console.error(`[CallReviewer] Failed to mark hot lead:`, err);
           }
+
+          // Slack notification for positive-sentiment hot leads
+          if (review.sentiment === 'positive') {
+            try {
+              const webhookUrl = (db.prepare("SELECT value FROM settings WHERE key = 'slack_webhook_url'").get() as any)?.value?.trim();
+              if (webhookUrl) {
+                let leadName = '';
+                try {
+                  const lead = db.prepare('SELECT first_name, last_name FROM dialer_leads_cache WHERE phone_normalized = ? LIMIT 1').get(phone) as any;
+                  if (lead) leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ');
+                } catch { /* ignore */ }
+
+                const msg = [
+                  `🔥 *Hot Lead — Positive Sentiment*`,
+                  `*${phone}*${leadName ? ` (${leadName})` : ''}`,
+                  `Duration: ${call.duration_seconds}s | Reason: ${review.hot_lead_reason || 'N/A'}`,
+                  call.summary ? `Summary: ${call.summary}` : '',
+                ].filter(Boolean).join('\n');
+
+                await fetch(webhookUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ text: msg }),
+                });
+                console.log(`[CallReviewer] Slack notification sent for hot lead ${phone}`);
+              }
+            } catch (err) {
+              console.error('[CallReviewer] Slack notification error:', err instanceof Error ? err.message : err);
+            }
+          }
         }
       }
 

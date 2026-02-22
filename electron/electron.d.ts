@@ -178,6 +178,22 @@ export interface ElectronAPI {
 
     // Force sync
     forceSync: () => Promise<{ success: boolean }>;
+
+    // Force Retell poll (manual trigger)
+    forcePollRetell: () => Promise<{ fetched: number; newRecords: number; errors: number }>;
+
+    // Backfill historical calls from Retell
+    backfillRetell: (daysBack: number) => Promise<{ fetched: number; newRecords: number; errors: number }>;
+    onBackfillProgress: (callback: (data: { fetched: number; inserted: number; page: number }) => void) => void;
+
+    // Sync + poller health status
+    getSyncStatus: () => Promise<{
+      running: boolean;
+      supabaseConfigured: boolean;
+      retellConfigured: boolean;
+      fastSync: { ok: boolean; error: string | null; lastRun: string | null };
+      fullSync: { ok: boolean; error: string | null; lastRun: string | null };
+    }>;
   };
 }
 

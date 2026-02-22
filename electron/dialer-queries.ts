@@ -36,15 +36,7 @@ export async function getCallHistory(
 ) {
   let query = supabase
     .from('call_records')
-    .select(`
-      *,
-      leads_cache!left (
-        first_name,
-        last_name,
-        county,
-        state
-      )
-    `)
+    .select('*')
     .order('call_started_at', { ascending: false })
     .limit(limit);
 
@@ -193,18 +185,28 @@ export async function getCallbacksDue(supabase: SupabaseClient) {
 
 // ── Trigger n8n Cadence ──
 
-export async function triggerCadence(webhookUrl: string) {
-  const response = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ trigger: 'tc-dash', timestamp: new Date().toISOString() }),
-  });
+export async function triggerCadence(
+  supabase: SupabaseClient,
+  db: Database.Database,
+  onProgress: (status: any) => void
+): Promise<any> {
+  // Query local cache for cadence-eligible leads (replaces n8n webhook trigger)
+  const leads = db.prepare(`
+    SELECT id FROM dialer_leads_cache
+    WHERE ai_cadence_on = 1
+      AND can_call_now = 1
+      AND final_outcome IS NULL
+    ORDER BY priority_score DESC
+    LIMIT 50
+  `).all() as any[];
 
-  if (!response.ok) {
-    throw new Error(`n8n webhook failed: ${response.status} ${response.statusText}`);
+  if (leads.length === 0) {
+    return { success: true, message: 'No leads due for cadence calls', dialed: 0 };
   }
 
-  return { success: true };
+  console.log(`[triggerCadence] Found ${leads.length} cadence-eligible leads, starting batch dial...`);
+  const leadIds = leads.map((l: any) => l.id);
+  return batchDialLeads(supabase, db, leadIds, 10, 30000, onProgress);
 }
 
 // ── Un-reviewed calls (for AI reviewer) ──
@@ -278,15 +280,7 @@ export async function getTodayCallCount(supabase: SupabaseClient) {
 export async function getInboundCalls(supabase: SupabaseClient, limit = 20) {
   const { data, error } = await supabase
     .from('call_records')
-    .select(`
-      *,
-      leads_cache!left (
-        first_name,
-        last_name,
-        county,
-        state
-      )
-    `)
+    .select('*')
     .eq('call_direction', 'inbound')
     .order('call_started_at', { ascending: false })
     .limit(limit);
@@ -826,9 +820,28 @@ export function syncCallHistoryToLocal(db: Database.Database, calls: any[]): voi
     )
   `);
 
+  // Prepare lead lookup statements for resolving lead context from local cache
+  const leadByIdStmt = db.prepare(
+    'SELECT first_name, last_name, county, state FROM dialer_leads_cache WHERE id = ?'
+  );
+  const leadByPhoneStmt = db.prepare(
+    'SELECT first_name, last_name, county, state FROM dialer_leads_cache WHERE phone_normalized = ? LIMIT 1'
+  );
+
   const tx = db.transaction(() => {
     for (const call of calls) {
-      const lc = call.leads_cache;
+      // Look up lead context from local SQLite cache (replaces removed PostgREST join)
+      let leadCtx: any = null;
+      if (call.lead_id) {
+        leadCtx = leadByIdStmt.get(call.lead_id);
+      }
+      if (!leadCtx && call.seller_phone_normalized) {
+        leadCtx = leadByPhoneStmt.get(call.seller_phone_normalized);
+      }
+      if (!leadCtx && call.phone_normalized) {
+        leadCtx = leadByPhoneStmt.get(call.phone_normalized);
+      }
+
       upsert.run({
         id: call.id,
         lead_id: call.lead_id || null,
@@ -849,10 +862,10 @@ export function syncCallHistoryToLocal(db: Database.Database, calls: any[]): voi
         custom_analysis: call.custom_analysis ? JSON.stringify(call.custom_analysis) : null,
         extracted_data: call.extracted_data ? JSON.stringify(call.extracted_data) : null,
         cost_cents: call.cost_cents || null,
-        lead_first_name: lc?.first_name || null,
-        lead_last_name: lc?.last_name || null,
-        lead_county: lc?.county || null,
-        lead_state: lc?.state || null,
+        lead_first_name: leadCtx?.first_name || null,
+        lead_last_name: leadCtx?.last_name || null,
+        lead_county: leadCtx?.county || null,
+        lead_state: leadCtx?.state || null,
         created_at: call.created_at || null,
       });
     }

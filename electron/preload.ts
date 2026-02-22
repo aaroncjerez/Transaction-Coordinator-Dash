@@ -289,5 +289,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Force sync
     forceSync: () =>
       ipcRenderer.invoke('dialer:forceSync'),
+
+    // Force Retell poll (manual trigger)
+    forcePollRetell: () =>
+      ipcRenderer.invoke('dialer:forcePollRetell'),
+
+    // Backfill historical calls from Retell
+    backfillRetell: (daysBack: number) =>
+      ipcRenderer.invoke('dialer:backfillRetell', daysBack),
+    onBackfillProgress: (callback: (data: { fetched: number; inserted: number; page: number }) => void) => {
+      ipcRenderer.on('dialer:backfill-progress', (_event: any, data: any) => callback(data));
+    },
+
+    // Sync + poller health status
+    getSyncStatus: () =>
+      ipcRenderer.invoke('dialer:syncStatus'),
   },
 });
