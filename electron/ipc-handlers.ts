@@ -2113,6 +2113,16 @@ Provide your analysis in JSON format:
       retellConfigured,
     };
   });
+
+  // ── Call Guard audit log ──
+
+  ipcMain.handle('dialer:getGuardLog', async (_event, limit?: number) => {
+    return db.prepare(`
+      SELECT * FROM dialer_call_guard_log
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit || 50);
+  });
 }
 
 // Old chunkText removed — replaced by paragraph-aware chunker in electron/chunker.ts

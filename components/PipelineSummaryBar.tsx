@@ -1,5 +1,5 @@
 import React from 'react';
-import { DollarSign, TrendingUp, AlertTriangle, Clock, CheckSquare } from 'lucide-react';
+import { AlertTriangle, Clock, CheckSquare } from 'lucide-react';
 import { Deal, Task, Deadline } from '../types';
 import { cn } from '../lib/utils';
 
@@ -11,29 +11,10 @@ interface PipelineSummaryBarProps {
   onFilterStale: () => void;
 }
 
-const formatValue = (value: number): string => {
-  if (value >= 1000000) return `$${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `$${Math.round(value / 1000)}K`;
-  return `$${value.toLocaleString()}`;
-};
-
 export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
   deals, tasks, deadlines, onFilterOverdue, onFilterStale,
 }) => {
   const activeDeals = deals.filter(d => d.stage !== 'Cancelled' && d.stage !== 'Sold');
-  const soldDeals = deals.filter(d => d.stage === 'Sold');
-  const totalPurchase = activeDeals.reduce((sum, d) => sum + (d.purchase_price || 0), 0);
-
-  // My projected share: sum jl_share_amount for active deals, fallback to spread * pct
-  const myProjected = activeDeals.reduce((sum, d) => {
-    if (d.jl_share_amount && d.jl_share_amount > 0) return sum + d.jl_share_amount;
-    const profit = (d.expected_sales_price || 0) - (d.purchase_price || 0);
-    const pct = d.jl_share_percent || 0;
-    return sum + (profit > 0 ? profit * pct / 100 : 0);
-  }, 0);
-
-  // My realized share: sum jl_share_amount for sold deals
-  const myRealized = soldDeals.reduce((sum, d) => sum + (d.jl_share_amount || 0), 0);
 
   const now = Date.now();
   const overdueCount = deadlines.filter(d =>
@@ -49,23 +30,6 @@ export const PipelineSummaryBar: React.FC<PipelineSummaryBarProps> = ({
 
   return (
     <div className="px-5 py-2 border-b border-gray-200 bg-white flex items-center gap-5 flex-wrap">
-      <Metric
-        icon={<DollarSign size={12} />}
-        label="Pipeline"
-        value={formatValue(totalPurchase)}
-      />
-      <Metric
-        icon={<TrendingUp size={12} />}
-        label="My Projected"
-        value={formatValue(myProjected)}
-        valueClass="text-emerald-600"
-      />
-      <Metric
-        icon={<DollarSign size={12} />}
-        label="My Realized"
-        value={formatValue(myRealized)}
-        valueClass={myRealized > 0 ? 'text-emerald-600' : undefined}
-      />
       <Metric
         icon={<AlertTriangle size={12} />}
         label="Overdue"

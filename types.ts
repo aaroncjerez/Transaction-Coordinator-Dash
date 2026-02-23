@@ -553,6 +553,7 @@ export interface BatchDialProgress {
   currentLeadName: string | null;
   errors: number;
   skippedDnc: number;
+  skippedGuard?: number;
 }
 
 export interface BatchDialResult {
@@ -562,14 +563,48 @@ export interface BatchDialResult {
   connected: number;
   failed: number;
   skippedDnc: number;
+  skippedGuard?: number;
   durationSeconds: number;
   details: Array<{
     leadId: string;
     phone: string;
-    status: 'dialed' | 'dnc_skipped' | 'error';
+    status: 'dialed' | 'dnc_skipped' | 'guard_blocked' | 'error';
     callId?: string;
     error?: string;
+    guardReason?: string;
+    guardDetails?: string;
   }>;
+}
+
+// ===== Call Guard Types =====
+
+export type CallGuardBlockReason =
+  | 'dnc_listed'
+  | 'final_outcome_set'
+  | 'real_conversation'
+  | 'called_recently'
+  | 'cadence_not_due';
+
+export interface CallGuardVerdict {
+  allowed: boolean;
+  reason: CallGuardBlockReason | null;
+  details: string | null;
+  matchedCallId?: string;
+  matchedCallDate?: string;
+  matchedDuration?: number;
+  matchedOutcome?: string;
+}
+
+export interface CallGuardLogEntry {
+  id: number;
+  lead_id: string | null;
+  phone_normalized: string;
+  lead_name: string | null;
+  block_reason: string;
+  block_details: string | null;
+  caller: string;
+  override_used: number;
+  created_at: string;
 }
 
 // ===== Inbound Call Types =====

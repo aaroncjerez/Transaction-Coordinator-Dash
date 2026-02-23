@@ -13,6 +13,177 @@ function getSetting(db: Database.Database, key: string, envFallback: string): st
   return (row?.value?.trim() || process.env[envFallback] || '').trim();
 }
 
+// ══════════════════════════════════════════════════════
+// CALL GUARD — Local safety checks before any call
+// ══════════════════════════════════════════════════════
+
+export type CallGuardBlockReason =
+  | 'dnc_listed'
+  | 'final_outcome_set'
+  | 'real_conversation'
+  | 'called_recently'
+  | 'cadence_not_due';
+
+export interface CallGuardVerdict {
+  allowed: boolean;
+  reason: CallGuardBlockReason | null;
+  details: string | null;
+  matchedCallId?: string;
+  matchedCallDate?: string;
+  matchedDuration?: number;
+  matchedOutcome?: string;
+}
+
+/**
+ * Check whether a call to this phone should be allowed.
+ * Queries LOCAL SQLite only — instant, no network.
+ * Check order (fail-fast, most critical first):
+ *   1. DNC list
+ *   2. Final outcome (DNC, Deal Made, Not Interested, etc.)
+ *   3. Real conversation (duration >= 30s AND successful/has transcript)
+ *   4. Called in last 24 hours
+ *   5. Cadence not due (optional, skippable)
+ */
+export function checkCallGuard(
+  db: Database.Database,
+  phoneNormalized: string,
+  leadId?: string,
+  options?: { skipCadenceCheck?: boolean }
+): CallGuardVerdict {
+  // 1. DNC check
+  const dncRow = db.prepare(
+    'SELECT id, reason FROM dialer_dnc_cache WHERE phone_normalized = ?'
+  ).get(phoneNormalized) as any;
+  if (dncRow) {
+    return { allowed: false, reason: 'dnc_listed', details: dncRow.reason || 'On DNC list' };
+  }
+
+  // 2. Final outcome check
+  const leadRow = db.prepare(
+    'SELECT final_outcome, last_contact_at, ai_cadence_on, next_call_date FROM dialer_leads_cache WHERE phone_normalized = ? LIMIT 1'
+  ).get(phoneNormalized) as any;
+
+  if (leadRow?.final_outcome) {
+    return {
+      allowed: false,
+      reason: 'final_outcome_set',
+      details: `Lead has outcome: ${leadRow.final_outcome}`,
+      matchedOutcome: leadRow.final_outcome,
+    };
+  }
+
+  // 3. Real conversation check (duration >= 30s AND successful or has transcript)
+  const convRow = db.prepare(`
+    SELECT id, call_started_at, duration_seconds, transcript
+    FROM dialer_call_records
+    WHERE seller_phone_normalized = ?
+      AND call_direction = 'outbound'
+      AND duration_seconds >= 30
+      AND (call_successful = 1 OR (transcript IS NOT NULL AND transcript != ''))
+    ORDER BY call_started_at DESC
+    LIMIT 1
+  `).get(phoneNormalized) as any;
+
+  if (convRow) {
+    return {
+      allowed: false,
+      reason: 'real_conversation',
+      details: `Had ${convRow.duration_seconds}s conversation on ${convRow.call_started_at}`,
+      matchedCallId: convRow.id,
+      matchedCallDate: convRow.call_started_at,
+      matchedDuration: convRow.duration_seconds,
+    };
+  }
+
+  // 4. 24-hour recency check
+  const recentRow = db.prepare(`
+    SELECT id, call_started_at, duration_seconds
+    FROM dialer_call_records
+    WHERE seller_phone_normalized = ?
+      AND call_direction = 'outbound'
+      AND call_started_at >= datetime('now', '-24 hours')
+    ORDER BY call_started_at DESC
+    LIMIT 1
+  `).get(phoneNormalized) as any;
+
+  if (recentRow) {
+    return {
+      allowed: false,
+      reason: 'called_recently',
+      details: `Called at ${recentRow.call_started_at} (within 24h)`,
+      matchedCallId: recentRow.id,
+      matchedCallDate: recentRow.call_started_at,
+    };
+  }
+
+  // 4b. Fallback: check lead-level last_contact_at if no local call records
+  if (leadRow?.last_contact_at) {
+    const lastContactDate = new Date(leadRow.last_contact_at);
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (lastContactDate > twentyFourHoursAgo) {
+      return {
+        allowed: false,
+        reason: 'called_recently',
+        details: `Lead last_contact_at: ${leadRow.last_contact_at} (within 24h)`,
+      };
+    }
+  }
+
+  // 5. Cadence schedule check (optional)
+  if (!options?.skipCadenceCheck && leadRow?.ai_cadence_on === 1 && leadRow?.next_call_date) {
+    const nextDate = new Date(leadRow.next_call_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (nextDate > today) {
+      return {
+        allowed: false,
+        reason: 'cadence_not_due',
+        details: `Next cadence call scheduled for ${leadRow.next_call_date}`,
+      };
+    }
+  }
+
+  return { allowed: true, reason: null, details: null };
+}
+
+/**
+ * Log a blocked (or overridden) call attempt for auditing.
+ */
+export function logCallGuardBlock(
+  db: Database.Database,
+  phoneNormalized: string,
+  leadId: string | null,
+  leadName: string | null,
+  verdict: CallGuardVerdict,
+  caller: 'single_call' | 'batch_dial' | 'cadence',
+  overrideUsed: boolean = false
+): void {
+  try {
+    db.prepare(`
+      INSERT INTO dialer_call_guard_log
+        (lead_id, phone_normalized, lead_name, block_reason, block_details, caller, override_used)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      leadId,
+      phoneNormalized,
+      leadName,
+      verdict.reason,
+      JSON.stringify({
+        details: verdict.details,
+        matchedCallId: verdict.matchedCallId,
+        matchedCallDate: verdict.matchedCallDate,
+        matchedDuration: verdict.matchedDuration,
+        matchedOutcome: verdict.matchedOutcome,
+      }),
+      caller,
+      overrideUsed ? 1 : 0
+    );
+  } catch (err) {
+    // Guard log should never break the call flow
+    console.error('[CallGuard] Failed to log block:', err instanceof Error ? err.message : err);
+  }
+}
+
 // ── Call Queue ──
 
 export async function getCallQueue(supabase: SupabaseClient, limit = 20) {
@@ -206,7 +377,7 @@ export async function triggerCadence(
 
   console.log(`[triggerCadence] Found ${leads.length} cadence-eligible leads, starting batch dial...`);
   const leadIds = leads.map((l: any) => l.id);
-  return batchDialLeads(supabase, db, leadIds, 10, 30000, onProgress);
+  return batchDialLeads(supabase, db, leadIds, 10, 30000, onProgress, false);
 }
 
 // ── Un-reviewed calls (for AI reviewer) ──
@@ -490,7 +661,8 @@ export async function callLead(
     market_value?: number;
     retell_agent_id?: string;
     from_number?: string;
-  }
+  },
+  guardOptions?: { forceOverride?: boolean; caller?: 'single_call' | 'batch_dial' | 'cadence' }
 ) {
   const RETELL_API_KEY = getSetting(db, 'retell_api_key', 'RETELL_API_KEY');
   const DEFAULT_AGENT_ID = getSetting(db, 'retell_agent_id', 'RETELL_AGENT_ID');
@@ -509,6 +681,25 @@ export async function callLead(
     throw new Error(`Invalid phone number: "${rawPhone}" (need 10+ digits)`);
   }
   const e164Phone = `+${e164Digits}`;
+
+  // ── CALL GUARD — local safety check ──
+  const phoneForGuard = lead.phone_normalized || e164Phone;
+  const callerType = guardOptions?.caller || 'single_call';
+  const verdict = checkCallGuard(db, phoneForGuard, lead.id, {
+    skipCadenceCheck: callerType === 'cadence',
+  });
+
+  if (!verdict.allowed) {
+    const leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
+    if (guardOptions?.forceOverride) {
+      logCallGuardBlock(db, phoneForGuard, lead.id, leadName, verdict, callerType, true);
+      console.warn(`[callLead] GUARD OVERRIDE: ${verdict.reason} for ${phoneForGuard} — proceeding`);
+    } else {
+      logCallGuardBlock(db, phoneForGuard, lead.id, leadName, verdict, callerType, false);
+      console.warn(`[callLead] BLOCKED: ${verdict.reason} for ${phoneForGuard}: ${verdict.details}`);
+      throw new Error(`Call blocked: ${verdict.details}`);
+    }
+  }
 
   const response = await fetch('https://api.retellai.com/v2/create-phone-call', {
     method: 'POST',
@@ -559,7 +750,8 @@ export async function batchDialLeads(
   leadIds: string[],
   batchSize: number = 10,
   delayMs: number = 30000,
-  onProgress: (status: any) => void
+  onProgress: (status: any) => void,
+  forceOverride: boolean = false
 ): Promise<any> {
   if (leadIds.length > 50) throw new Error('Maximum 50 leads per batch');
   if (batchSize > 10) batchSize = 10; // Retell limit
@@ -571,19 +763,13 @@ export async function batchDialLeads(
   let dialedCount = 0;
   let errors = 0;
   let skippedDnc = 0;
+  let skippedGuard = 0;
 
   // Save batch state
   db.prepare(`
     INSERT INTO dialer_batch_dial_state (id, status, total_leads, batch_size, delay_seconds, lead_ids, started_at)
     VALUES (?, 'running', ?, ?, ?, ?, datetime('now'))
   `).run(sessionId, leadIds.length, batchSize, Math.round(delayMs / 1000), JSON.stringify(leadIds));
-
-  // Get DNC phones for pre-check
-  const dncPhones = new Set<string>();
-  const dncRows = db.prepare('SELECT phone_normalized FROM dialer_dnc_cache').all() as any[];
-  for (const row of dncRows) {
-    dncPhones.add(row.phone_normalized);
-  }
 
   // Fetch lead details from local cache
   const placeholders = leadIds.map(() => '?').join(',');
@@ -603,10 +789,22 @@ export async function batchDialLeads(
         return;
       }
 
-      // DNC pre-check
-      if (dncPhones.has(lead.phone_normalized)) {
-        skippedDnc++;
-        details.push({ leadId, phone: lead.phone_normalized, status: 'dnc_skipped' });
+      // Call guard pre-check (subsumes DNC check)
+      const verdict = checkCallGuard(db, lead.phone_normalized, lead.id);
+      if (!verdict.allowed && !forceOverride) {
+        if (verdict.reason === 'dnc_listed') {
+          skippedDnc++;
+        }
+        skippedGuard++;
+        const leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
+        logCallGuardBlock(db, lead.phone_normalized, lead.id, leadName, verdict, 'batch_dial', false);
+        details.push({
+          leadId,
+          phone: lead.phone_normalized,
+          status: 'guard_blocked',
+          guardReason: verdict.reason,
+          guardDetails: verdict.details,
+        });
         return;
       }
 
@@ -621,7 +819,7 @@ export async function batchDialLeads(
           state: lead.state,
           parcel_acres: lead.parcel_acres,
           market_value: lead.market_value,
-        });
+        }, { forceOverride: true, caller: 'batch_dial' }); // Guard already ran above
         dialedCount++;
         details.push({ leadId, phone: lead.phone_normalized, status: 'dialed', callId: result.call_id });
       } catch (err: any) {
@@ -643,11 +841,12 @@ export async function batchDialLeads(
       currentLeadName: null,
       errors,
       skippedDnc,
+      skippedGuard,
     });
 
     // Update batch state
     db.prepare('UPDATE dialer_batch_dial_state SET dialed_count = ?, current_batch = ? WHERE id = ?')
-      .run(dialedCount + skippedDnc, batchIdx + 1, sessionId);
+      .run(dialedCount + skippedGuard, batchIdx + 1, sessionId);
 
     // Wait between batches (except after the last one)
     if (batchIdx < totalBatches - 1) {
@@ -659,7 +858,7 @@ export async function batchDialLeads(
 
   // Finalize batch state
   db.prepare("UPDATE dialer_batch_dial_state SET status = 'completed', dialed_count = ?, results = ?, completed_at = datetime('now') WHERE id = ?")
-    .run(dialedCount + skippedDnc, JSON.stringify(details), sessionId);
+    .run(dialedCount + skippedGuard, JSON.stringify(details), sessionId);
 
   return {
     sessionId,
@@ -668,6 +867,7 @@ export async function batchDialLeads(
     connected: 0, // We don't know yet — calls are async
     failed: errors,
     skippedDnc,
+    skippedGuard,
     durationSeconds,
     details,
   };
@@ -920,9 +1120,24 @@ export function syncDNCToLocal(db: Database.Database, entries: any[]): void {
 
 export function getLocalCallQueue(db: Database.Database, limit = 50): any[] {
   return db.prepare(`
-    SELECT * FROM dialer_leads_cache
-    WHERE can_call_now = 1
-    ORDER BY priority_score DESC
+    SELECT l.* FROM dialer_leads_cache l
+    WHERE l.can_call_now = 1
+      AND l.final_outcome IS NULL
+      AND l.phone_normalized NOT IN (
+        SELECT phone_normalized FROM dialer_dnc_cache
+      )
+      AND l.phone_normalized NOT IN (
+        SELECT seller_phone_normalized FROM dialer_call_records
+        WHERE call_direction = 'outbound'
+          AND duration_seconds >= 30
+          AND (call_successful = 1 OR (transcript IS NOT NULL AND transcript != ''))
+      )
+      AND l.phone_normalized NOT IN (
+        SELECT seller_phone_normalized FROM dialer_call_records
+        WHERE call_direction = 'outbound'
+          AND call_started_at >= datetime('now', '-24 hours')
+      )
+    ORDER BY l.priority_score DESC
     LIMIT ?
   `).all(limit);
 }

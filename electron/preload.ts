@@ -304,5 +304,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Sync + poller health status
     getSyncStatus: () =>
       ipcRenderer.invoke('dialer:syncStatus'),
+
+    // Call guard audit log
+    getGuardLog: (limit?: number) =>
+      ipcRenderer.invoke('dialer:getGuardLog', limit),
   },
 });

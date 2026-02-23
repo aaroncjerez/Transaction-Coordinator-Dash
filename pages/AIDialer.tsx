@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Phone, Search, Maximize2, Minimize2, RefreshCw, Loader2 } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { CallQueuePanel } from '../components/dialer/CallQueuePanel';
@@ -38,6 +38,8 @@ export const AIDialer: React.FC = () => {
   const [reviewProgress, setReviewProgress] = useState<{ current: number; total: number } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const sessionStartRef = useRef(Date.now());
+  const [callsPerHour, setCallsPerHour] = useState<number | null>(null);
 
   const loadCounts = useCallback(async () => {
     try {
@@ -70,6 +72,18 @@ export const AIDialer: React.FC = () => {
     });
     onDialerCacheUpdated(() => { loadCounts(); });
   }, [loadCounts, showToast]);
+
+  // Session timer: compute calls/hr every 30s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsedMs = Date.now() - sessionStartRef.current;
+      const elapsedHours = elapsedMs / (1000 * 60 * 60);
+      if (elapsedHours >= 1 / 12) { // show after 5 minutes
+        setCallsPerHour(Math.round((todayCalls / elapsedHours) * 10) / 10);
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [todayCalls]);
 
   const handleLeadClick = (leadOrPhone: any) => {
     const phone = typeof leadOrPhone === 'string'
@@ -213,7 +227,9 @@ export const AIDialer: React.FC = () => {
           <div className="flex items-center gap-2">
             <Phone size={18} className="text-blue-600" />
             <h1 className="text-base font-semibold text-gray-900">AI Dialer</h1>
-            <span className="text-caption text-gray-500">{todayCalls} calls today</span>
+            <span className="text-caption text-gray-500">
+              {todayCalls} calls today{callsPerHour != null ? ` \u00b7 ${callsPerHour}/hr` : ''}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <LaunchCadenceButton />
@@ -245,7 +261,7 @@ export const AIDialer: React.FC = () => {
     <>
       <TopBar
         title="AI Dialer"
-        subtitle={`${todayCalls} calls today`}
+        subtitle={`${todayCalls} calls today${callsPerHour != null ? ` \u00b7 ${callsPerHour}/hr` : ''}`}
         actions={<LaunchCadenceButton />}
       />
 

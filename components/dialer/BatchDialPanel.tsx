@@ -114,10 +114,12 @@ export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds,
             </span>
             <span className="tabular-nums">{progress.dialedCount}/{progress.totalLeads} ({pct}%)</span>
           </div>
-          {progress.skippedDnc > 0 && (
+          {((progress.skippedGuard ?? 0) > 0 || progress.skippedDnc > 0) && (
             <span className="text-micro text-amber-600">
               <AlertTriangle size={10} className="inline mr-1" />
-              {progress.skippedDnc} skipped (DNC)
+              {(progress.skippedGuard ?? 0) > 0
+                ? `${progress.skippedGuard} blocked by guard${progress.skippedDnc > 0 ? ` (${progress.skippedDnc} DNC)` : ''}`
+                : `${progress.skippedDnc} skipped (DNC)`}
             </span>
           )}
         </div>
@@ -135,8 +137,8 @@ export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds,
             <div className="text-micro text-gray-500">Connected</div>
           </div>
           <div className="text-center">
-            <div className="text-lg font-bold text-amber-600">{result.skippedDnc}</div>
-            <div className="text-micro text-gray-500">DNC Skip</div>
+            <div className="text-lg font-bold text-amber-600">{result.skippedGuard ?? result.skippedDnc}</div>
+            <div className="text-micro text-gray-500">{result.skippedGuard != null ? 'Guarded' : 'DNC Skip'}</div>
           </div>
           <div className="text-center">
             <div className="text-lg font-bold text-red-600">{result.failed}</div>

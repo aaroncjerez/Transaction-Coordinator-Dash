@@ -925,6 +925,29 @@ const migrations: Migration[] = [
       console.log('[Migration v19] Dialer cache tables + Retell settings created');
     },
   },
+  {
+    version: 20,
+    description: 'Call guard audit log — tracks blocked/overridden call attempts',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_call_guard_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lead_id TEXT,
+          phone_normalized TEXT NOT NULL,
+          lead_name TEXT,
+          block_reason TEXT NOT NULL,
+          block_details TEXT,
+          caller TEXT DEFAULT 'system',
+          override_used INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dcgl_phone ON dialer_call_guard_log(phone_normalized);
+        CREATE INDEX IF NOT EXISTS idx_dcgl_created ON dialer_call_guard_log(created_at DESC);
+      `);
+
+      console.log('[Migration v20] Call guard audit log table created');
+    },
+  },
 ];
 
 /**

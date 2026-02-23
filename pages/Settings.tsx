@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders } from 'lucide-react';
-import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync, testSlackWebhook } from '../lib/database';
+import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders, Search, Loader2, Wrench } from 'lucide-react';
+import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync, testSlackWebhook, crawlAllDeadlines } from '../lib/database';
 import { Button } from '../components/ui/Button';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
@@ -43,6 +43,8 @@ export const Settings: React.FC = () => {
   const [fubPersonSync, setFubPersonSync] = useState<any>(null);
   const [fubPersonSyncing, setFubPersonSyncing] = useState(false);
   const [testingSlack, setTestingSlack] = useState(false);
+  const [scanningDocs, setScanningDocs] = useState(false);
+  const [scanResult, setScanResult] = useState<string | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -145,6 +147,20 @@ export const Settings: React.FC = () => {
       showToast({ message: 'Failed to test Slack webhook', type: 'error' });
     } finally {
       setTestingSlack(false);
+    }
+  };
+
+  const handleScanAllDocs = async () => {
+    setScanningDocs(true);
+    setScanResult(null);
+    try {
+      const result = await crawlAllDeadlines();
+      setScanResult(`${result.dealsScanned} deals scanned: ${result.totalCreated} deadlines found, ${result.totalUpdated} updated`);
+    } catch (e) {
+      setScanResult('Scan failed');
+      console.error('Bulk deadline scan failed:', e);
+    } finally {
+      setScanningDocs(false);
     }
   };
 
@@ -419,6 +435,33 @@ export const Settings: React.FC = () => {
                   <span className="text-caption text-gray-500">days</span>
                 </div>
               </div>
+            </div>
+          </Section>
+
+          {/* Maintenance */}
+          <Section icon={<Wrench size={16} />} title="Maintenance">
+            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Scan All Documents for Deadlines</p>
+                  <p className="text-micro text-gray-400">
+                    Crawl all uploaded PDFs and extract deadline dates using AI
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleScanAllDocs}
+                  disabled={scanningDocs}
+                  isLoading={scanningDocs}
+                >
+                  {!scanningDocs && <Search size={12} className="mr-1.5" />}
+                  {scanningDocs ? 'Scanning...' : 'Scan All'}
+                </Button>
+              </div>
+              {scanResult && (
+                <p className="text-caption text-gray-600 bg-subtle rounded-md px-3 py-2">{scanResult}</p>
+              )}
             </div>
           </Section>
 

@@ -194,6 +194,19 @@ export interface ElectronAPI {
       fastSync: { ok: boolean; error: string | null; lastRun: string | null };
       fullSync: { ok: boolean; error: string | null; lastRun: string | null };
     }>;
+
+    // Call guard audit log
+    getGuardLog: (limit?: number) => Promise<Array<{
+      id: number;
+      lead_id: string | null;
+      phone_normalized: string;
+      lead_name: string | null;
+      block_reason: string;
+      block_details: string | null;
+      caller: string;
+      override_used: number;
+      created_at: string;
+    }>>;
   };
 }
 

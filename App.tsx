@@ -6,7 +6,6 @@ import { Pipeline } from './pages/Pipeline';
 import { DealDetail } from './pages/DealDetail';
 import { Tasks } from './pages/Tasks';
 import { Archive } from './pages/Archive';
-import { Analytics } from './pages/Analytics';
 import { KPIs } from './pages/KPIs';
 import { Settings } from './pages/Settings';
 import { Leads } from './pages/Leads';
@@ -23,7 +22,7 @@ function App() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/dialer" element={<AIDialer />} />
-          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/analytics" element={<Navigate to="/" replace />} />
           <Route path="/kpis" element={<KPIs />} />
           <Route path="/archive" element={<Archive />} />
           <Route path="/settings" element={<Settings />} />

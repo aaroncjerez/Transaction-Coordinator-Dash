@@ -496,3 +496,17 @@ export async function getDialerSyncStatus(): Promise<{
 }> {
   return api.dialer.getSyncStatus();
 }
+
+export async function fetchDialerGuardLog(limit?: number): Promise<Array<{
+  id: number;
+  lead_id: string | null;
+  phone_normalized: string;
+  lead_name: string | null;
+  block_reason: string;
+  block_details: string | null;
+  caller: string;
+  override_used: number;
+  created_at: string;
+}>> {
+  return api.dialer.getGuardLog(limit);
+}

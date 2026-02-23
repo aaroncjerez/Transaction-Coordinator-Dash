@@ -350,5 +350,9 @@ export async function reviewRecentCalls(
   }
 
   console.log(`[CallReviewer] Batch done. Reviewed: ${reviewed}, Errors: ${errors}, DNC: ${dncDetected}, Hot: ${hotLeadsFound}`);
+
+  // Clear the progress bar in the UI
+  notifyRenderer('dialer:review-progress', null);
+
   return { success: true, reviewed, errors, dncDetected, hotLeadsFound };
 }

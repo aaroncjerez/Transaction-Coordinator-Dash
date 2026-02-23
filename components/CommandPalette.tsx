@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, ArrowRight, Home, LayoutDashboard, CheckSquare, BarChart3, Archive, Settings,
+  Search, ArrowRight, Home, LayoutDashboard, CheckSquare, Archive, Settings,
   Plus, RefreshCw, Folder,
 } from 'lucide-react';
 import { Deal } from '../types';
@@ -67,11 +67,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
       id: 'nav-tasks', label: 'Tasks', section: 'navigation',
       icon: <CheckSquare size={14} />, onSelect: () => navigateAndClose('/tasks'),
       keywords: 'tasks todo checklist',
-    });
-    cmds.push({
-      id: 'nav-analytics', label: 'Analytics', section: 'navigation',
-      icon: <BarChart3 size={14} />, onSelect: () => navigateAndClose('/analytics'),
-      keywords: 'analytics charts stats reports funnel',
     });
     cmds.push({
       id: 'nav-archive', label: 'Archive', section: 'navigation',
