@@ -230,6 +230,7 @@ export function buildTeamScorecards(
     let primaryMetric: TeamScorecard['primaryMetric'];
     let secondaryMetric: TeamScorecard['secondaryMetric'];
     let hotLeadsMetric: TeamScorecard['hotLeadsMetric'];
+    let postCallTimeMetric: TeamScorecard['postCallTimeMetric'];
     let funnelMetrics: TeamScorecard['funnelMetrics'];
     let status: StatusColor = 'yellow';
     let isCrushingIt = false;
@@ -292,6 +293,7 @@ export function buildTeamScorecards(
         const conversations = kpi?.conversations || 0;
         const conversationsTarget = member.targets.conversations || 125;
         const callHotLeads = kpi?.hotLeadsCall || 0;
+        const avgPostCallTime = kpi?.avgPostCallTime || 0;
 
         // Primary: Conversations (60s+) — meaningful phone interactions
         // Floor: 75–125, Good: 125–200, Strong: 200–300, Elite: 300–400+
@@ -306,6 +308,18 @@ export function buildTeamScorecards(
           value: callHotLeads,
           unit: '',
         };
+
+        // Post-call time metric (lower is better — goal: under 60s)
+        if (avgPostCallTime > 0) {
+          const pctStatus: StatusColor =
+            avgPostCallTime <= 60 ? 'green' :
+            avgPostCallTime <= 90 ? 'yellow' : 'red';
+          postCallTimeMetric = {
+            value: avgPostCallTime,
+            target: 60,
+            status: pctStatus,
+          };
+        }
 
         // Status based on conversations (60s+)
         // Green: ≥125 (Good tier), Yellow: ≥75 (Floor tier), Red: <75
@@ -380,6 +394,7 @@ export function buildTeamScorecards(
       primaryMetric,
       secondaryMetric,
       hotLeadsMetric,
+      postCallTimeMetric,
       funnelMetrics,
       status,
       isCrushingIt,

@@ -34,6 +34,7 @@ export interface WeeklyKPI {
   conversations?: number;  // Cold call conversations (60s+)
   leadsPriced?: number;
   medianPricingSpeed?: number;
+  avgPostCallTime?: number;  // Maria's avg post-call time in seconds
 }
 
 // Business-level metrics
@@ -139,6 +140,11 @@ export interface TeamScorecard {
   hotLeadsMetric?: {
     current: number;
     target: number;  // $500K pace target
+  };
+  postCallTimeMetric?: {
+    value: number;      // seconds
+    target: number;     // 60
+    status: StatusColor;
   };
   funnelMetrics?: {
     stage1: { label: string; value: number };

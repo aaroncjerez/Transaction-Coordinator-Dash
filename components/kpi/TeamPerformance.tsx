@@ -173,6 +173,30 @@ export function TeamPerformance({ teamScorecards }: TeamPerformanceProps) {
                           </div>
                         )}
 
+                        {/* Post-Call Time (Maria) */}
+                        {scorecard.postCallTimeMetric && (
+                          <div>
+                            <div className="text-xs text-neutral-600 mb-1">
+                              avg post-call time
+                            </div>
+                            <div className="flex items-baseline gap-2">
+                              <span className={`text-2xl font-bold ${
+                                scorecard.postCallTimeMetric.status === 'green'
+                                  ? 'text-green-600'
+                                  : scorecard.postCallTimeMetric.status === 'yellow'
+                                    ? 'text-amber-600'
+                                    : 'text-red-600'
+                              }`}>
+                                {scorecard.postCallTimeMetric.value}
+                              </span>
+                              <span className="text-sm text-neutral-500">sec</span>
+                              <span className="text-xs text-neutral-400">
+                                / {scorecard.postCallTimeMetric.target}s goal
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Target Progress */}
                         <div>
                           <div className="text-xs text-neutral-600 mb-1">Target Progress</div>

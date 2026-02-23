@@ -75,6 +75,7 @@ interface AirtableWeeklyRecord {
   'Maria Total Leads'?: number;
   'Maria Hot Leads'?: number;
   'Maria Offers Shared'?: number;
+  'Maria Avg Post Call Time'?: number;
   // Justine's metrics
   'Total Texts Sent - Justine'?: number;
   'Justine Total Leads'?: number;
@@ -186,6 +187,7 @@ function parseAirtableWeekRecord(record: AirtableWeeklyRecord): ParsedWeekData {
       offersSent: record['Maria Offers Shared'] || 0,
       contractsSent: 0,
       contractsSigned: 0,
+      avgPostCallTime: record['Maria Avg Post Call Time'] || 0,
     },
     {
       id: 'justine',
@@ -234,6 +236,7 @@ function parseAirtableWeekRecord(record: AirtableWeeklyRecord): ParsedWeekData {
     contractsSigned: member.contractsSigned,
     leadsPriced: (member as any).leadsPriced,
     medianPricingSpeed: (member as any).medianPricingSpeed,
+    avgPostCallTime: (member as any).avgPostCallTime,
   }));
 
   // Use Airtable's calculated totals (they may differ from sum of individuals)
