@@ -20,6 +20,9 @@ mac:
     - target: dmg
       arch:
         - universal
+    - target: zip
+      arch:
+        - universal
   hardenedRuntime: false
   darkModeSupport: true
   x64ArchFiles: "Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/**"
@@ -27,6 +30,11 @@ mac:
 dmg:
   title: Jerez Land TC
   artifactName: "Jerez-Land-TC-${version}.${ext}"
+
+publish:
+  provider: github
+  owner: aaroncjerez
+  repo: Transaction-Coordinator-Dash
 
 # Rebuild better-sqlite3 for the target
 npmRebuild: true

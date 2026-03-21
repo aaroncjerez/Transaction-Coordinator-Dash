@@ -1,7 +1,8 @@
-import { app, BrowserWindow, protocol, net, shell } from 'electron';
+import { app, BrowserWindow, protocol, net, shell, dialog } from 'electron';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import dotenv from 'dotenv';
+import { autoUpdater } from 'electron-updater';
 import { initDatabase, backupDatabase } from './database.js';
 import { registerIpcHandlers } from './ipc-handlers.js';
 import { startAlertScheduler } from './alert-scheduler.js';
@@ -163,6 +164,43 @@ app.whenReady().then(() => {
 
   // Create window
   createWindow();
+
+  // Auto-updater (only in packaged builds)
+  if (app.isPackaged) {
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+
+    autoUpdater.on('update-available', (info) => {
+      console.log(`[AutoUpdate] Update available: v${info.version}`);
+    });
+
+    autoUpdater.on('update-downloaded', (info) => {
+      console.log(`[AutoUpdate] Update downloaded: v${info.version}`);
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Update Ready',
+        message: `Version ${info.version} has been downloaded.`,
+        detail: 'The update will be installed when you restart the app.',
+        buttons: ['Restart Now', 'Later'],
+        defaultId: 0,
+      }).then(({ response }) => {
+        if (response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
+    });
+
+    autoUpdater.on('error', (err) => {
+      console.error('[AutoUpdate] Error:', err.message);
+    });
+
+    // Check for updates after a short delay
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((err) => {
+        console.error('[AutoUpdate] Check failed:', err.message);
+      });
+    }, 10_000);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
