@@ -11,7 +11,7 @@ import {
   DragEndEvent,
 } from '@dnd-kit/core';
 import { RefreshCw, Plus, Filter, X, Search, LayoutGrid, List, CheckSquare, XSquare, ChevronRight } from 'lucide-react';
-import { Deal, Task, Deadline, FubSyncStatus, DealType } from '../types';
+import { Deal, Task, Deadline, FubSyncStatus, DealType, DealStage } from '../types';
 import { PIPELINE_STAGES, DEAL_TYPES, getStageColor } from '../constants';
 import { cn } from '../lib/utils';
 import {
@@ -426,21 +426,33 @@ export const Pipeline: React.FC = () => {
     setActiveDealId(event.active.id as string);
   };
 
+  // Optimistically move a deal to a new stage in local state (no DB call)
+  const optimisticStageMove = (dealId: string, newStage: DealStage) => {
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: newStage } : d));
+  };
+
+  // Revert an optimistic move
+  const revertStageMove = (dealId: string, originalStage: DealStage) => {
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage: originalStage } : d));
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     setActiveDealId(null);
     const { active, over } = event;
     if (!over) return;
 
     const dealId = active.id as string;
-    const newStage = over.id as string;
+    const newStage = over.id as DealStage;
     const deal = deals.find(d => d.id === dealId);
     if (!deal || deal.stage === newStage) return;
+
+    const originalStage = deal.stage;
 
     // Check for incomplete tasks
     try {
       const result = await checkStageChange(dealId, newStage);
       if (!result.canProceed && result.incompleteTasks && result.incompleteTasks.length > 0) {
-        // Show confirmation dialog
+        // Show confirmation dialog (don't optimistically move yet — wait for user)
         setStageDialog({
           dealId,
           dealName: deal.deal_name,
@@ -450,18 +462,20 @@ export const Pipeline: React.FC = () => {
         });
         return;
       }
-      // No blockers — proceed directly
-      await executeStageChange(dealId, newStage);
+      // No blockers — optimistically move, then persist
+      optimisticStageMove(dealId, newStage);
+      await executeStageChange(dealId, newStage, originalStage);
     } catch (err) {
       console.error('Stage change check failed:', err);
+      revertStageMove(dealId, originalStage);
       showToast({ message: 'Failed to move deal', type: 'error' });
     }
   };
 
-  const executeStageChange = async (dealId: string, newStage: string) => {
+  const executeStageChange = async (dealId: string, newStage: string, previousStage?: DealStage) => {
     const deal = deals.find(d => d.id === dealId);
     const dealName = deal?.deal_name ?? 'Deal';
-    const previousStage = deal?.stage ?? '';
+    const origStage: DealStage = previousStage ?? deal?.stage ?? 'Purchase Agreement Signed';
     try {
       const result = await updateDealFields(dealId, { stage: newStage });
       await fetchData();
@@ -472,7 +486,7 @@ export const Pipeline: React.FC = () => {
         label: `${dealName} → ${newStage}`,
         timestamp: Date.now(),
         revert: async () => {
-          await updateDealFields(dealId, { stage: previousStage });
+          await updateDealFields(dealId, { stage: origStage });
           await fetchData();
         },
       });
@@ -488,14 +502,17 @@ export const Pipeline: React.FC = () => {
       });
     } catch (err) {
       console.error('Stage change failed:', err);
+      if (origStage) revertStageMove(dealId, origStage);
       showToast({ message: 'Failed to update stage', type: 'error' });
     }
   };
 
   const handleDialogConfirm = async () => {
     if (!stageDialog) return;
-    await executeStageChange(stageDialog.dealId, stageDialog.toStage);
+    const { dealId, fromStage, toStage } = stageDialog;
     setStageDialog(null);
+    optimisticStageMove(dealId, toStage as DealStage);
+    await executeStageChange(dealId, toStage, fromStage as DealStage);
   };
 
   // ---- Sync ----
@@ -899,7 +916,7 @@ export const Pipeline: React.FC = () => {
                 className={cn('text-gray-400 transition-transform', showCancelled && 'rotate-90')}
               />
               <span className="text-caption font-semibold text-gray-500">
-                {cancelledDeals.length} Cancelled Deal{cancelledDeals.length !== 1 ? 's' : ''}
+                {cancelledDeals.length} Archived Deal{cancelledDeals.length !== 1 ? 's' : ''}
               </span>
               <span className="flex-1" />
             </button>

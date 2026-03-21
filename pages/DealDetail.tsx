@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Sparkles } from 'lucide-react';
 import { DealViewData, mapDealData } from '../lib/deal-utils';
@@ -12,6 +12,8 @@ import { DealFiles } from '../components/deal/DealFiles';
 import { DealAnalyzer } from '../components/DealAnalyzer';
 import { DealChat } from '../components/DealChat';
 import { DealActivity } from '../components/deal/DealActivity';
+import { SaveIndicator } from '../components/ui/SaveIndicator';
+import { useAutoSave } from '../hooks/useAutoSave';
 
 type DetailTab = 'overview' | 'tasks' | 'files' | 'activity' | 'analysis' | 'chat';
 
@@ -22,11 +24,20 @@ export const DealDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
 
-  useEffect(() => {
-    if (id) fetchDealData(id);
-  }, [id]);
+  // Auto-save: debounced persistence for deal field edits
+  const { queueSave, flush, status: saveStatus } = useAutoSave({
+    saveFn: async (fields) => {
+      if (!id) throw new Error('No deal ID');
+      return updateDealFields(id, fields);
+    },
+    debounceMs: 800,
+    maxRetries: 3,
+    onError: (error, failedFields) => {
+      console.error('[DealDetail] Auto-save failed after retries:', error, failedFields);
+    },
+  });
 
-  const fetchDealData = async (dealId: string) => {
+  const fetchDealData = useCallback(async (dealId: string) => {
     try {
       setLoading(true);
       const dealData = await fetchDealById(dealId);
@@ -37,8 +48,13 @@ export const DealDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  useEffect(() => {
+    if (id) fetchDealData(id);
+  }, [id, fetchDealData]);
+
+  // Local-only: instant state update (no persistence)
   const handleDealChange = (field: string, value: any) => {
     setDeal(prev => prev ? { ...prev, [field]: value } : null);
   };
@@ -64,13 +80,16 @@ export const DealDetail: React.FC = () => {
         title={deal.deal_name}
         subtitle={[deal.county, deal.state].filter(Boolean).join(', ') || undefined}
         actions={
-          <button
-            onClick={() => navigate('/pipeline')}
-            className="flex items-center gap-1.5 text-caption text-gray-500 hover:text-gray-700 transition-colors"
-          >
-            <ArrowLeft size={14} />
-            Back to Pipeline
-          </button>
+          <div className="flex items-center gap-3">
+            <SaveIndicator status={saveStatus} />
+            <button
+              onClick={async () => { await flush(); navigate('/pipeline'); }}
+              className="flex items-center gap-1.5 text-caption text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              <ArrowLeft size={14} />
+              Back to Pipeline
+            </button>
+          </div>
         }
       />
 
@@ -110,7 +129,7 @@ export const DealDetail: React.FC = () => {
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="max-w-3xl mx-auto px-5 py-5">
           {activeTab === 'overview' && (
-            <DealOverview deal={deal} onDealChange={handleDealChange} />
+            <DealOverview deal={deal} onDealChange={handleDealChange} queueSave={queueSave} />
           )}
           {activeTab === 'tasks' && (
             <DealTasks dealId={deal.id} stageHex={stageColor.hex} />

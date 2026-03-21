@@ -82,6 +82,7 @@ export const UploadPanel: React.FC = () => {
   const [headers, setHeaders] = useState<string[]>([]);
   const [columnMap, setColumnMap] = useState<Record<number, string>>({});
   const [fileName, setFileName] = useState('');
+  const [listName, setListName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null);
   const [result, setResult] = useState<UploadBatchResult | null>(null);
@@ -111,7 +112,8 @@ export const UploadPanel: React.FC = () => {
 
   // Listen for upload progress
   useEffect(() => {
-    onDialerUploadProgress((data) => setProgress(data));
+    const unsub = onDialerUploadProgress((data) => setProgress(data));
+    return () => unsub();
   }, []);
 
   // Load batches on mount
@@ -220,12 +222,13 @@ export const UploadPanel: React.FC = () => {
     const batchId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     try {
-      const res = await uploadDialerLeads(mappedRows, batchId);
+      const res = await uploadDialerLeads(mappedRows, batchId, listName || fileName.replace(/\.(csv|tsv|txt)$/i, ''));
       setResult(res);
       setStep(4);
+      const dncNote = res.dncMatches > 0 ? ` ⚠️ ${res.dncMatches} already in DNC` : '';
       showToast({
-        message: `Uploaded ${res.imported} leads (${res.duplicates} dupes, ${res.errors} errors)`,
-        type: res.errors > 0 ? 'error' : 'success',
+        message: `Uploaded ${res.imported} leads (${res.duplicates} dupes, ${res.errors} errors)${dncNote}`,
+        type: res.dncMatches > 0 ? 'warning' : res.errors > 0 ? 'error' : 'success',
       });
       // Refresh batch list
       await loadBatches();
@@ -242,6 +245,7 @@ export const UploadPanel: React.FC = () => {
     setHeaders([]);
     setColumnMap({});
     setFileName('');
+    setListName('');
     setProgress(null);
     setResult(null);
     setShowDetails(false);
@@ -305,22 +309,35 @@ export const UploadPanel: React.FC = () => {
 
       {/* ── Step 1: File Drop ── */}
       {step === 1 && (
-        <div
-          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors cursor-pointer"
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload size={36} className="mx-auto text-gray-400 mb-3" />
-          <p className="text-body font-medium text-gray-700">Drop a CSV file here</p>
-          <p className="text-caption text-gray-400 mt-1">or click to browse</p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.tsv,.txt"
-            className="hidden"
-            onChange={handleFileInput}
-          />
+        <div className="space-y-4">
+          <div>
+            <label className="block text-caption font-medium text-gray-700 mb-1">List Name</label>
+            <input
+              type="text"
+              value={listName}
+              onChange={(e) => setListName(e.target.value)}
+              placeholder="e.g. Texas 5+ Acres, March Batch"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-colors"
+            />
+            <p className="text-micro text-gray-400 mt-1">Defaults to the CSV filename if left blank</p>
+          </div>
+          <div
+            className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors cursor-pointer"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={36} className="mx-auto text-gray-400 mb-3" />
+            <p className="text-body font-medium text-gray-700">Drop a CSV file here</p>
+            <p className="text-caption text-gray-400 mt-1">or click to browse</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.tsv,.txt"
+              className="hidden"
+              onChange={handleFileInput}
+            />
+          </div>
         </div>
       )}
 
@@ -567,6 +584,21 @@ export const UploadPanel: React.FC = () => {
               <p className="text-micro text-gray-500">Skipped</p>
             </div>
           </div>
+
+          {/* DNC warning */}
+          {result.dncMatches > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+              <AlertTriangle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-caption font-medium text-red-800">
+                  {result.dncMatches} uploaded lead{result.dncMatches !== 1 ? 's' : ''} already in DNC list
+                </p>
+                <p className="text-micro text-red-600 mt-0.5">
+                  These leads will be blocked by the call guard and won't appear in the queue.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Toggle details */}
           {result.details.length > 0 && (

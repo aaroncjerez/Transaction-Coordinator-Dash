@@ -74,6 +74,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ai:analyzeDeal', dealId),
     getDealAnalysis: (dealId: string) =>
       ipcRenderer.invoke('ai:getDealAnalysis', dealId),
+    backfillEmbeddings: () =>
+      ipcRenderer.invoke('ai:backfillEmbeddings'),
+    onBackfillProgress: (callback: (data: { current: number; total: number }) => void) => {
+      ipcRenderer.on('ai:backfill-progress', (_event: any, data: any) => callback(data));
+    },
+  },
+
+  dealSummary: {
+    generate: (dealId: string) =>
+      ipcRenderer.invoke('deal:generateSummary', dealId),
+    get: (dealId: string) =>
+      ipcRenderer.invoke('deal:getSummary', dealId),
+  },
+
+  notes: {
+    create: (dealId: string, content: string, pushToFub: boolean) =>
+      ipcRenderer.invoke('notes:create', dealId, content, pushToFub),
+    list: (dealId: string) =>
+      ipcRenderer.invoke('notes:list', dealId),
+  },
+
+  chat: {
+    saveMessage: (dealId: string, role: string, content: string, sources?: string) =>
+      ipcRenderer.invoke('chat:saveMessage', dealId, role, content, sources),
+    getMessages: (dealId: string) =>
+      ipcRenderer.invoke('chat:getMessages', dealId),
   },
 
   pdf: {
@@ -98,6 +124,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('files:delete', fileId),
     getFilePath: (relativePath: string) =>
       ipcRenderer.invoke('files:getPath', relativePath),
+    readPdf: (filePath: string) =>
+      ipcRenderer.invoke('files:readPdf', filePath),
   },
 
   deadlines: {
@@ -167,6 +195,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('fub:triggerFileSync', dealId),
     getDealsWithFubLinks: () =>
       ipcRenderer.invoke('fub:getDealsWithFubLinks'),
+    // Browser file sync
+    browserSyncDeal: (dealId: string) =>
+      ipcRenderer.invoke('fub-browser:syncDeal', dealId),
+    browserSyncAll: () =>
+      ipcRenderer.invoke('fub-browser:syncAll'),
+    closeFubBrowser: () =>
+      ipcRenderer.invoke('fub-browser:closeBrowser'),
+    onBrowserSyncProgress: (callback: (data: any) => void) => {
+      ipcRenderer.on('fub-browser:progress', (_event: any, data: any) => callback(data));
+    },
+    offBrowserSyncProgress: () => {
+      ipcRenderer.removeAllListeners('fub-browser:progress');
+    },
+    onBrowserBulkComplete: (callback: (data: any) => void) => {
+      ipcRenderer.on('fub-browser:bulk-complete', (_event: any, data: any) => callback(data));
+    },
+    offBrowserBulkComplete: () => {
+      ipcRenderer.removeAllListeners('fub-browser:bulk-complete');
+    },
   },
 
   kpi: {
@@ -196,8 +243,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   dialer: {
-    getCallQueue: (limit?: number) =>
-      ipcRenderer.invoke('dialer:getCallQueue', limit),
+    getCallQueue: (limit?: number, listIds?: string[]) =>
+      ipcRenderer.invoke('dialer:getCallQueue', limit, listIds),
     getCallHistory: (limit?: number, filters?: any) =>
       ipcRenderer.invoke('dialer:getCallHistory', limit, filters),
     getCallsForLead: (phoneNormalized: string) =>
@@ -229,20 +276,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getTodayCallCount: () =>
       ipcRenderer.invoke('dialer:getTodayCallCount'),
     onReviewProgress: (callback: (data: any) => void) => {
-      ipcRenderer.on('dialer:review-progress', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:review-progress', handler);
+      return () => { ipcRenderer.removeListener('dialer:review-progress', handler); };
     },
     onNewCalls: (callback: (data: any) => void) => {
-      ipcRenderer.on('dialer:new-calls', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:new-calls', handler);
+      return () => { ipcRenderer.removeListener('dialer:new-calls', handler); };
     },
-    uploadLeads: (leads: any[], batchId: string) =>
-      ipcRenderer.invoke('dialer:uploadLeads', leads, batchId),
+    uploadLeads: (leads: any[], batchId: string, listName?: string) =>
+      ipcRenderer.invoke('dialer:uploadLeads', leads, batchId, listName),
     onUploadProgress: (callback: (data: { processed: number; total: number }) => void) => {
-      ipcRenderer.on('dialer:upload-progress', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:upload-progress', handler);
+      return () => { ipcRenderer.removeListener('dialer:upload-progress', handler); };
     },
     syncFubDNC: () =>
       ipcRenderer.invoke('dialer:syncFubDNC'),
+    syncFubExceptUnreachedToDNC: () =>
+      ipcRenderer.invoke('dialer:syncFubExceptUnreachedToDNC'),
     onFubSyncProgress: (callback: (data: { stage: string; fetched: number; phones: number }) => void) => {
-      ipcRenderer.on('dialer:fub-sync-progress', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:fub-sync-progress', handler);
+      return () => { ipcRenderer.removeListener('dialer:fub-sync-progress', handler); };
     },
     getUploadBatches: () =>
       ipcRenderer.invoke('dialer:getUploadBatches'),
@@ -253,9 +310,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     callLead: (lead: any) =>
       ipcRenderer.invoke('dialer:callLead', lead),
 
+    // Lists
+    getLists: () =>
+      ipcRenderer.invoke('dialer:getLists'),
+
+    // Browse all leads in a list (no cadence filtering)
+    getLeadsByList: (listIds: string[], limit?: number) =>
+      ipcRenderer.invoke('dialer:getLeadsByList', listIds, limit),
+
     // Local cache reads
-    getLocalCallQueue: (limit?: number) =>
-      ipcRenderer.invoke('dialer:getLocalCallQueue', limit),
+    getLocalCallQueue: (limit?: number, listIds?: string[]) =>
+      ipcRenderer.invoke('dialer:getLocalCallQueue', limit, listIds),
     getLocalCallHistory: (limit?: number, filters?: any) =>
       ipcRenderer.invoke('dialer:getLocalCallHistory', limit, filters),
     getLocalDNCList: () =>
@@ -265,26 +330,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getLocalInboundCalls: (limit?: number) =>
       ipcRenderer.invoke('dialer:getLocalInboundCalls', limit),
 
-    // Inbound calls (Supabase fallback)
+    // Inbound calls
     getInboundCalls: (limit?: number) =>
       ipcRenderer.invoke('dialer:getInboundCalls', limit),
 
     // Batch dial
-    batchDial: (leadIds: string[]) =>
-      ipcRenderer.invoke('dialer:batchDial', leadIds),
+    batchDial: (leadIds: string[], fromNumbers?: string | string[]) =>
+      ipcRenderer.invoke('dialer:batchDial', leadIds, fromNumbers),
+    getNumberHealth: (fromNumbers: string[]) =>
+      ipcRenderer.invoke('dialer:getNumberHealth', fromNumbers),
+    getNumberThrottle: (fromNumbers: string[]) =>
+      ipcRenderer.invoke('dialer:getNumberThrottle', fromNumbers),
+    setNumberLimits: (phone: string, dailyLimit?: number, hourlyLimit?: number) =>
+      ipcRenderer.invoke('dialer:setNumberLimits', phone, dailyLimit, hourlyLimit),
+    setNumberPaused: (phone: string, paused: boolean, reason?: string) =>
+      ipcRenderer.invoke('dialer:setNumberPaused', phone, paused, reason),
+    getCampaignCapacity: (fromNumbers: string[]) =>
+      ipcRenderer.invoke('dialer:getCampaignCapacity', fromNumbers),
     onBatchDialProgress: (callback: (data: any) => void) => {
-      ipcRenderer.on('dialer:batch-dial-progress', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:batch-dial-progress', handler);
+      return () => { ipcRenderer.removeListener('dialer:batch-dial-progress', handler); };
     },
 
     // Inbound call notification
     onInboundCall: (callback: (data: any) => void) => {
-      ipcRenderer.on('dialer:inbound-call', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:inbound-call', handler);
+      return () => { ipcRenderer.removeListener('dialer:inbound-call', handler); };
     },
 
     // Cache update notification
     onCacheUpdated: (callback: (data: { type: string }) => void) => {
-      ipcRenderer.on('dialer:cache-updated', (_event: any, data: any) => callback(data));
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on('dialer:cache-updated', handler);
+      return () => { ipcRenderer.removeListener('dialer:cache-updated', handler); };
     },
+
+    // Retell phone numbers
+    getRetellPhoneNumbers: () =>
+      ipcRenderer.invoke('dialer:getRetellPhoneNumbers'),
 
     // Force sync
     forceSync: () =>
@@ -308,5 +393,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Call guard audit log
     getGuardLog: (limit?: number) =>
       ipcRenderer.invoke('dialer:getGuardLog', limit),
+
+    // Campaign pause/resume
+    pauseBatchDial: () =>
+      ipcRenderer.invoke('dialer:pauseBatchDial'),
+    resumeBatchDial: () =>
+      ipcRenderer.invoke('dialer:resumeBatchDial'),
+    isBatchPaused: () =>
+      ipcRenderer.invoke('dialer:isBatchPaused'),
+
+    // Lead actions
+    setLeadOutcome: (phoneNormalized: string, outcome: string, reason?: string) =>
+      ipcRenderer.invoke('dialer:setLeadOutcome', phoneNormalized, outcome, reason),
+    clearLeadOutcome: (phoneNormalized: string) =>
+      ipcRenderer.invoke('dialer:clearLeadOutcome', phoneNormalized),
+    setLeadCallback: (phoneNormalized: string, callbackDatetime: string | null) =>
+      ipcRenderer.invoke('dialer:setLeadCallback', phoneNormalized, callbackDatetime),
+    addLeadNote: (phoneNormalized: string, note: string) =>
+      ipcRenderer.invoke('dialer:addLeadNote', phoneNormalized, note),
+    getLeadNotes: (phoneNormalized: string) =>
+      ipcRenderer.invoke('dialer:getLeadNotes', phoneNormalized),
+    deleteLeadNote: (noteId: string) =>
+      ipcRenderer.invoke('dialer:deleteLeadNote', noteId),
+
+    // Lead search
+    searchLeads: (query: string, limit?: number) =>
+      ipcRenderer.invoke('dialer:searchLeads', query, limit),
+
+    // Paginated call history
+    getCallHistoryPaginated: (limit?: number, offset?: number, filters?: any) =>
+      ipcRenderer.invoke('dialer:getCallHistoryPaginated', limit, offset, filters),
+
+    // RAG: Transcript search + conversation memory
+    searchTranscripts: (query: string, options?: { phoneNormalized?: string; topN?: number }) =>
+      ipcRenderer.invoke('dialer:searchTranscripts', query, options),
+    getPreCallContext: (phoneNormalized: string) =>
+      ipcRenderer.invoke('dialer:getPreCallContext', phoneNormalized),
+    backfillDialerEmbeddings: () =>
+      ipcRenderer.invoke('dialer:backfillEmbeddings'),
   },
 });

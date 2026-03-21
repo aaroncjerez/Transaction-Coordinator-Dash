@@ -22,6 +22,7 @@ mac:
         - universal
   hardenedRuntime: false
   darkModeSupport: true
+  x64ArchFiles: "Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/**"
 
 dmg:
   title: Jerez Land TC

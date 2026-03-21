@@ -161,6 +161,42 @@ export interface DiscoveredAttachment {
   sourceId: number;
 }
 
+// ==========================================
+// FUB Deal Pipeline Types
+// ==========================================
+
+export interface FubPipelineStage {
+  id: number;
+  name: string;
+  orderWeight?: number;
+  [key: string]: any;
+}
+
+export interface FubPipeline {
+  id: number;
+  name: string;
+  stages?: FubPipelineStage[];
+  [key: string]: any;
+}
+
+export interface FubDeal {
+  id: number;
+  personId?: number;
+  pipelineId?: number;
+  stageId?: number;
+  name?: string;
+  price?: number;
+  status?: string;
+  closingDate?: string;
+  possessionDate?: string;
+  commissionValue?: number;
+  commission?: number;
+  agentCommission?: number;
+  teamCommission?: number;
+  customFields?: Record<string, any>;
+  [key: string]: any;
+}
+
 /**
  * Build the Basic auth header for FUB API.
  * FUB uses API key as username with empty password.
@@ -383,6 +419,39 @@ export async function discoverAttachments(
 // ==========================================
 // Person Sync Methods
 // ==========================================
+
+/**
+ * Fetch ALL people from FUB (no stage filter, paginated).
+ * GET /v1/people?limit=100&offset={offset}
+ */
+export async function fetchAllPeople(
+  config: FubConfig,
+  limit = 100,
+  offset = 0
+): Promise<{ people: FubPerson[]; total: number; hasMore: boolean }> {
+  const url = `${FUB_API_BASE}/people?limit=${limit}&offset=${offset}&fields=allFields`;
+  const response = await fetchWithRetry(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`FUB GET /people failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const people: FubPerson[] = data.people || data.response || [];
+  const total = data._metadata?.total || people.length;
+  const nextOffset = data._metadata?.nextoffset;
+
+  return {
+    people,
+    total,
+    hasMore: !!nextOffset && people.length >= limit,
+  };
+}
 
 /**
  * Fetch people from FUB by stage (paginated).
@@ -703,4 +772,147 @@ export async function downloadAttachment(
   }
 
   return { buffer, fileName };
+}
+
+// ==========================================
+// Deal Pipeline Methods
+// ==========================================
+
+/**
+ * Fetch all pipelines from FUB.
+ * GET /v1/pipelines
+ * Returns pipeline objects (may include stages inline depending on FUB version).
+ */
+export async function fetchPipelines(
+  config: FubConfig
+): Promise<FubPipeline[]> {
+  const url = `${FUB_API_BASE}/pipelines`;
+  const response = await fetchWithRetry(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`FUB GET /pipelines failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.pipelines || data.response || [];
+}
+
+/**
+ * Fetch a single pipeline with stages.
+ * GET /v1/pipelines/{id}
+ */
+export async function fetchPipeline(
+  config: FubConfig,
+  pipelineId: number
+): Promise<FubPipeline | null> {
+  const url = `${FUB_API_BASE}/pipelines/${pipelineId}`;
+  const response = await fetchWithRetry(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`FUB GET /pipelines/${pipelineId} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.response || data;
+}
+
+/**
+ * Fetch deals for a person from FUB.
+ * GET /v1/deals?personId={id}
+ */
+export async function fetchDealsByPerson(
+  config: FubConfig,
+  personId: number
+): Promise<FubDeal[]> {
+  const url = `${FUB_API_BASE}/deals?personId=${personId}`;
+  const response = await fetchWithRetry(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) return [];
+    throw new Error(`FUB GET /deals?personId=${personId} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.deals || data.response || [];
+}
+
+/**
+ * Fetch a single deal from FUB.
+ * GET /v1/deals/{id}
+ */
+export async function fetchDeal(
+  config: FubConfig,
+  dealId: number
+): Promise<FubDeal | null> {
+  const url = `${FUB_API_BASE}/deals/${dealId}`;
+  const response = await fetchWithRetry(url, {
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 404) return null;
+    throw new Error(`FUB GET /deals/${dealId} failed: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  const result = data.response || data;
+
+  // Diagnostic: log raw deal keys to discover commission field names
+  console.log(`[FubClient] fetchDeal(${dealId}) keys:`, Object.keys(result).join(', '));
+  const moneyFields = Object.entries(result).filter(([k]) =>
+    /commission|price|value|amount|profit|cost|revenue/i.test(k)
+  );
+  if (moneyFields.length > 0) {
+    console.log(`[FubClient] fetchDeal(${dealId}) money-related:`, Object.fromEntries(moneyFields));
+  }
+
+  return result;
+}
+
+/**
+ * Update a deal's stage in the FUB Deal Pipeline.
+ * PUT /v1/deals/{id}
+ */
+export async function updateDealStage(
+  config: FubConfig,
+  dealId: number,
+  stageId: number
+): Promise<boolean> {
+  const url = `${FUB_API_BASE}/deals/${dealId}`;
+  const response = await fetchWithRetry(url, {
+    method: 'PUT',
+    headers: {
+      Authorization: authHeader(config.apiKey),
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ stageId }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    console.error(`[FubClient] updateDealStage(${dealId}, stageId=${stageId}) failed: ${response.status} ${text}`);
+    return false;
+  }
+
+  return true;
 }

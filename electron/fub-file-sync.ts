@@ -69,14 +69,14 @@ export function stopFubFileSync(): void {
  * Manually trigger sync for one deal or all deals.
  * Called from IPC handler.
  */
-export async function triggerFubSync(dealId?: string): Promise<{ success: boolean; synced: number; errors: number }> {
+export async function triggerFubSync(dealId?: string): Promise<{ success: boolean; synced: number; errors: number; reason?: string }> {
   return runSync(dealId);
 }
 
 /**
  * Core sync logic. Processes all deals with fub_person_id (or a single deal).
  */
-async function runSync(targetDealId?: string): Promise<{ success: boolean; synced: number; errors: number }> {
+async function runSync(targetDealId?: string): Promise<{ success: boolean; synced: number; errors: number; reason?: string }> {
   const db = getDb();
   if (!db) {
     console.warn('[FubFileSync] No database available');
@@ -85,8 +85,8 @@ async function runSync(targetDealId?: string): Promise<{ success: boolean; synce
 
   const config = getFubConfig(db);
   if (!config) {
-    // No FUB API key configured — silently skip
-    return { success: true, synced: 0, errors: 0 };
+    // No FUB API key configured
+    return { success: true, synced: 0, errors: 0, reason: 'no_api_key' };
   }
 
   // Get deals with FUB person IDs
@@ -102,7 +102,7 @@ async function runSync(targetDealId?: string): Promise<{ success: boolean; synce
   }
 
   if (deals.length === 0) {
-    return { success: true, synced: 0, errors: 0 };
+    return { success: true, synced: 0, errors: 0, reason: 'no_deals' };
   }
 
   console.log(`[FubFileSync] Processing ${deals.length} deal(s) with FUB links`);
@@ -152,7 +152,7 @@ async function runSync(targetDealId?: string): Promise<{ success: boolean; synce
     console.log(`[FubFileSync] Complete: ${totalSynced} new files synced, ${totalErrors} errors`);
   }
 
-  return { success: totalErrors === 0, synced: totalSynced, errors: totalErrors };
+  return { success: totalErrors === 0, synced: totalSynced, errors: totalErrors, reason: 'completed' };
 }
 
 /**

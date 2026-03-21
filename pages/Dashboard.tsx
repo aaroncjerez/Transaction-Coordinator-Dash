@@ -38,6 +38,7 @@ function getDealTotalFees(d: Deal): number {
     (d.misc_fees || 0);
 }
 
+
 // ---- Dashboard Page ----
 
 export const Dashboard: React.FC = () => {
@@ -57,6 +58,8 @@ export const Dashboard: React.FC = () => {
   } | null>(null);
   const [cfoLoading, setCfoLoading] = useState(false);
   const [cfoError, setCfoError] = useState<string | null>(null);
+  const [yearFilter, setYearFilter] = useState<'thisYear' | 'allTime'>('thisYear');
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
     const load = async () => {
@@ -78,6 +81,21 @@ export const Dashboard: React.FC = () => {
 
   const activeDeals = useMemo(() => deals.filter(d => d.stage !== 'Cancelled' && d.stage !== 'Sold'), [deals]);
   const soldDeals = useMemo(() => deals.filter(d => d.stage === 'Sold'), [deals]);
+
+  // Year-filtered sold deals for realized metrics (use close_date only — no updated_at fallback)
+  const filteredSoldDeals = useMemo(() => {
+    if (yearFilter === 'allTime') return soldDeals;
+    return soldDeals.filter(d => {
+      if (!d.close_date || d.close_date === 'TBD') return false;
+      return new Date(d.close_date).getFullYear() === currentYear;
+    });
+  }, [soldDeals, yearFilter, currentYear]);
+
+  // Sold deals missing close_date or realized_gross_profit
+  const incompleteSoldDeals = useMemo(() =>
+    soldDeals.filter(d => !d.close_date || d.close_date === 'TBD' || !d.realized_gross_profit),
+    [soldDeals]
+  );
 
   // Overdue deadlines (past due, not acknowledged)
   const overdueDeadlines = useMemo(() =>
@@ -154,26 +172,13 @@ export const Dashboard: React.FC = () => {
   const totalPipeline = useMemo(() =>
     activeDeals.reduce((sum, d) => sum + (d.purchase_price || 0), 0), [activeDeals]);
 
-  const totalPipelineValue = useMemo(() =>
-    activeDeals.reduce((s, d) => s + (d.expected_sales_price || 0), 0), [activeDeals]);
-
-  const totalActiveFees = useMemo(() =>
-    activeDeals.reduce((s, d) => s + getDealTotalFees(d), 0), [activeDeals]);
-
-  const estimatedProfit = totalPipelineValue - totalPipeline - totalActiveFees;
-
-  // My projected share: sum jl_share_amount for active deals, fallback to spread * pct
+  // My realized profit across active deals (from FUB deal commission sync)
   const myProjectedProfit = useMemo(() =>
-    activeDeals.reduce((sum, d) => {
-      if (d.jl_share_amount && d.jl_share_amount > 0) return sum + d.jl_share_amount;
-      const profit = (d.expected_sales_price || 0) - (d.purchase_price || 0);
-      const pct = d.jl_share_percent || 0;
-      return sum + (profit > 0 ? profit * pct / 100 : 0);
-    }, 0), [activeDeals]);
+    activeDeals.reduce((sum, d) => sum + (d.realized_gross_profit || 0), 0), [activeDeals]);
 
-  // My realized share: sum jl_share_amount for sold deals
-  const myRealizedProfit = useMemo(() =>
-    soldDeals.reduce((sum, d) => sum + (d.jl_share_amount || 0), 0), [soldDeals]);
+  // My Profit = realized_gross_profit for sold deals (filtered by year)
+  const myProfit = useMemo(() =>
+    filteredSoldDeals.reduce((sum, d) => sum + (d.realized_gross_profit || 0), 0), [filteredSoldDeals]);
 
   // Deal type breakdown
   const dealTypeBreakdown = useMemo(() => {
@@ -207,7 +212,7 @@ export const Dashboard: React.FC = () => {
 
   const monthlyProfits = useMemo((): MonthlyProfit[] => {
     const byMonth: Record<string, MonthlyProfit> = {};
-    soldDeals.forEach(d => {
+    filteredSoldDeals.forEach(d => {
       const dateStr = d.close_date || d.updated_at || d.created_at;
       if (!dateStr || dateStr === 'TBD') return;
       const dt = new Date(dateStr);
@@ -224,10 +229,10 @@ export const Dashboard: React.FC = () => {
       }
       byMonth[key].dealCount++;
       byMonth[key].realizedGrossProfit += d.realized_gross_profit || 0;
-      byMonth[key].myShare += d.jl_share_amount || 0;
+      byMonth[key].myShare += d.realized_gross_profit || 0;
     });
     return Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month));
-  }, [soldDeals]);
+  }, [filteredSoldDeals]);
 
   const trailingAverage = useMemo(() => {
     const recent = monthlyProfits.slice(0, 6);
@@ -261,14 +266,14 @@ export const Dashboard: React.FC = () => {
         activeDeals: { count: activeDeals.length, stages: stageBreakdown },
         totalPipelineValue: totalPipeline,
         myProjectedProfit,
-        myRealizedProfit,
-        totalRealizedGross: soldDeals.reduce((s, d) => s + (d.realized_gross_profit || 0), 0),
+        myRealizedProfit: myProfit,
+        totalRealizedGross: myProfit,
         monthlyProfits,
         trailingAverage,
         overdueDeadlineCount: overdueDeadlines.length,
         staleDealsCount: staleDeals.length,
         pendingTaskCount: pendingTasks.length,
-        soldDealCount: soldDeals.length,
+        soldDealCount: filteredSoldDeals.length,
       });
       setCfoInsights(result);
     } catch (err: any) {
@@ -302,13 +307,60 @@ export const Dashboard: React.FC = () => {
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <div className="max-w-5xl mx-auto px-5 py-6 space-y-6">
 
-          {/* ---- Quick Stats Row ---- */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <StatCard icon={<LayoutGrid size={16} />} label="Active Deals" value={String(activeDeals.length)} />
-            <StatCard icon={<DollarSign size={16} />} label="Pipeline Value" value={formatCurrency(totalPipeline)} />
-            <StatCard icon={<TrendingUp size={16} />} label="Est. Gross Profit" value={formatCurrency(estimatedProfit)} valueClass="text-emerald-600" />
-            <StatCard icon={<TrendingUp size={16} />} label="My Projected" value={formatCurrency(myProjectedProfit)} valueClass="text-emerald-600" />
-            <StatCard icon={<DollarSign size={16} />} label="My Realized" value={formatCurrency(myRealizedProfit)} valueClass="text-emerald-600" />
+          {/* ---- Active Pipeline Stats ---- */}
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-3">Active Pipeline</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <StatCard icon={<LayoutGrid size={16} />} label="Active Deals" value={String(activeDeals.length)} />
+              <StatCard icon={<DollarSign size={16} />} label="Pipeline Value" value={formatCurrency(totalPipeline)} />
+              <StatCard icon={<TrendingUp size={16} />} label="My Projected" value={formatCurrency(myProjectedProfit)} valueClass="text-emerald-600" />
+            </div>
+          </div>
+
+          {/* ---- Realized Stats (with year toggle) ---- */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-900">Realized</h3>
+              <div className="flex bg-gray-100 rounded-md p-0.5">
+                <button
+                  className={cn('px-2.5 py-1 text-micro font-medium rounded transition-colors',
+                    yearFilter === 'thisYear' ? 'bg-white shadow-xs text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                  )}
+                  onClick={() => setYearFilter('thisYear')}
+                >
+                  {currentYear}
+                </button>
+                <button
+                  className={cn('px-2.5 py-1 text-micro font-medium rounded transition-colors',
+                    yearFilter === 'allTime' ? 'bg-white shadow-xs text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                  )}
+                  onClick={() => setYearFilter('allTime')}
+                >
+                  All Time
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <StatCard icon={<DollarSign size={16} />} label="My Profit" value={formatCurrency(myProfit)} valueClass="text-emerald-700 font-bold" />
+              <StatCard icon={<LayoutGrid size={16} />} label="Sold Deals" value={String(filteredSoldDeals.length)} />
+            </div>
+            {incompleteSoldDeals.length > 0 && (
+              <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                <p className="text-caption text-amber-700">
+                  {incompleteSoldDeals.length} sold deal{incompleteSoldDeals.length !== 1 ? 's' : ''} missing close date or profit:{' '}
+                  {incompleteSoldDeals.map((d, i) => (
+                    <span key={d.id}>
+                      {i > 0 && ', '}
+                      <button className="underline hover:text-amber-900" onClick={() => navigate(`/pipeline?deal=${d.id}`)}>{d.deal_name}</button>
+                      <span className="text-amber-500 text-micro ml-0.5">
+                        ({[!d.close_date || d.close_date === 'TBD' ? 'no date' : null, !d.realized_gross_profit ? 'no profit' : null].filter(Boolean).join(', ')})
+                      </span>
+                    </span>
+                  ))}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* ---- Stage Distribution + Deal Types ---- */}
@@ -499,7 +551,7 @@ export const Dashboard: React.FC = () => {
                     <th className="text-right py-2 text-caption font-semibold text-gray-500">Spread</th>
                     <th className="text-right py-2 text-caption font-semibold text-gray-500">Fees</th>
                     <th className="text-right py-2 text-caption font-semibold text-gray-500">Net Profit</th>
-                    <th className="text-right py-2 text-caption font-semibold text-blue-600">JL Share</th>
+                    <th className="text-right py-2 text-caption font-semibold text-blue-600">My Profit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -509,7 +561,7 @@ export const Dashboard: React.FC = () => {
                     const purchase = stageDeals.reduce((s, d) => s + (d.purchase_price || 0), 0);
                     const sale = stageDeals.reduce((s, d) => s + (d.expected_sales_price || 0), 0);
                     const fees = stageDeals.reduce((s, d) => s + getDealTotalFees(d), 0);
-                    const jlShare = stageDeals.reduce((s, d) => s + (d.jl_share_amount || 0), 0);
+                    const jlShare = stageDeals.reduce((s, d) => s + (d.realized_gross_profit || 0), 0);
                     const spread = sale - purchase;
                     const netProfit = spread - fees;
                     const sc = getStageColor(stage);
@@ -542,7 +594,7 @@ export const Dashboard: React.FC = () => {
                     const totalPurchase = allNonCancelled.reduce((s, d) => s + (d.purchase_price || 0), 0);
                     const totalSale = allNonCancelled.reduce((s, d) => s + (d.expected_sales_price || 0), 0);
                     const totalFees = allNonCancelled.reduce((s, d) => s + getDealTotalFees(d), 0);
-                    const totalJlShare = allNonCancelled.reduce((s, d) => s + (d.jl_share_amount || 0), 0);
+                    const totalJlShare = allNonCancelled.reduce((s, d) => s + (d.realized_gross_profit || 0), 0);
                     const totalSpread = totalSale - totalPurchase;
                     const totalNet = totalSpread - totalFees;
                     return (
@@ -570,7 +622,7 @@ export const Dashboard: React.FC = () => {
           </div>
 
           {/* ---- Operational Metrics Row ---- */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 text-center">
               <p className="text-micro text-gray-400 font-medium uppercase tracking-wide mb-1">Avg Days in Pipeline</p>
               <p className="text-xl font-bold text-amber-600">{avgDaysInPipeline}d</p>
@@ -581,18 +633,13 @@ export const Dashboard: React.FC = () => {
               <p className="text-xl font-bold text-emerald-600">{taskBreakdown.completionRate}%</p>
               <p className="text-micro text-gray-400">{taskBreakdown.done} of {taskBreakdown.total}</p>
             </div>
-            <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 text-center">
-              <p className="text-micro text-gray-400 font-medium uppercase tracking-wide mb-1">Sold Deals</p>
-              <p className="text-xl font-bold text-emerald-600">{soldDeals.length}</p>
-              <p className="text-micro text-gray-400">{formatCurrency(myRealizedProfit)} realized</p>
-            </div>
           </div>
 
           {/* ---- Month-to-Month Profit ---- */}
           {monthlyProfits.length > 0 && (
             <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-900">Monthly Profit (My Share)</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Monthly Profit</h3>
                 <span className="text-caption text-gray-500">
                   Avg: <span className="font-semibold text-emerald-600">{formatCurrency(trailingAverage)}</span>/mo
                 </span>

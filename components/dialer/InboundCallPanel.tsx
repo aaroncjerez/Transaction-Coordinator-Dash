@@ -26,9 +26,10 @@ export const InboundCallPanel: React.FC<InboundCallPanelProps> = ({ searchQuery,
   useEffect(() => { loadCalls(); }, [loadCalls]);
 
   useEffect(() => {
-    onDialerCacheUpdated((data) => {
+    const unsub = onDialerCacheUpdated((data) => {
       if (data.type === 'history') loadCalls();
     });
+    return () => unsub();
   }, [loadCalls]);
 
   const filtered = calls.filter(call => {

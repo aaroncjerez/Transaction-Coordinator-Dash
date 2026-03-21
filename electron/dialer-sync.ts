@@ -1,43 +1,38 @@
 /**
- * Dialer Sync Runner — Two-tier background polling + local SQLite cache
+ * Dialer Sync Runner — Local background processor
  *
- * Fast sync (5s): Poll Supabase for new call_records, update local cache, detect inbound calls
- * Full sync (60s): Refresh call queue + DNC list, run AI reviewer, send cache-updated events
- *
- * Pattern: follows fub-person-sync.ts (start/stop, interval, guard)
+ * No Supabase — all data lives in SQLite.
+ * Runs periodic background tasks:
+ *   - AI call review (unreviewed transcripts)
+ *   - Conversation memory updates (for reviewed calls)
+ *   - Transcript embedding backfill
+ *   - Inbound call detection
  */
 
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, Notification } from 'electron';
 import { getDb } from './database.js';
-import { isSupabaseConfigured, getSupabaseClient } from './supabase-client.js';
 import {
-  getCallQueue,
-  getCallHistory,
-  getDNCList,
   getUnreviewedCalls,
   getTodayCallCount,
   getInboundCalls,
-  syncCallQueueToLocal,
-  syncCallHistoryToLocal,
-  syncDNCToLocal,
 } from './dialer-queries.js';
 import { reviewRecentCalls } from './call-reviewer.js';
+import {
+  chunkAndEmbedTranscript,
+  updateLeadMemory,
+} from './dialer-memory.js';
 
-// Track sync health for status reporting
-let lastFastSyncOk = false;
-let lastFullSyncOk = false;
-let lastFastSyncError: string | null = null;
-let lastFullSyncError: string | null = null;
-let lastFastSyncTime: string | null = null;
-let lastFullSyncTime: string | null = null;
+// Track sync health
+let lastSyncOk = false;
+let lastSyncError: string | null = null;
+let lastSyncTime: string | null = null;
 
-const FAST_SYNC_INTERVAL_MS = 5 * 1000;   // 5 seconds — call records
-const FULL_SYNC_INTERVAL_MS = 60 * 1000;  // 60 seconds — queue + DNC + AI review
+const SYNC_INTERVAL_MS = 60 * 1000;  // 60 seconds
+const INBOUND_CHECK_MS = 10 * 1000;  // 10 seconds
 
-let fastIntervalId: ReturnType<typeof setInterval> | null = null;
-let fullIntervalId: ReturnType<typeof setInterval> | null = null;
-let isFastSyncing = false;
-let isFullSyncing = false;
+let syncIntervalId: ReturnType<typeof setInterval> | null = null;
+let inboundIntervalId: ReturnType<typeof setInterval> | null = null;
+let isSyncing = false;
 let lastCallCount = 0;
 let lastInboundCallId: string | null = null;
 
@@ -50,232 +45,226 @@ function notifyRenderer(channel: string, data: any): void {
 }
 
 /**
- * Fast sync — poll for new call records, update local cache (every 5 seconds)
+ * Inbound call check — lightweight, runs every 10s
  */
-async function fastSync(): Promise<void> {
-  if (isFastSyncing) return;
-  isFastSyncing = true;
-
+async function checkInbound(): Promise<void> {
   try {
     const db = getDb();
-    if (!isSupabaseConfigured(db)) {
-      console.log('[DialerSync:fast] Supabase not configured, skipping');
-      return;
-    }
-
-    const supabase = getSupabaseClient(db);
-    console.log('[DialerSync:fast] Fetching call history...');
-
-    // Fetch recent call history from Supabase and sync to local
-    const calls = await getCallHistory(supabase, 200);
-    console.log(`[DialerSync:fast] Fetched ${calls.length} call records from Supabase`);
-    if (calls.length > 0) {
-      syncCallHistoryToLocal(db, calls);
-    }
 
     // Check for new calls today
-    const currentCount = await getTodayCallCount(supabase);
+    const currentCount = getTodayCallCount(db);
     if (currentCount > lastCallCount && lastCallCount > 0) {
       const newCalls = currentCount - lastCallCount;
-      console.log(`[DialerSync:fast] ${newCalls} new call(s) detected`);
       notifyRenderer('dialer:new-calls', { count: newCalls });
+      notifyRenderer('dialer:cache-updated', { type: 'history' });
     }
     lastCallCount = currentCount;
 
     // Check for new inbound calls
-    const inboundCalls = await getInboundCalls(supabase, 5);
-    if (inboundCalls.length > 0 && inboundCalls[0].id !== lastInboundCallId) {
-      const newCall = inboundCalls[0];
-      if (lastInboundCallId !== null) {
-        // Look up lead name from local SQLite cache
-        const phone = newCall.seller_phone_normalized || newCall.phone_normalized;
-        let leadName: string | null = null;
-        try {
-          if (newCall.lead_id) {
-            const lead = db.prepare(
-              'SELECT first_name, last_name FROM dialer_leads_cache WHERE id = ?'
-            ).get(newCall.lead_id) as any;
-            if (lead) leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
-          }
-          if (!leadName && phone) {
-            const lead = db.prepare(
-              'SELECT first_name, last_name FROM dialer_leads_cache WHERE phone_normalized = ? LIMIT 1'
-            ).get(phone) as any;
-            if (lead) leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
-          }
-        } catch { /* ignore lookup errors */ }
+    const inboundCalls = getInboundCalls(db, 5);
+    if (inboundCalls.length > 0) {
+      const newCall = inboundCalls[0] as any;
+      if (newCall.id !== lastInboundCallId) {
+        if (lastInboundCallId !== null) {
+          const phone = newCall.seller_phone_normalized || newCall.phone_normalized;
+          let leadName: string | null = null;
+          try {
+            if (newCall.lead_id) {
+              const lead = db.prepare(
+                'SELECT first_name, last_name FROM dialer_leads_cache WHERE id = ?'
+              ).get(newCall.lead_id) as any;
+              if (lead) leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
+            }
+            if (!leadName && phone) {
+              const lead = db.prepare(
+                'SELECT first_name, last_name FROM dialer_leads_cache WHERE phone_normalized = ? LIMIT 1'
+              ).get(phone) as any;
+              if (lead) leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || null;
+            }
+          } catch { /* ignore */ }
 
-        notifyRenderer('dialer:inbound-call', {
-          callId: newCall.id,
-          phone,
-          leadName,
-          leadId: newCall.lead_id,
-          timestamp: newCall.call_started_at,
-        });
+          notifyRenderer('dialer:inbound-call', {
+            callId: newCall.id,
+            phone,
+            leadName,
+            leadId: newCall.lead_id,
+            timestamp: newCall.call_started_at,
+          });
+
+          // Native OS notification
+          if (Notification.isSupported()) {
+            const notif = new Notification({
+              title: 'Inbound Call',
+              body: leadName ? `${leadName} (${phone})` : phone || 'Unknown caller',
+              silent: false,
+            });
+            notif.show();
+          }
+        }
+        lastInboundCallId = newCall.id;
       }
-      lastInboundCallId = inboundCalls[0].id;
     }
-
-    // Notify that call history cache was updated
-    notifyRenderer('dialer:cache-updated', { type: 'history' });
-
-    lastFastSyncOk = true;
-    lastFastSyncError = null;
-    lastFastSyncTime = new Date().toISOString();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[DialerSync:fast] Error:', msg);
-    lastFastSyncOk = false;
-    lastFastSyncError = msg;
-    lastFastSyncTime = new Date().toISOString();
-  } finally {
-    isFastSyncing = false;
+    // Inbound check is non-critical, don't spam logs
   }
 }
 
 /**
- * Full sync — refresh queue, DNC list, run AI reviewer (every 60 seconds)
+ * Main sync cycle — runs every 60s
+ * 1. AI call review
+ * 2. Transcript embedding
+ * 3. Conversation memory updates
  */
 export async function fullSync(): Promise<void> {
-  if (isFullSyncing) return;
-  isFullSyncing = true;
+  if (isSyncing) return;
+  isSyncing = true;
 
   try {
     const db = getDb();
-    if (!isSupabaseConfigured(db)) return;
 
-    const supabase = getSupabaseClient(db);
-
-    // 1. Sync call queue to local cache
+    // 1. AI review of unreviewed calls
+    const reviewedPhones: string[] = [];
     try {
-      const queue = await getCallQueue(supabase, 100);
-      syncCallQueueToLocal(db, queue);
-      notifyRenderer('dialer:cache-updated', { type: 'queue' });
-    } catch (err) {
-      console.error('[DialerSync:full] Queue sync error:', err instanceof Error ? err.message : err);
-    }
-
-    // 2. Sync DNC list to local cache
-    try {
-      const dnc = await getDNCList(supabase);
-      syncDNCToLocal(db, dnc);
-      notifyRenderer('dialer:cache-updated', { type: 'dnc' });
-    } catch (err) {
-      console.error('[DialerSync:full] DNC sync error:', err instanceof Error ? err.message : err);
-    }
-
-    // 3. Auto-review unreviewed calls
-    try {
-      const unreviewedCalls = await getUnreviewedCalls(supabase, 5);
+      const unreviewedCalls = getUnreviewedCalls(db, 5);
       if (unreviewedCalls.length > 0) {
-        console.log(`[DialerSync:full] Found ${unreviewedCalls.length} un-reviewed call(s), starting AI review...`);
-
         const anthropicKey = db.prepare(
           "SELECT value FROM settings WHERE key = 'anthropic_api_key'"
         ).get() as any;
 
         if (anthropicKey?.value || process.env.ANTHROPIC_API_KEY) {
+          console.log(`[DialerSync] Found ${unreviewedCalls.length} un-reviewed call(s), starting AI review...`);
           const result = await reviewRecentCalls(db, 5);
           if (result.reviewed > 0) {
-            console.log(`[DialerSync:full] AI review complete: ${result.reviewed} reviewed, ${result.dncDetected} DNC, ${result.hotLeadsFound} hot leads`);
-            notifyRenderer('dialer:new-calls', { count: result.reviewed });
+            console.log(`[DialerSync] AI review: ${result.reviewed} reviewed, ${result.dncDetected} DNC, ${result.hotLeadsFound} hot leads`);
+            notifyRenderer('dialer:cache-updated', { type: 'history' });
+
+            // Collect phones from reviewed calls for memory update
+            for (const call of unreviewedCalls as any[]) {
+              const phone = call.seller_phone_normalized || call.phone_normalized;
+              if (phone && !reviewedPhones.includes(phone)) {
+                reviewedPhones.push(phone);
+              }
+            }
           }
-        } else {
-          console.log('[DialerSync:full] Skipping AI review — Anthropic API key not configured');
         }
       }
     } catch (err) {
-      console.error('[DialerSync:full] AI review error:', err instanceof Error ? err.message : err);
+      console.error('[DialerSync] AI review error:', err instanceof Error ? err.message : err);
     }
 
-    lastFullSyncOk = true;
-    lastFullSyncError = null;
-    lastFullSyncTime = new Date().toISOString();
+    // 2. Transcript embedding for calls without chunks
+    try {
+      const voyageKey = (db.prepare(
+        "SELECT value FROM settings WHERE key = 'voyage_api_key'"
+      ).get() as any)?.value?.trim() || process.env.VOYAGE_API_KEY;
+
+      if (voyageKey) {
+        const unembeddedCalls = db.prepare(`
+          SELECT id FROM dialer_call_records
+          WHERE transcript IS NOT NULL AND transcript != ''
+            AND id NOT IN (SELECT DISTINCT call_id FROM dialer_transcript_chunks)
+          ORDER BY call_started_at DESC
+          LIMIT 5
+        `).all() as any[];
+
+        for (const call of unembeddedCalls) {
+          try {
+            await chunkAndEmbedTranscript(db, call.id, voyageKey);
+          } catch (err) {
+            console.error(`[DialerSync] Embedding error for call ${call.id}:`, err instanceof Error ? err.message : err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[DialerSync] Embedding backfill error:', err instanceof Error ? err.message : err);
+    }
+
+    // 3. Update conversation memory for leads with newly reviewed calls
+    if (reviewedPhones.length > 0) {
+      try {
+        const anthropicKey = (db.prepare(
+          "SELECT value FROM settings WHERE key = 'anthropic_api_key'"
+        ).get() as any)?.value?.trim() || process.env.ANTHROPIC_API_KEY;
+
+        if (anthropicKey) {
+          for (const phone of reviewedPhones) {
+            try {
+              await updateLeadMemory(db, phone, anthropicKey);
+            } catch (err) {
+              console.error(`[DialerSync] Memory update error for ${phone}:`, err instanceof Error ? err.message : err);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[DialerSync] Memory update error:', err instanceof Error ? err.message : err);
+      }
+    }
+
+    lastSyncOk = true;
+    lastSyncError = null;
+    lastSyncTime = new Date().toISOString();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (!msg.includes('not configured') && !msg.includes('Missing')) {
-      console.error('[DialerSync:full] Error:', msg);
+      console.error('[DialerSync] Error:', msg);
     }
-    lastFullSyncOk = false;
-    lastFullSyncError = msg;
-    lastFullSyncTime = new Date().toISOString();
+    lastSyncOk = false;
+    lastSyncError = msg;
+    lastSyncTime = new Date().toISOString();
   } finally {
-    isFullSyncing = false;
+    isSyncing = false;
   }
 }
 
 /**
- * Start the dialer sync background runner.
- * Called from main.ts on app startup.
+ * Start the background processor.
  */
 export function startDialerSync(): void {
-  if (fastIntervalId || fullIntervalId) {
+  if (syncIntervalId || inboundIntervalId) {
     console.log('[DialerSync] Already running');
     return;
   }
 
-  // Startup diagnostics
-  try {
-    const db = getDb();
-    const configured = isSupabaseConfigured(db);
-    console.log(`[DialerSync] Starting background sync (5s fast / 60s full) | Supabase configured: ${configured}`);
-    if (!configured) {
-      console.warn('[DialerSync] WARNING: Supabase not configured — sync will be a no-op until credentials are set in Settings');
-    }
-  } catch (err) {
-    console.error('[DialerSync] Startup diagnostics error:', err instanceof Error ? err.message : err);
-  }
+  console.log('[DialerSync] Starting background processor (10s inbound check / 60s full sync)');
 
-  // Initial sync after a short delay (let the app finish loading)
-  // Wrapped with .catch() to surface unhandled promise rejections
+  // Initial sync after short delay
   setTimeout(() => {
-    fullSync().catch(err => console.error('[DialerSync] Initial fullSync error:', err));
-    fastSync().catch(err => console.error('[DialerSync] Initial fastSync error:', err));
-  }, 5000);
+    fullSync().catch(err => console.error('[DialerSync] Initial sync error:', err));
+  }, 8000);
 
-  fastIntervalId = setInterval(() => {
-    fastSync().catch(err => console.error('[DialerSync] fastSync interval error:', err));
-  }, FAST_SYNC_INTERVAL_MS);
+  inboundIntervalId = setInterval(() => {
+    checkInbound().catch(() => {});
+  }, INBOUND_CHECK_MS);
 
-  fullIntervalId = setInterval(() => {
-    fullSync().catch(err => console.error('[DialerSync] fullSync interval error:', err));
-  }, FULL_SYNC_INTERVAL_MS);
+  syncIntervalId = setInterval(() => {
+    fullSync().catch(err => console.error('[DialerSync] Sync error:', err));
+  }, SYNC_INTERVAL_MS);
 }
 
 /**
- * Stop the dialer sync runner.
+ * Stop the background processor.
  */
 export function stopDialerSync(): void {
-  if (fastIntervalId) {
-    clearInterval(fastIntervalId);
-    fastIntervalId = null;
+  if (syncIntervalId) {
+    clearInterval(syncIntervalId);
+    syncIntervalId = null;
   }
-  if (fullIntervalId) {
-    clearInterval(fullIntervalId);
-    fullIntervalId = null;
+  if (inboundIntervalId) {
+    clearInterval(inboundIntervalId);
+    inboundIntervalId = null;
   }
   console.log('[DialerSync] Stopped');
 }
 
 /**
- * Get sync health status for UI display.
+ * Get sync health status.
  */
 export function getSyncStatus(): {
   running: boolean;
-  supabaseConfigured: boolean;
-  fastSync: { ok: boolean; error: string | null; lastRun: string | null };
-  fullSync: { ok: boolean; error: string | null; lastRun: string | null };
+  sync: { ok: boolean; error: string | null; lastRun: string | null };
 } {
-  let supabaseConfigured = false;
-  try {
-    const db = getDb();
-    supabaseConfigured = isSupabaseConfigured(db);
-  } catch { /* ignore */ }
-
   return {
-    running: !!(fastIntervalId || fullIntervalId),
-    supabaseConfigured,
-    fastSync: { ok: lastFastSyncOk, error: lastFastSyncError, lastRun: lastFastSyncTime },
-    fullSync: { ok: lastFullSyncOk, error: lastFullSyncError, lastRun: lastFullSyncTime },
+    running: !!(syncIntervalId || inboundIntervalId),
+    sync: { ok: lastSyncOk, error: lastSyncError, lastRun: lastSyncTime },
   };
 }

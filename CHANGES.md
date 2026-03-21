@@ -1,5 +1,71 @@
 # TC Dash — Changes Log
 
+## 2026-03-14 — AI Dialer UI Redesign + Critical Bug Fixes
+
+### Phase 0: Critical Bug Fixes (10 items)
+
+**IPC Event Listener Memory Leaks (CRITICAL)**
+- All 7 IPC listener functions in `preload.ts` now return cleanup functions
+- Updated `electron.d.ts` return types from `void` to `() => void`
+- Updated all 7 `database.ts` wrappers to pass through cleanup functions
+- Fixed all consuming components: AIDialer, CallQueuePanel, BatchDialPanel, UploadPanel, DNCPanel, CallHistoryPanel
+
+**SQL NOT IN with NULL (CRITICAL)**
+- `getCallQueue()` and `getLeadsByList()` returned 0 results because 4 call records had NULL `seller_phone_normalized`
+- SQL `NOT IN` evaluates to UNKNOWN when subquery returns any NULL, filtering out ALL rows
+- Fixed: Added `AND seller_phone_normalized IS NOT NULL AND seller_phone_normalized != ''` to all 4 subqueries
+- Result: 662 leads now available (was 0)
+
+**Batch Dial Fixes**
+- Added module-level `activeDialingPhones` Set to prevent duplicate concurrent dials
+- Added try/catch that marks batch state as 'failed' on crash (was stuck as 'running' forever)
+- Fixed `dialed_count` to exclude `skippedGuard` count
+- Added migration v26 for unique index on `dialer_call_records(retell_call_id)`
+
+**UI Fixes**
+- Removed `LaunchCadenceButton` component (kept backend cadence logic)
+- Fixed `handleCall` race condition: removed optimistic local state delete, await loadQueue() instead
+- Added selectedIds reset on list change
+- Deleted duplicate `DialerLeadModal.tsx`
+
+### Phase 1: Three-Panel Layout Redesign
+
+**New Components**
+- `FilterSidebar.tsx` — Left sidebar (w-56) with hot leads, callbacks, list selector, geo filters, sort, filter toggles
+
+**AIDialer.tsx Rewrite**
+- Three-panel layout: FilterSidebar | CallQueuePanel | Right context panel
+- Lifted filter/sort state from CallQueuePanel to AIDialer
+- Right panel: Campaign setup (lead count, caller ID selection, progress) or lead detail slide-over
+
+**CallQueuePanel Updates**
+- Stripped filter/sort UI (now in FilterSidebar)
+- Accepts parent-controlled props for state, county, sort, filters, selection
+- Table + card view modes
+- Quick-select (Top 10/25/50/100)
+- Status color dots: Gray/Blue/Yellow/Green/Orange/Red
+
+### Phase 2: Campaign System
+
+**Backend (`dialer-queries.ts`)**
+- `batchDialLeads()` rewritten with round-robin `fromNumbers: string[]` parameter
+- 429 retry with exponential backoff (5s, 10s, 15s)
+- Per-number stats tracking during campaign
+- `getNumberHealthStats()` — 24h connect rate window, scam-likely flagging
+
+**Frontend**
+- Campaign setup in right panel: lead count, caller ID checkboxes with health indicators
+- Campaign progress: progress bar, per-number stats, current batch
+- Campaign results: grid showing Dialed/Connected/Guarded/Failed
+- Number Health dashboard in Manage tab
+
+**IPC**
+- `dialer:batchDial` — accepts `fromNumbers` array
+- `dialer:getNumberHealth` — returns per-number stats
+- New types: `BatchDialProgress`, `BatchDialResult`
+
+---
+
 ## 2026-02-09 — KPI Dashboard Merged into Main
 
 Merged `claude/mystifying-shaw` branch (6 commits) into `main`. Adds full KPI dashboard with team performance tracking, funnel visualization, goals, CEO weekly brief, and Airtable integration.

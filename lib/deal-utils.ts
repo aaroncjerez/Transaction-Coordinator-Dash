@@ -15,6 +15,7 @@ export interface DealViewData {
   expected_sales_price: number;
   contract_date: string;
   close_date: string;
+  possession_date?: string;
   contract_end_date?: string;
   phone_number: string;
   email?: string;
@@ -75,6 +76,7 @@ export function mapDealData(raw: Record<string, any>): DealViewData {
     expected_sales_price: raw.expected_sales_price || 0,
     contract_date: raw.contract_execution_date || 'TBD',
     close_date: raw.close_date || 'TBD',
+    possession_date: raw.possession_date || undefined,
     contract_end_date: raw.contract_end_date || undefined,
     phone_number: raw.phone_number || '',
     email: raw.email || undefined,

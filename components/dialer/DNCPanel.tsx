@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Loader2, ShieldOff, ShieldAlert, Plus, Trash2, RefreshCw } from 'lucide-react';
-import { fetchLocalDialerDNCList, fetchLocalDialerDNCStats, addDialerManualDNC, removeDialerDNC, syncDialerFubDNC, onDialerFubSyncProgress, onDialerCacheUpdated } from '../../lib/database';
+import { Loader2, ShieldOff, ShieldAlert, Plus, Trash2, RefreshCw, Download } from 'lucide-react';
+import { fetchLocalDialerDNCList, fetchLocalDialerDNCStats, addDialerManualDNC, removeDialerDNC, syncDialerFubDNC, syncDialerFubExceptUnreachedToDNC, onDialerFubSyncProgress, onDialerCacheUpdated } from '../../lib/database';
 import { formatPhone, normalizePhone } from '../../lib/utils/phone';
+import { exportDNCCsv } from '../../lib/csv-export';
 import { useToast } from '../ui/Toast';
 import { cn } from '../../lib/utils';
 
@@ -38,10 +39,11 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
-    onDialerFubSyncProgress((data) => setSyncProgress(data));
-    onDialerCacheUpdated((data) => {
+    const unsub1 = onDialerFubSyncProgress((data) => setSyncProgress(data));
+    const unsub2 = onDialerCacheUpdated((data) => {
       if (data.type === 'dnc') loadData();
     });
+    return () => { unsub1(); unsub2(); };
   }, [loadData]);
 
   const handleSyncFub = async () => {
@@ -56,6 +58,24 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
       await loadData();
     } catch (err: any) {
       showToast({ message: err.message || 'FUB sync failed', type: 'error' });
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  };
+
+  const handleDncAllExceptUnreached = async () => {
+    setSyncing(true);
+    setSyncProgress(null);
+    try {
+      const result = await syncDialerFubExceptUnreachedToDNC();
+      showToast({
+        message: `DNC'd ${result.added} FUB phones (${result.skippedUnreached} unreached kept, ${result.duplicates} dupes)`,
+        type: 'success',
+      });
+      await loadData();
+    } catch (err: any) {
+      showToast({ message: err.message || 'FUB DNC sync failed', type: 'error' });
     } finally {
       setSyncing(false);
       setSyncProgress(null);
@@ -188,6 +208,29 @@ export const DNCPanel: React.FC<DNCPanelProps> = ({ searchQuery }) => {
               <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
               {syncing ? 'Syncing FUB...' : 'Sync from FUB'}
             </button>
+            <button
+              onClick={handleDncAllExceptUnreached}
+              disabled={syncing}
+              className={cn(
+                'inline-flex items-center gap-1.5 text-caption font-medium transition-colors',
+                syncing
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-orange-600 hover:text-orange-700'
+              )}
+              title="Pull ALL FUB leads to DNC except those in Unreached stage"
+            >
+              <ShieldAlert size={14} />
+              DNC All Except Unreached
+            </button>
+            {entries.length > 0 && (
+              <button
+                onClick={() => exportDNCCsv(entries)}
+                className="inline-flex items-center gap-1.5 text-caption font-medium text-gray-500 hover:text-gray-700 transition-colors"
+              >
+                <Download size={14} />
+                Export CSV
+              </button>
+            )}
           </div>
         )}
       </div>

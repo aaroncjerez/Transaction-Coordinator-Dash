@@ -2,44 +2,6 @@ import { TeamMember } from './types.js';
 
 export const TEAM_MEMBERS: TeamMember[] = [
   {
-    id: 'john',
-    name: 'John',
-    role: 'cold_texter',
-    isActive: true,
-    targets: {
-      textsSent: 15000,
-      hotLeads: 11,
-    },
-  },
-  {
-    id: 'edward',
-    name: 'Edward',
-    role: 'cold_texter',
-    isActive: true,
-    targets: {
-      textsSent: 15000,
-      hotLeads: 11,
-    },
-  },
-  {
-    id: 'maria',
-    name: 'Maria',
-    role: 'cold_caller',
-    isActive: true,
-    targets: {
-      callsMade: 500,          // Logged calls (still tracked)
-      conversations: 125,      // PRIMARY: conversations (60s+) per week — Green threshold
-      hotLeads: 10,
-    },
-  },
-  {
-    id: 'justine',
-    name: 'Justine',
-    role: 'comper',
-    isActive: false,
-    targets: {},
-  },
-  {
     id: 'aaron',
     name: 'Aaron',
     role: 'closer',
@@ -49,13 +11,32 @@ export const TEAM_MEMBERS: TeamMember[] = [
       contractsSigned: 5,
     },
   },
+  {
+    id: 'john',
+    name: 'John',
+    role: 'cold_texter',
+    isActive: true,
+    targets: {
+      textsSent: 12500,   // 50k texts/month ÷ 4 weeks = 12,500/week (sole texter)
+      hotLeads: 5,        // 1 hot lead per day = 5/week
+    },
+  },
+  {
+    id: 'edward',
+    name: 'Edward',
+    role: 'lead_manager',
+    isActive: true,
+    targets: {
+      offersSent: 20,     // Primary KPI: offers sent to sellers
+    },
+  },
 ];
 
 export const TARGETS = {
-  weeklyTexts: 46900,
-  weeklyHotLeadsText: 22,
-  weeklyHotLeadsCall: 8,
-  weeklyTotalHotLeads: 20,
+  weeklyTexts: 12500,          // 50k texts/month ÷ 4 weeks
+  weeklyHotLeadsText: 5,       // 1 hot lead/day = 5/week
+  weeklyHotLeadsCall: 0,
+  weeklyTotalHotLeads: 5,      // Text-only now (sole texter)
   weeklyOffersSent: 20,
   weeklyContractsSent: 1.3,
   weeklyContractsSigned: 5,
@@ -65,7 +46,8 @@ export const TARGETS = {
   HALF_MILLION_CONTRACTS_SENT: 0.65,
   HALF_MILLION_DEALS_CLOSED: 0.455,
 
-  yield: 0.55,
+  // Yield: 1 gross lead per 600 texts = 1.67 gross leads per 1000 texts
+  yield: 1.67,
   offerCoverage: 100,
   closeRate: 70,
 
@@ -81,8 +63,8 @@ export const TARGETS = {
 
 export const STATUS_THRESHOLDS = {
   yield: {
-    green: 0.55,
-    yellow: 0.45,
+    green: 1.67,    // 1 gross lead per 600 texts
+    yellow: 1.2,    // ~1 per 830 texts
   },
   offerCoverage: {
     green: 100,

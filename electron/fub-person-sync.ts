@@ -20,6 +20,7 @@ import {
   updatePersonStage,
   updatePerson,
   createNote,
+  fetchDealsByPerson,
   type FubConfig,
   type FubPerson,
 } from './fub-client.js';
@@ -27,14 +28,37 @@ import { seedTasksForStage, seedTasksUpToStage } from './rule-engine.js';
 import {
   QUALIFYING_FUB_STAGES,
   resolveFubStage,
+  resolveStageIdToApp,
   STAGE_ORDER,
   type DealStage,
 } from './stage-constants.js';
-import { processOutboxQueue, recoverStaleJobs } from './fub-outbox.js';
+import { processOutboxQueue, recoverStaleJobs, ensurePipelineCache } from './fub-outbox.js';
 
 const SYNC_INTERVAL_MS = 10 * 1000; // 10 seconds (faster for outbox retry catch-up)
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
+
+/**
+ * Circuit-breaker: detect rapid stage oscillation for a deal.
+ * If a deal has had >= threshold stage changes in the last windowSeconds,
+ * block further sync-driven stage changes to prevent infinite loops.
+ *
+ * Only counts sync-driven changes (fub_sync, fub_deal_sync), not user-initiated.
+ */
+function isStageOscillating(db: any, dealId: string, threshold = 4, windowSeconds = 120): boolean {
+  const row = db.prepare(
+    `SELECT COUNT(*) as cnt FROM audit_log
+     WHERE deal_id = ? AND event_type = 'stage_change'
+       AND created_at > datetime('now', '-' || ? || ' seconds')
+       AND (details LIKE '%"source":"fub_sync"%' OR details LIKE '%"source":"fub_deal_sync"%')`
+  ).get(dealId, windowSeconds) as any;
+
+  if (row && row.cnt >= threshold) {
+    console.warn(`[CircuitBreaker] Deal ${dealId} has ${row.cnt} sync-driven stage changes in ${windowSeconds}s — halting sync for this deal`);
+    return true;
+  }
+  return false;
+}
 
 function generateUUID(): string {
   return crypto.randomUUID();
@@ -236,6 +260,13 @@ async function runSync(): Promise<{
     errors++;
   }
 
+  // Sync FUB Deal Pipeline — link deals + reverse stage sync
+  try {
+    await syncFubDealPipeline(db, config);
+  } catch (err) {
+    console.warn('[FubPersonSync] Deal pipeline sync error:', err);
+  }
+
   // Sweep FUB write outbox — retries any pending/failed pushes
   try {
     await processOutboxQueue();
@@ -376,7 +407,18 @@ function processPerson(db: any, person: FubPerson): 'new' | 'updated' | 'unchang
   // Resolve FUB stage → app stage
   const appStage = resolveFubStage(fubStage);
   if (!appStage) {
-    // Trash or unknown stage — skip
+    // Unknown stage — skip
+    return 'unchanged';
+  }
+
+  // Check if deal already exists (needed before terminal-stage guard)
+  const existingDeal = db.prepare(
+    'SELECT * FROM deals WHERE fub_person_id = ?'
+  ).get(personId) as any;
+
+  // Don't create new deals for terminal-stage leads (Dead/Nurture/Trash).
+  // Only cancel existing deals that were previously active in the pipeline.
+  if (appStage === 'Cancelled' && !existingDeal) {
     return 'unchanged';
   }
 
@@ -384,42 +426,51 @@ function processPerson(db: any, person: FubPerson): 'new' | 'updated' | 'unchang
   const dealName = buildDealName(person);
   const fubFields = extractFubFields(person);
 
-  // Check if deal already exists
-  const existingDeal = db.prepare(
-    'SELECT * FROM deals WHERE fub_person_id = ?'
-  ).get(personId) as any;
-
   if (existingDeal) {
     let changed = false;
 
-    // Stage change handling (with outbox guard)
+    // Stage change handling — FUB is source of truth
     if (existingDeal.stage !== appStage) {
-      const pendingPush = db.prepare(
-        `SELECT id FROM fub_outbox
-         WHERE deal_id = ? AND action = 'push_stage' AND status IN ('pending', 'in_flight')
-         LIMIT 1`
-      ).get(existingDeal.id) as any;
-
-      if (pendingPush) {
-        console.log(`[FubPersonSync] Skipping FUB→local stage overwrite for deal ${existingDeal.id} — outbox job ${pendingPush.id} pending`);
+      if (existingDeal.fub_deal_id) {
+        // Deal is linked to FUB Deal Pipeline — pipeline sync owns the stage.
+        // Person-level stage is ignored entirely to prevent oscillation.
+        console.log(`[FubPersonSync] Skipping stage for "${existingDeal.deal_name}" — pipeline-linked, pipeline owns stage (person=${appStage}, local=${existingDeal.stage})`);
       } else {
-        const oldStage = existingDeal.stage;
-        db.prepare(`
-          UPDATE deals SET stage = ?, previous_stage = ?, updated_at = datetime('now')
-          WHERE id = ?
-        `).run(appStage, oldStage, existingDeal.id);
+        // No pipeline link — person sync is the only source of truth for stage
+        if (isStageOscillating(db, existingDeal.id)) {
+          console.log(`[FubPersonSync] Circuit-breaker tripped for "${existingDeal.deal_name}" — skipping stage change ${existingDeal.stage} → ${appStage}`);
+        } else {
+          // Outbox guard: skip if a push_stage job is pending or recently succeeded (120s grace)
+          const recentPush = db.prepare(
+            `SELECT id, status FROM fub_outbox
+             WHERE deal_id = ? AND action = 'push_stage'
+               AND (status IN ('pending', 'in_flight')
+                    OR (status = 'succeeded' AND completed_at > datetime('now', '-120 seconds')))
+             LIMIT 1`
+          ).get(existingDeal.id) as any;
 
-        db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
-          existingDeal.id, 'stage_change',
-          JSON.stringify({ from: oldStage, to: appStage, source: 'fub_sync' })
-        );
+          if (recentPush) {
+            console.log(`[FubPersonSync] Skipping FUB→local stage overwrite for deal ${existingDeal.id} — outbox job ${recentPush.id} ${recentPush.status}`);
+          } else {
+            const oldStage = existingDeal.stage;
+            db.prepare(`
+              UPDATE deals SET stage = ?, previous_stage = ?, updated_at = datetime('now')
+              WHERE id = ?
+            `).run(appStage, oldStage, existingDeal.id);
 
-        const dealType = fubFields.deal_type || existingDeal.deal_type || 'Standard Flip';
-        const seededTasks = seedTasksForStage(db, existingDeal.id, dealType, appStage);
-        if (seededTasks.length > 0) {
-          console.log(`[FubPersonSync] Stage change ${oldStage} → ${appStage}: seeded ${seededTasks.length} tasks for deal ${existingDeal.id}`);
+            db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+              existingDeal.id, 'stage_change',
+              JSON.stringify({ from: oldStage, to: appStage, source: 'fub_sync' })
+            );
+
+            const dealType = fubFields.deal_type || existingDeal.deal_type || 'Standard Flip';
+            const seededTasks = seedTasksForStage(db, existingDeal.id, dealType, appStage);
+            if (seededTasks.length > 0) {
+              console.log(`[FubPersonSync] Stage change ${oldStage} → ${appStage}: seeded ${seededTasks.length} tasks for deal ${existingDeal.id}`);
+            }
+            changed = true;
+          }
         }
-        changed = true;
       }
     }
 
@@ -533,6 +584,246 @@ function updateSyncRecord(
       updated_at = datetime('now')
   `).run(fubPersonId, dealId, fubStage, status, error || null);
 }
+
+// ==========================================
+// FUB Deal Pipeline Sync
+// ==========================================
+
+/**
+ * Sync FUB Deal Pipeline: link deals + reverse stage sync.
+ * Runs after person sync on each cycle.
+ *
+ * 1. Finds deals with fub_person_id but no fub_deal_id → links them
+ * 2. For linked deals, checks if FUB deal stage differs from local → updates local
+ */
+async function syncFubDealPipeline(db: any, config: FubConfig): Promise<void> {
+  console.log('[FubDealSync] Starting deal pipeline sync...');
+
+  // Find deals that need linking (have person ID but no deal ID)
+  const unlinkedDeals = db.prepare(
+    `SELECT id, fub_person_id, stage, deal_name FROM deals
+     WHERE fub_person_id IS NOT NULL AND fub_person_id != ''
+       AND (fub_deal_id IS NULL OR fub_deal_id = '')`
+  ).all() as any[];
+
+  if (unlinkedDeals.length > 0) {
+    console.log(`[FubDealSync] Linking ${unlinkedDeals.length} unlinked deal(s)...`);
+  }
+
+  for (const deal of unlinkedDeals) {
+    try {
+      await linkFubDeal(db, config, deal);
+    } catch (err) {
+      console.warn(`[FubDealSync] Failed to link deal ${deal.id}:`, err);
+    }
+  }
+
+  // Ensure pipeline cache is populated before resolving stage IDs
+  await ensurePipelineCache(db, config);
+
+  // Check deal stage changes for linked deals
+  const linkedDeals = db.prepare(
+    `SELECT id, fub_deal_id, fub_person_id, stage, deal_name, deal_type,
+            realized_gross_profit, purchase_price, close_date, possession_date
+     FROM deals
+     WHERE fub_deal_id IS NOT NULL AND fub_deal_id != ''
+       AND stage != 'Cancelled'`
+  ).all() as any[];
+
+  if (linkedDeals.length === 0) {
+    console.log('[FubDealSync] No linked deals to sync.');
+    return;
+  }
+
+  console.log(`[FubDealSync] Checking ${linkedDeals.length} linked deal(s) for stage changes...`);
+
+  for (const deal of linkedDeals) {
+    try {
+      await syncDealStageFromFub(db, config, deal);
+    } catch (err) {
+      console.warn(`[FubDealSync] Failed to sync deal stage for ${deal.id}:`, err);
+    }
+  }
+}
+
+/**
+ * Link a local deal to a FUB Deal Pipeline deal.
+ * Finds FUB deals by personId and stores the first match.
+ */
+async function linkFubDeal(db: any, config: FubConfig, deal: any): Promise<string | null> {
+  const personId = parseInt(deal.fub_person_id, 10);
+  if (isNaN(personId)) return null;
+
+  const fubDeals = await fetchDealsByPerson(config, personId);
+  if (fubDeals.length === 0) return null;
+
+  const fubDeal = fubDeals[0];
+  const fubDealId = String(fubDeal.id);
+  db.prepare('UPDATE deals SET fub_deal_id = ?, updated_at = datetime(\'now\') WHERE id = ?')
+    .run(fubDealId, deal.id);
+
+  // Pull commission on initial link
+  syncFieldsFromFubDeal(db, deal, fubDeal);
+
+  console.log(`[FubDealSync] Linked deal "${deal.deal_name}" → FUB deal ${fubDealId}`);
+  return fubDealId;
+}
+
+/** Parse a commission value from FUB — may be string, number, or undefined */
+function parseCommissionValue(val: any): number | null {
+  if (val == null) return null;
+  if (typeof val === 'number') return val === 0 ? null : val;
+  if (typeof val === 'string') {
+    const cleaned = val.replace(/[$,\s]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) || num === 0 ? null : num;
+  }
+  return null;
+}
+
+/**
+ * Sync fields from a FUB deal to local deal columns.
+ * FUB is source of truth — always overwrites local values when FUB has data.
+ * - price → purchase_price
+ * - commission → realized_gross_profit
+ * - closingDate → close_date
+ * - possessionDate → possession_date
+ */
+function syncFieldsFromFubDeal(db: any, deal: any, fubDeal: any): void {
+  // Diagnostic: log all FUB deal keys so we can discover new fields
+  const dealKeys = Object.keys(fubDeal);
+  const moneyFields = dealKeys.filter(k =>
+    /commission|price|value|amount|profit|cost|revenue/i.test(k)
+  );
+  console.log(`[FubDealSync] FUB deal ${fubDeal.id} for "${deal.deal_name}" — ${dealKeys.length} keys: ${dealKeys.join(', ')}`);
+  if (moneyFields.length > 0) {
+    console.log(`[FubDealSync] Money-related fields:`, Object.fromEntries(moneyFields.map((k: string) => [k, fubDeal[k]])));
+  }
+
+  const updates: string[] = [];
+  const values: any[] = [];
+  const auditDetails: Record<string, any> = { source: 'fub_deal' };
+
+  // --- Commission → realized_gross_profit (FUB is source of truth) ---
+  const commission =
+    parseCommissionValue(fubDeal.commissionValue) ??
+    parseCommissionValue(fubDeal.commission) ??
+    parseCommissionValue(fubDeal.agentCommission) ??
+    parseCommissionValue(fubDeal.teamCommission) ??
+    parseCommissionValue(fubDeal.dealCommission) ??
+    parseCommissionValue(fubDeal.grossCommission) ??
+    parseCommissionValue(fubDeal.customFields?.commission) ??
+    parseCommissionValue(fubDeal.customFields?.commissionValue) ??
+    null;
+
+  if (commission != null && commission !== (deal.realized_gross_profit || 0)) {
+    updates.push('realized_gross_profit = ?');
+    values.push(commission);
+    auditDetails.realized_gross_profit = commission;
+  }
+
+  // --- Price → purchase_price (FUB is source of truth) ---
+  const fubPrice = parseCommissionValue(fubDeal.price);
+  if (fubPrice != null && fubPrice !== (deal.purchase_price || 0)) {
+    updates.push('purchase_price = ?');
+    values.push(fubPrice);
+    auditDetails.purchase_price = fubPrice;
+  }
+
+  // --- closingDate → close_date (FUB is source of truth) ---
+  const fubCloseDate = fubDeal.closingDate || fubDeal.closing_date || null;
+  if (fubCloseDate && fubCloseDate !== deal.close_date) {
+    updates.push('close_date = ?');
+    values.push(fubCloseDate);
+    auditDetails.close_date = fubCloseDate;
+  }
+
+  // --- possessionDate → possession_date (FUB is source of truth) ---
+  const fubPossession = fubDeal.possessionDate || fubDeal.possession_date || fubDeal.customFields?.possessionDate || null;
+  if (fubPossession && fubPossession !== deal.possession_date) {
+    updates.push('possession_date = ?');
+    values.push(fubPossession);
+    auditDetails.possession_date = fubPossession;
+  }
+
+  if (updates.length === 0) return;
+
+  updates.push("updated_at = datetime('now')");
+  values.push(deal.id);
+  db.prepare(`UPDATE deals SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+  db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+    deal.id, 'deal_field_sync', JSON.stringify(auditDetails)
+  );
+
+  console.log(`[FubDealSync] Synced fields for "${deal.deal_name}":`, auditDetails);
+}
+
+/**
+ * Check if a FUB deal's pipeline stage differs from local, and update local if so.
+ * Respects outbox guard: won't overwrite if a push_deal_stage is pending.
+ */
+async function syncDealStageFromFub(db: any, config: FubConfig, deal: any): Promise<void> {
+  const fubDealId = parseInt(deal.fub_deal_id, 10);
+  if (isNaN(fubDealId)) return;
+
+  // Outbox grace: skip if a push_deal_stage job is pending or recently succeeded (120s)
+  const recentDealPush = db.prepare(
+    `SELECT id FROM fub_outbox
+     WHERE deal_id = ? AND action = 'push_deal_stage'
+       AND (status IN ('pending', 'in_flight')
+            OR (status = 'succeeded' AND completed_at > datetime('now', '-120 seconds')))
+     LIMIT 1`
+  ).get(deal.id) as any;
+
+  if (recentDealPush) return;
+
+  // Fetch the FUB deal to get its current stageId + fields
+  const { fetchDeal } = await import('./fub-client.js');
+  const fubDeal = await fetchDeal(config, fubDealId);
+  if (!fubDeal) return;
+
+  // Sync deal fields (price, commission, dates) — runs independently of stage sync
+  syncFieldsFromFubDeal(db, deal, fubDeal);
+
+  if (!fubDeal.stageId) return;
+
+  // Resolve FUB stageId → app stage
+  const appStage = resolveStageIdToApp(db, fubDeal.stageId);
+  if (!appStage) return;
+
+  // If stage is the same, nothing to do
+  if (deal.stage === appStage) return;
+
+  // Circuit-breaker: block if deal is oscillating rapidly
+  if (isStageOscillating(db, deal.id)) {
+    console.log(`[FubDealSync] Circuit-breaker tripped for "${deal.deal_name}" — skipping stage change ${deal.stage} → ${appStage}`);
+    return;
+  }
+
+  // FUB Deal Pipeline is source of truth — update local stage
+  const oldStage = deal.stage;
+  db.prepare(`
+    UPDATE deals SET stage = ?, previous_stage = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(appStage, oldStage, deal.id);
+
+  db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+    deal.id, 'stage_change',
+    JSON.stringify({ from: oldStage, to: appStage, source: 'fub_deal_sync' })
+  );
+
+  const dealType = deal.deal_type || 'Standard Flip';
+  const seededTasks = seedTasksForStage(db, deal.id, dealType, appStage);
+
+  console.log(`[FubDealSync] Deal "${deal.deal_name}" stage: ${oldStage} → ${appStage} (from FUB Deal Pipeline)${seededTasks.length > 0 ? `, seeded ${seededTasks.length} tasks` : ''}`);
+
+  // Notify renderer
+  notifyRenderer('fub:person-sync-complete', { newDeals: 0, updatedDeals: 1, errors: 0 });
+}
+
+/** Export linkFubDeal for use by outbox */
+export { linkFubDeal };
 
 /**
  * Notify renderer process of sync events.

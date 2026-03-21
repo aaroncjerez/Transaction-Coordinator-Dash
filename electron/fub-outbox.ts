@@ -11,8 +11,8 @@
 
 import type Database from 'better-sqlite3';
 import { getDb } from './database.js';
-import { getFubConfig, updatePersonStage, updatePerson, createNote } from './fub-client.js';
-import { toFubStageName } from './stage-constants.js';
+import { getFubConfig, updatePersonStage, updatePerson, createNote, updateDealStage, fetchDealsByPerson, fetchPipelines } from './fub-client.js';
+import { toFubStageName, resolveDealStageId, toFubDealStageName } from './stage-constants.js';
 
 const BACKOFF_SECONDS = [0, 30, 120, 600, 1800]; // 0s, 30s, 2m, 10m, 30m
 
@@ -134,6 +134,43 @@ export async function processOutboxJob(db: Database.Database, job: OutboxJob): P
 
       await createNote(config, personId, payload.subject, payload.body);
       console.log(`[FubOutbox] Posted note to FUB person ${personId}`);
+    } else if (job.action === 'push_deal_stage') {
+      // Push stage change to FUB Deal Pipeline
+      let deal = db.prepare('SELECT fub_deal_id, fub_person_id, deal_name FROM deals WHERE id = ?').get(job.deal_id) as any;
+      if (!deal) throw new Error('Deal not found');
+
+      // Lazy-link FUB deal if not yet linked
+      if (!deal.fub_deal_id) {
+        if (!deal.fub_person_id) throw new Error('Deal has no fub_person_id — cannot discover FUB deal');
+        const personId = parseInt(deal.fub_person_id, 10);
+        if (isNaN(personId)) throw new Error(`Invalid fub_person_id: ${deal.fub_person_id}`);
+
+        const fubDeals = await fetchDealsByPerson(config, personId);
+        if (fubDeals.length === 0) throw new Error(`No FUB deals found for person ${personId}`);
+
+        const fubDealId = fubDeals[0].id;
+        db.prepare('UPDATE deals SET fub_deal_id = ? WHERE id = ?').run(String(fubDealId), job.deal_id);
+        deal = { ...deal, fub_deal_id: String(fubDealId) };
+        console.log(`[FubOutbox] Linked deal ${job.deal_id} to FUB deal ${fubDealId}`);
+      }
+
+      // Ensure pipeline cache is populated
+      await ensurePipelineCache(db, config);
+
+      const stageId = resolveDealStageId(db, payload.stage);
+      if (!stageId) {
+        const fubStageName = toFubDealStageName(payload.stage);
+        throw new Error(`Cannot resolve FUB stageId for app stage "${payload.stage}" (FUB name: "${fubStageName}")`);
+      }
+
+      const fubDealId = parseInt(deal.fub_deal_id, 10);
+      const fubStageName = toFubDealStageName(payload.stage);
+      console.log(`[FubOutbox] Pushing deal stage "${payload.stage}" → FUB "${fubStageName}" (stageId=${stageId}) for FUB deal ${fubDealId} (${deal.deal_name})`);
+
+      const success = await updateDealStage(config, fubDealId, stageId);
+      if (!success) throw new Error('FUB API returned false for deal stage update');
+
+      console.log(`[FubOutbox] Pushed deal stage to FUB deal ${fubDealId} (${deal.deal_name})`);
     }
 
     // Mark succeeded
@@ -238,4 +275,65 @@ export function recoverStaleJobs(): void {
   if (stale.changes > 0) {
     console.log(`[FubOutbox] Recovered ${stale.changes} stale in_flight jobs`);
   }
+}
+
+/**
+ * Ensure the fub_pipeline_cache table has data.
+ * Fetches pipelines from FUB API if cache is empty or stale (>24h).
+ */
+export async function ensurePipelineCache(db: any, config: any): Promise<void> {
+  const cached = db.prepare('SELECT COUNT(*) as cnt FROM fub_pipeline_cache').get() as any;
+  const staleCheck = db.prepare(
+    "SELECT MIN(updated_at) as oldest FROM fub_pipeline_cache"
+  ).get() as any;
+
+  const isStale = staleCheck?.oldest
+    ? (Date.now() - new Date(staleCheck.oldest).getTime()) > 24 * 60 * 60 * 1000
+    : true;
+
+  if (cached.cnt > 0 && !isStale) return;
+
+  console.log('[FubOutbox] Refreshing pipeline cache from FUB API...');
+  const pipelines = await fetchPipelines(config);
+
+  for (const pipeline of pipelines) {
+    // Fetch stages — they may be inline or need separate fetch
+    const stages = pipeline.stages || [];
+
+    for (const stage of stages) {
+      db.prepare(`
+        INSERT INTO fub_pipeline_cache (pipeline_id, pipeline_name, stage_id, stage_name, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(pipeline_id, stage_id) DO UPDATE SET
+          stage_name = excluded.stage_name,
+          pipeline_name = excluded.pipeline_name,
+          updated_at = datetime('now')
+      `).run(pipeline.id, pipeline.name, stage.id, stage.name);
+    }
+
+    // If stages weren't inline, try fetching the pipeline individually
+    if (stages.length === 0) {
+      try {
+        const { fetchPipeline } = await import('./fub-client.js');
+        const full = await fetchPipeline(config, pipeline.id);
+        if (full?.stages) {
+          for (const stage of full.stages) {
+            db.prepare(`
+              INSERT INTO fub_pipeline_cache (pipeline_id, pipeline_name, stage_id, stage_name, updated_at)
+              VALUES (?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(pipeline_id, stage_id) DO UPDATE SET
+                stage_name = excluded.stage_name,
+                pipeline_name = excluded.pipeline_name,
+                updated_at = datetime('now')
+            `).run(pipeline.id, pipeline.name, stage.id, stage.name);
+          }
+        }
+      } catch (err) {
+        console.warn(`[FubOutbox] Failed to fetch pipeline ${pipeline.id} details:`, err);
+      }
+    }
+  }
+
+  const total = db.prepare('SELECT COUNT(*) as cnt FROM fub_pipeline_cache').get() as any;
+  console.log(`[FubOutbox] Pipeline cache refreshed: ${total.cnt} stages cached`);
 }

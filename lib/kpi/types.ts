@@ -1,5 +1,5 @@
 // Team member types
-export type TeamRole = 'cold_texter' | 'cold_caller' | 'closer' | 'comper';
+export type TeamRole = 'cold_texter' | 'cold_caller' | 'closer' | 'comper' | 'lead_manager';
 
 export interface TeamMember {
   id: string;
@@ -270,6 +270,22 @@ export interface ScaleProgress {
   halfMillionProgress?: HalfMillionProgress;
 }
 
+// Week-over-week analysis
+export interface WoWAlert {
+  severity: 'critical' | 'warning' | 'positive';
+  metric: string;
+  message: string;
+  currentValue: number;
+  previousValue: number;
+  changePercent: number;
+  owner: string;
+}
+
+export interface WoWAnalysis {
+  alerts: WoWAlert[];
+  summary: string;
+}
+
 // Dashboard state
 export interface DashboardState {
   currentWeek: WeeklyAggregate | null;
@@ -282,6 +298,7 @@ export interface DashboardState {
   scaleProgress: ScaleProgress | null;
   teamScorecards: TeamScorecard[];
   isWinning: boolean;
+  wowAnalysis: WoWAnalysis | null;
   isLoading: boolean;
   error: string | null;
   sixMonthAverages?: SixMonthAverages | null;

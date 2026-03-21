@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Circle, CheckCircle2, Clock, DollarSign, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Circle, CheckCircle2, Clock, DollarSign, AlertTriangle } from 'lucide-react';
 import { Deal, Task, Deadline, FubSyncStatus } from '../types';
 import { getStageColor } from '../constants';
 import { cn } from '../lib/utils';
@@ -25,11 +25,13 @@ const formatPrice = (price: number): string => {
   return `$${price.toLocaleString()}`;
 };
 
-const formatProfit = (purchase: number, sale: number): string | null => {
-  if (purchase == null || sale == null || sale <= purchase) return null;
-  const profit = sale - purchase;
-  if (profit <= 0) return null;
-  return formatPrice(profit);
+
+/** Format realized profit — keeps exact dollars under $10K for precision */
+const formatProfitValue = (val: number): string => {
+  if (val == null || val === 0) return '—';
+  if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+  if (val >= 10000) return `$${(val / 1000).toFixed(0)}K`;
+  return `$${val.toLocaleString()}`;
 };
 
 const getDeadlineBadge = (deadline: Deadline): { label: string; color: string } | null => {
@@ -71,11 +73,7 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
   const daysSinceClose = closeDate
     ? Math.floor((Date.now() - new Date(closeDate).getTime()) / 86400000)
     : null;
-  const realizedProfit = deal.realized_gross_profit && deal.realized_gross_profit !== 0
-    ? formatPrice(deal.realized_gross_profit)
-    : null;
-  const computedProfit = formatProfit(deal.purchase_price, deal.expected_sales_price);
-  const profit = realizedProfit || computedProfit;
+  const hasRealizedProfit = deal.realized_gross_profit != null && deal.realized_gross_profit !== 0;
   const deadlineBadge = nearestDeadline ? getDeadlineBadge(nearestDeadline) : null;
   const syncDot = getSyncDot(syncStatus, !!deal.fub_person_id);
 
@@ -194,14 +192,12 @@ export const KanbanCard: React.FC<KanbanCardProps> = ({
           {/* Money line */}
           <div className="mt-2 flex items-center gap-1 text-caption text-gray-500">
             <DollarSign className="h-3 w-3 flex-shrink-0" />
-            <span>{formatPrice(deal.purchase_price)}</span>
-            {profit && (
-              <>
-                <ArrowRight className="h-2.5 w-2.5 text-gray-300" />
-                <span className={cn('font-medium', realizedProfit ? 'text-emerald-600' : 'text-emerald-600/70')}>
-                  {profit} {realizedProfit ? 'profit' : 'est.'}
-                </span>
-              </>
+            {hasRealizedProfit ? (
+              <span className="font-semibold text-emerald-600">
+                {formatProfitValue(deal.realized_gross_profit!)} profit
+              </span>
+            ) : (
+              <span>{formatPrice(deal.purchase_price)}</span>
             )}
           </div>
 

@@ -3,6 +3,7 @@ import { getDb, getDataDir } from './database.js';
 import { seedTasksForStage, seedTasksUpToStage } from './rule-engine.js';
 import { chunkTextParagraphAware } from './chunker.js';
 import { triggerFubSync } from './fub-file-sync.js';
+import { registerBrowserSyncHandlers } from './fub-browser-sync.js';
 import {
   fetchWeeklyKPIs,
   fetchPreviousWeekKPIs,
@@ -22,6 +23,7 @@ import {
   detectBottleneck,
   buildTeamScorecards,
   isTeamWinning,
+  analyzeWeekOverWeek,
 } from '../lib/kpi/calculations.js';
 import { calculateScaleProgress } from '../lib/kpi/scale-calculations.js';
 import path from 'path';
@@ -29,6 +31,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import Anthropic from '@anthropic-ai/sdk';
+import { semanticSearch, embedChunksForDeal, backfillAllEmbeddings } from './embeddings.js';
 
 // Ensure .env is loaded (backup in case main.ts load timing is off)
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
@@ -124,7 +127,8 @@ export function registerIpcHandlers(): void {
   // ===== DEALS =====
 
   ipcMain.handle('db:deals:getAll', (_event, options?: { orderBy?: string; ascending?: boolean }) => {
-    const orderBy = options?.orderBy || 'created_at';
+    const allowedCols = ['created_at', 'updated_at', 'property_address', 'stage', 'status', 'deal_name', 'purchase_price', 'sale_price'];
+    const orderBy = allowedCols.includes(options?.orderBy || '') ? options!.orderBy! : 'created_at';
     const direction = options?.ascending ? 'ASC' : 'DESC';
     const rows = db.prepare(`SELECT * FROM deals ORDER BY ${orderBy} ${direction}`).all();
     return rows.map((row: any) => ({
@@ -292,18 +296,34 @@ export function registerIpcHandlers(): void {
     if (fields.stage && currentDeal && fields.stage !== currentDeal.stage) {
       console.log(`[Stage Change] ${currentDeal.deal_name}: ${currentDeal.stage} → ${fields.stage}`);
       const dealType = fields.deal_type || currentDeal.deal_type || 'Standard Flip';
-      const seededTasks = seedTasksForStage(db, id, dealType, fields.stage);
-      if (seededTasks.length > 0) {
-        console.log(`[Stage Change] Seeded ${seededTasks.length} new tasks for stage ${fields.stage}`);
+      try {
+        const seededTasks = seedTasksForStage(db, id, dealType, fields.stage);
+        if (seededTasks.length > 0) {
+          console.log(`[Stage Change] Seeded ${seededTasks.length} new tasks for stage ${fields.stage}`);
+        }
+      } catch (seedErr) {
+        // Don't block the stage change response — tasks can be seeded later
+        console.error(`[Stage Change] Task seeding failed for ${fields.stage}:`, seedErr);
       }
 
       // Push stage change to FUB via outbox (durable + immediate attempt)
       try {
         const { enqueueFubPush, attemptImmediatePush } = await import('./fub-outbox.js');
+
+        // 1. Push person-level stage (existing behavior)
         const jobId = enqueueFubPush(db, id, 'push_stage', { stage: fields.stage });
         fubPush.queued = true;
 
-        // Attempt immediate push with 5s timeout
+        // 2. Push Deal Pipeline stage (new — skips Cancelled)
+        if (fields.stage !== 'Cancelled') {
+          const dealPipelineJobId = enqueueFubPush(db, id, 'push_deal_stage', { stage: fields.stage });
+          // Fire-and-forget for deal pipeline (person stage push gives UI feedback)
+          attemptImmediatePush(dealPipelineJobId).catch(err => {
+            console.warn('[Stage Change] FUB Deal Pipeline push failed, will retry:', err);
+          });
+        }
+
+        // Attempt immediate push with 5s timeout (person stage)
         const pushResult = await Promise.race([
           attemptImmediatePush(jobId),
           new Promise<{ success: false; error: string }>(resolve =>
@@ -338,6 +358,11 @@ export function registerIpcHandlers(): void {
           console.warn('[Field Sync] FUB outbox error:', err);
         }
       }
+    }
+
+    // Invalidate AI summary on stage change (will auto-regenerate on next view)
+    if (fields.stage && currentDeal && fields.stage !== currentDeal.stage) {
+      try { db.prepare('DELETE FROM deal_summaries WHERE deal_id = ?').run(id); } catch { /* table may not exist yet */ }
     }
 
     return { success: true, fubPush };
@@ -381,7 +406,8 @@ export function registerIpcHandlers(): void {
   // ===== TASKS =====
 
   ipcMain.handle('db:tasks:getAll', (_event, options?: { orderBy?: string; ascending?: boolean }) => {
-    const orderBy = options?.orderBy || 'created_at';
+    const allowedCols = ['created_at', 'updated_at', 'due_date', 'title', 'status', 'priority', 'deal_id'];
+    const orderBy = allowedCols.includes(options?.orderBy || '') ? options!.orderBy! : 'created_at';
     const direction = options?.ascending ? 'ASC' : 'DESC';
     return db.prepare(`SELECT * FROM tasks ORDER BY ${orderBy} ${direction}`).all();
   });
@@ -546,7 +572,8 @@ export function registerIpcHandlers(): void {
   // ===== DAILY LEADS =====
 
   ipcMain.handle('db:leads:getAll', (_event, options?: { orderBy?: string; ascending?: boolean }) => {
-    const orderBy = options?.orderBy || 'score';
+    const allowedCols = ['score', 'created_at', 'county', 'state', 'acreage', 'asking_price', 'action_required', 'is_completed'];
+    const orderBy = allowedCols.includes(options?.orderBy || '') ? options!.orderBy! : 'score';
     const direction = options?.ascending ? 'ASC' : 'DESC';
     const rows = db.prepare(`SELECT * FROM daily_leads ORDER BY ${orderBy} ${direction}`).all() as any[];
     return rows.map(r => ({
@@ -618,7 +645,8 @@ export function registerIpcHandlers(): void {
   // ===== MARKET ANALYSIS =====
 
   ipcMain.handle('db:market:getAll', (_event, options?: { orderBy?: string; ascending?: boolean; limit?: number }) => {
-    const orderBy = options?.orderBy || 'absorption_rate';
+    const allowedCols = ['absorption_rate', 'county', 'state', 'median_price', 'avg_dom', 'created_at', 'updated_at'];
+    const orderBy = allowedCols.includes(options?.orderBy || '') ? options!.orderBy! : 'absorption_rate';
     const direction = options?.ascending ? 'ASC' : 'DESC';
     const limit = options?.limit || 100;
     return db.prepare(`SELECT * FROM market_analysis ORDER BY ${orderBy} ${direction} LIMIT ?`).all(limit);
@@ -682,6 +710,22 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('files:getPath', (_event, relativePath: string) => {
     return path.join(FILE_STORAGE_DIR, relativePath);
+  });
+
+  // Read a PDF file as base64 for the inline viewer (file:// URLs don't work in pdf.js workers)
+  ipcMain.handle('files:readPdf', (_event, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { error: 'File not found', data: null };
+      }
+      const buffer = fs.readFileSync(filePath);
+      // Return as base64 data URL that react-pdf can consume
+      const base64 = buffer.toString('base64');
+      return { data: `data:application/pdf;base64,${base64}`, error: null };
+    } catch (e: any) {
+      console.error('[files:readPdf] Error reading file:', e);
+      return { error: e.message || 'Failed to read file', data: null };
+    }
   });
 
   // ===== AUDIT LOG =====
@@ -813,9 +857,8 @@ export function registerIpcHandlers(): void {
       'anthropic_api_key': 'ANTHROPIC_API_KEY',
       'fub_api_key': 'FUB_API_KEY',
       'slack_webhook_url': 'SLACK_WEBHOOK_URL',
-      'supabase_url': 'SUPABASE_URL',
-      'supabase_anon_key': 'SUPABASE_ANON_KEY',
       'n8n_trigger_webhook': 'N8N_TRIGGER_WEBHOOK',
+      'voyage_api_key': 'VOYAGE_API_KEY',
     };
     if (envKeyMap[key]) {
       process.env[envKeyMap[key]] = value;
@@ -1061,55 +1104,93 @@ export function registerIpcHandlers(): void {
     }
 
     let context = '';
-    if (dealId) {
-      const keywords = query.split(/\s+/).filter(w => w.length > 2).slice(0, 5);
-      let docs: any[] = [];
+    let sources: Array<{ file_name: string; chunk_index: number }> = [];
 
-      // Search with keyword matching, include file source info
-      for (const keyword of keywords) {
-        const found = db.prepare(
-          `SELECT k.content, k.chunk_index, k.file_id, f.file_name
-           FROM kb_chunks k
-           LEFT JOIN files f ON k.file_id = f.id
-           WHERE k.deal_id = ? AND k.content LIKE ?
-           LIMIT 3`
-        ).all(dealId, `%${keyword}%`) as any[];
-        docs.push(...found);
+    if (dealId) {
+      // Try semantic search first (if Voyage AI key configured)
+      const voyageKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('voyage_api_key') as any)?.value || '';
+      let semanticResults: any[] | null = null;
+
+      if (voyageKey) {
+        semanticResults = await semanticSearch(db, dealId, query, voyageKey, 5);
       }
 
-      const seen = new Set<string>();
-      docs = docs.filter(d => {
-        if (seen.has(d.content)) return false;
-        seen.add(d.content);
-        return true;
-      }).slice(0, 5);
-
-      if (docs.length > 0) {
-        context = docs.map(d => {
+      if (semanticResults && semanticResults.length > 0) {
+        // Semantic search succeeded
+        context = semanticResults.map(d => {
           const source = d.file_name ? `[Source: ${d.file_name}, chunk ${d.chunk_index}]` : '';
+          if (d.file_name) sources.push({ file_name: d.file_name, chunk_index: d.chunk_index });
           return `${source}\n${d.content}`;
         }).join('\n---\n');
-      }
+      } else {
+        // Fall back to keyword search
+        const keywords = query.split(/\s+/).filter(w => w.length > 2).slice(0, 5);
+        let docs: any[] = [];
 
-      if (!context) {
-        const allDocs = db.prepare(
-          `SELECT k.content, k.chunk_index, k.file_id, f.file_name
-           FROM kb_chunks k
-           LEFT JOIN files f ON k.file_id = f.id
-           WHERE k.deal_id = ?
-           LIMIT 10`
-        ).all(dealId) as any[];
-        if (allDocs.length > 0) {
-          context = allDocs.map(d => {
+        for (const keyword of keywords) {
+          const found = db.prepare(
+            `SELECT k.content, k.chunk_index, k.file_id, f.file_name
+             FROM kb_chunks k
+             LEFT JOIN files f ON k.file_id = f.id
+             WHERE k.deal_id = ? AND k.content LIKE ?
+             LIMIT 3`
+          ).all(dealId, `%${keyword}%`) as any[];
+          docs.push(...found);
+        }
+
+        const seen = new Set<string>();
+        docs = docs.filter(d => {
+          if (seen.has(d.content)) return false;
+          seen.add(d.content);
+          return true;
+        }).slice(0, 5);
+
+        if (docs.length > 0) {
+          context = docs.map(d => {
             const source = d.file_name ? `[Source: ${d.file_name}, chunk ${d.chunk_index}]` : '';
+            if (d.file_name) sources.push({ file_name: d.file_name, chunk_index: d.chunk_index });
             return `${source}\n${d.content}`;
           }).join('\n---\n');
         }
+
+        if (!context) {
+          const allDocs = db.prepare(
+            `SELECT k.content, k.chunk_index, k.file_id, f.file_name
+             FROM kb_chunks k
+             LEFT JOIN files f ON k.file_id = f.id
+             WHERE k.deal_id = ?
+             LIMIT 10`
+          ).all(dealId) as any[];
+          if (allDocs.length > 0) {
+            context = allDocs.map(d => {
+              const source = d.file_name ? `[Source: ${d.file_name}, chunk ${d.chunk_index}]` : '';
+              if (d.file_name) sources.push({ file_name: d.file_name, chunk_index: d.chunk_index });
+              return `${source}\n${d.content}`;
+            }).join('\n---\n');
+          }
+        }
       }
+
+      // Add deal metadata and file summaries for cross-document context
+      const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId) as any;
+      const fileSummaries = db.prepare('SELECT file_name, summary, doc_type, doc_date FROM pdf_extractions WHERE deal_id = ?').all(dealId) as any[];
+
+      let dealContext = '';
+      if (deal) {
+        dealContext = `\n\nDEAL OVERVIEW:\n- Name: ${deal.deal_name || 'N/A'}\n- Stage: ${deal.stage || 'N/A'}\n- Property: ${deal.property_address || 'N/A'}\n`;
+      }
+      if (fileSummaries.length > 0) {
+        dealContext += '\nDOCUMENT SUMMARIES:\n';
+        dealContext += fileSummaries.map(f =>
+          `- ${f.file_name}${f.doc_type ? ` (${f.doc_type})` : ''}${f.doc_date ? ` [${f.doc_date}]` : ''}: ${(f.summary || '').slice(0, 200)}`
+        ).join('\n');
+      }
+
+      if (dealContext) context = dealContext + '\n\nRELEVANT DOCUMENT EXCERPTS:\n' + context;
     }
 
     if (!context) {
-      return { answer: "I couldn't find any relevant documents for this deal. Please ensure files are uploaded and analyzed." };
+      return { answer: "I couldn't find any relevant documents for this deal. Please ensure files are uploaded and analyzed.", sources: [] };
     }
 
     try {
@@ -1120,7 +1201,6 @@ export function registerIpcHandlers(): void {
           role: 'user',
           content: `You are an expert real estate transaction coordinator assistant.
 
-Context from documents:
 ${context}
 
 Question: ${query}
@@ -1129,6 +1209,7 @@ Instructions:
 - Answer the question based STRICTLY on the provided context.
 - If the answer is not in the context, say "I don't see that information in the provided documents."
 - Cite specific details (dates, amounts, clauses) from the text.
+- When citing information, mention the source document name.
 - Be professional and concise.`
         }],
       });
@@ -1136,13 +1217,13 @@ Instructions:
       const answer = message.content[0]?.type === 'text' ? message.content[0].text : 'Unable to generate response';
 
       db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
-        dealId, 'ai_query', JSON.stringify({ query, answer_length: answer.length })
+        dealId, 'ai_query', JSON.stringify({ query, answer_length: answer.length, semantic: !!sources.length })
       );
 
-      return { answer };
+      return { answer, sources };
     } catch (e) {
       console.error('Claude API error:', e);
-      return { answer: 'I encountered an error generating a response. Please try again.' };
+      return { answer: 'I encountered an error generating a response. Please try again.', sources: [] };
     }
   });
 
@@ -1203,6 +1284,8 @@ Instructions:
     let summary = '';
     let keyFindings: string[] = [];
     let extractedDeadlines: Array<{ label: string; due_date: string }> = [];
+    let docType = '';
+    let docDate = '';
 
     try {
       const message = await anthropic.messages.create({
@@ -1212,9 +1295,15 @@ Instructions:
           role: 'user',
           content: `Analyze this real estate document and provide:
 
-1. A concise summary (2-3 paragraphs)
-2. Key findings as a JSON array of strings
-3. Important deadlines/dates as a JSON array
+1. Document type classification
+2. Document date (the primary date of the document)
+3. A concise summary (2-3 paragraphs)
+4. Key findings as a JSON array of strings
+5. Important deadlines/dates as a JSON array
+
+For document type, classify as exactly one of: Contract, Addendum, Amendment, Title Report, Survey, Deed, Closing Disclosure, Inspection Report, Appraisal, Insurance, HOA, Loan Estimate, Disclosure, Earnest Money, Tax Record, Plat Map, Environmental, Other
+
+For document date, extract the primary effective date or execution date (ISO YYYY-MM-DD). If unclear, use the earliest date mentioned.
 
 For deadlines, extract:
 - Closing dates
@@ -1233,6 +1322,12 @@ Document text:
 ${truncatedText}
 
 Respond in this exact format:
+DOC_TYPE:
+[One of the types listed above]
+
+DOC_DATE:
+[YYYY-MM-DD or "unknown"]
+
 SUMMARY:
 [Your summary here]
 
@@ -1245,6 +1340,15 @@ DEADLINES:
       });
 
       const responseText = message.content[0]?.type === 'text' ? message.content[0].text : '';
+
+      const docTypeMatch = responseText.match(/DOC_TYPE:\s*(.*?)(?=\n|DOC_DATE:|$)/);
+      docType = docTypeMatch?.[1]?.trim() || '';
+
+      const docDateMatch = responseText.match(/DOC_DATE:\s*(.*?)(?=\n|SUMMARY:|$)/);
+      const rawDocDate = docDateMatch?.[1]?.trim() || '';
+      if (rawDocDate && rawDocDate !== 'unknown' && /^\d{4}-\d{2}-\d{2}$/.test(rawDocDate)) {
+        docDate = rawDocDate;
+      }
 
       const summaryMatch = responseText.match(/SUMMARY:\s*([\s\S]*?)(?=KEY_FINDINGS:|$)/);
       summary = summaryMatch?.[1]?.trim() || responseText;
@@ -1266,9 +1370,9 @@ DEADLINES:
 
     // Store in pdf_extractions
     db.prepare(`
-      INSERT OR REPLACE INTO pdf_extractions (deal_id, file_name, file_path, category, extracted_text, summary, key_findings, page_count)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(dealId, fileName, filePath, category, pdfText, summary, JSON.stringify(keyFindings), pageCount);
+      INSERT OR REPLACE INTO pdf_extractions (deal_id, file_name, file_path, category, extracted_text, summary, key_findings, page_count, doc_type, doc_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(dealId, fileName, filePath, category, pdfText, summary, JSON.stringify(keyFindings), pageCount, docType || null, docDate || null);
 
     // Auto-create/update deadlines from extracted dates (match by label so addendums update dates)
     let deadlinesCreated = 0;
@@ -1316,7 +1420,15 @@ DEADLINES:
       console.log(`[PDF Analysis] "${fileName}": ${deadlinesCreated} deadline(s) created, ${deadlinesUpdated} updated`);
     }
 
-    return { summary, keyFindings, pageCount, wordCount: pdfText.split(/\s+/).length, deadlines: extractedDeadlines };
+    // Auto-generate embeddings if Voyage AI key is configured
+    const voyageKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('voyage_api_key') as any)?.value || '';
+    if (voyageKey) {
+      embedChunksForDeal(db, dealId, voyageKey).catch(e =>
+        console.error('[PDF Analysis] Embedding generation failed:', e)
+      );
+    }
+
+    return { summary, keyFindings, pageCount, wordCount: pdfText.split(/\s+/).length, deadlines: extractedDeadlines, docType, docDate };
   });
 
   ipcMain.handle('pdf:getAnalysis', (_event, dealId: string, filePath: string) => {
@@ -1637,6 +1749,7 @@ Provide your analysis in JSON format:
       const teamScorecards = buildTeamScorecards(currentWeek, calculatedMetrics);
       const winning = isTeamWinning(currentWeek);
       const scaleProgress = calculateScaleProgress(currentWeek, businessMetrics);
+      const wowAnalysis = analyzeWeekOverWeek(currentWeek, previousWeek);
 
       return {
         currentWeek,
@@ -1648,6 +1761,7 @@ Provide your analysis in JSON format:
         ceoBrief: null,
         scaleProgress,
         teamScorecards,
+        wowAnalysis,
         isWinning: winning,
         isLoading: false,
         error: null,
@@ -1665,6 +1779,7 @@ Provide your analysis in JSON format:
         ceoBrief: null,
         scaleProgress: null,
         teamScorecards: [],
+        wowAnalysis: null,
         isWinning: false,
         isLoading: false,
         error: error?.message || 'Failed to fetch KPI data',
@@ -1738,97 +1853,102 @@ Provide your analysis in JSON format:
     `).all();
   });
 
-  // ===== AI DIALER (Supabase) =====
+  // ===== AI DIALER (Local SQLite) =====
 
-  ipcMain.handle('dialer:getCallQueue', async (_event, limit?: number) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
+  ipcMain.handle('dialer:getCallQueue', async (_event, limit?: number, listIds?: string[]) => {
     const { getCallQueue } = await import('./dialer-queries.js');
-    return getCallQueue(supabase, limit);
+    return getCallQueue(db, limit, listIds);
+  });
+
+  // Keep legacy alias for any UI code still using the old channel name
+  ipcMain.handle('dialer:getLocalCallQueue', async (_event, limit?: number, listIds?: string[]) => {
+    const { getCallQueue } = await import('./dialer-queries.js');
+    return getCallQueue(db, limit, listIds);
+  });
+
+  ipcMain.handle('dialer:getLeadsByList', async (_event, listIds: string[], limit?: number) => {
+    const { getLeadsByList } = await import('./dialer-queries.js');
+    return getLeadsByList(db, listIds, limit);
+  });
+
+  ipcMain.handle('dialer:getLists', async () => {
+    const { getDialerLists } = await import('./dialer-queries.js');
+    return getDialerLists(db);
   });
 
   ipcMain.handle('dialer:getCallHistory', async (_event, limit?: number, filters?: any) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getCallHistory } = await import('./dialer-queries.js');
-    return getCallHistory(supabase, limit, filters);
+    return getCallHistory(db, limit, filters);
+  });
+
+  ipcMain.handle('dialer:getLocalCallHistory', async (_event, limit?: number, filters?: any) => {
+    const { getCallHistory } = await import('./dialer-queries.js');
+    return getCallHistory(db, limit, filters);
   });
 
   ipcMain.handle('dialer:getCallsForLead', async (_event, phoneNormalized: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getCallsForLead } = await import('./dialer-queries.js');
-    return getCallsForLead(supabase, phoneNormalized);
+    return getCallsForLead(db, phoneNormalized);
   });
 
   ipcMain.handle('dialer:getLeadById', async (_event, id: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getLeadById } = await import('./dialer-queries.js');
-    return getLeadById(supabase, id);
+    return getLeadById(db, id);
   });
 
   ipcMain.handle('dialer:getLeadMemory', async (_event, phoneNormalized: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getLeadMemory } = await import('./dialer-queries.js');
-    return getLeadMemory(supabase, phoneNormalized);
+    return getLeadMemory(db, phoneNormalized);
   });
 
   ipcMain.handle('dialer:getDNCList', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getDNCList } = await import('./dialer-queries.js');
-    return getDNCList(supabase);
+    return getDNCList(db);
+  });
+
+  ipcMain.handle('dialer:getLocalDNCList', async () => {
+    const { getDNCList } = await import('./dialer-queries.js');
+    return getDNCList(db);
   });
 
   ipcMain.handle('dialer:getDNCStats', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getDNCStats } = await import('./dialer-queries.js');
-    return getDNCStats(supabase);
+    return getDNCStats(db);
+  });
+
+  ipcMain.handle('dialer:getLocalDNCStats', async () => {
+    const { getDNCStats } = await import('./dialer-queries.js');
+    return getDNCStats(db);
   });
 
   ipcMain.handle('dialer:addManualDNC', async (_event, phone: string, reason: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { addManualDNC } = await import('./dialer-queries.js');
-    return addManualDNC(supabase, phone, reason);
+    return addManualDNC(db, phone, reason);
   });
 
   ipcMain.handle('dialer:removeFromDNC', async (_event, phone: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { removeFromDNC } = await import('./dialer-queries.js');
-    return removeFromDNC(supabase, phone);
+    return removeFromDNC(db, phone);
   });
 
   ipcMain.handle('dialer:getDailyStats', async (_event, days?: number) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getDailyStats } = await import('./dialer-queries.js');
-    return getDailyStats(supabase, days);
+    return getDailyStats(db, days);
   });
 
   ipcMain.handle('dialer:getHotLeads', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getHotLeads } = await import('./dialer-queries.js');
-    return getHotLeads(supabase);
+    return getHotLeads(db);
   });
 
   ipcMain.handle('dialer:getCallbacksDue', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getCallbacksDue } = await import('./dialer-queries.js');
-    return getCallbacksDue(supabase);
+    return getCallbacksDue(db);
   });
 
   ipcMain.handle('dialer:triggerCadence', async (_event) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { triggerCadence } = await import('./dialer-queries.js');
-    return triggerCadence(supabase, db, (progress) => {
+    return triggerCadence(db, (progress) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {
           win.webContents.send('dialer:batch-dial-progress', progress);
@@ -1848,96 +1968,50 @@ Provide your analysis in JSON format:
   });
 
   ipcMain.handle('dialer:getTodayCallCount', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getTodayCallCount } = await import('./dialer-queries.js');
-    return getTodayCallCount(supabase);
+    return getTodayCallCount(db);
   });
 
-  ipcMain.handle('dialer:uploadLeads', async (_event, leads: any[], batchId: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
+  ipcMain.handle('dialer:uploadLeads', async (_event, leads: any[], batchId: string, listName?: string) => {
     const { uploadLeadsBatch } = await import('./dialer-queries.js');
+    // Process all at once (local SQLite is fast, no need to chunk)
+    const result = uploadLeadsBatch(db, leads, batchId, listName);
 
-    const CHUNK_SIZE = 50;
-    const allDetails: any[] = [];
-    let totalImported = 0;
-    let totalDuplicates = 0;
-    let totalErrors = 0;
-    let totalSkipped = 0;
+    _event.sender.send('dialer:upload-progress', {
+      processed: leads.length,
+      total: leads.length,
+    });
 
-    for (let offset = 0; offset < leads.length; offset += CHUNK_SIZE) {
-      const chunk = leads.slice(offset, offset + CHUNK_SIZE);
-      const result = await uploadLeadsBatch(supabase, chunk, batchId);
-
-      totalImported += result.imported;
-      totalDuplicates += result.duplicates;
-      totalErrors += result.errors;
-      totalSkipped += result.skipped;
-
-      // Fix row indices to be global (not chunk-local)
-      for (const d of result.details) {
-        allDetails.push({ ...d, row_index: d.row_index + offset });
-      }
-
-      // Send progress update to renderer
-      _event.sender.send('dialer:upload-progress', {
-        processed: Math.min(offset + CHUNK_SIZE, leads.length),
-        total: leads.length,
-      });
-    }
-
-    return {
-      batch_id: batchId,
-      total_rows: leads.length,
-      imported: totalImported,
-      duplicates: totalDuplicates,
-      errors: totalErrors,
-      skipped: totalSkipped,
-      details: allDetails,
-    };
+    return result;
   });
 
   ipcMain.handle('dialer:getUploadBatches', async () => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getUploadBatches } = await import('./dialer-queries.js');
-    return getUploadBatches(supabase);
+    return getUploadBatches(db);
   });
 
   ipcMain.handle('dialer:getUploadBatchLeads', async (_event, batchId: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getUploadBatchLeads } = await import('./dialer-queries.js');
-    return getUploadBatchLeads(supabase, batchId);
+    return getUploadBatchLeads(db, batchId);
   });
 
   ipcMain.handle('dialer:deleteUploadBatch', async (_event, batchId: string) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { deleteUploadBatch } = await import('./dialer-queries.js');
-    return deleteUploadBatch(supabase, batchId);
+    return deleteUploadBatch(db, batchId);
   });
 
   ipcMain.handle('dialer:callLead', async (_event, lead: any) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { callLead } = await import('./dialer-queries.js');
-    return callLead(supabase, db, lead);
+    return callLead(db, lead);
   });
 
   ipcMain.handle('dialer:syncFubDNC', async (_event) => {
     const { getFubConfig, fetchPeopleByStage } = await import('./fub-client.js');
-    const { getSupabaseClient } = await import('./supabase-client.js');
     const { syncFubPeopleToDNC } = await import('./dialer-queries.js');
 
     const config = getFubConfig(db);
     if (!config) throw new Error('FUB API key not configured — set it in Settings.');
 
-    const supabase = getSupabaseClient(db);
-
-    // Fetch ALL people from FUB across all stages (paginated)
-    // FUB doesn't have a "get all" endpoint, so we iterate stages + no-stage
     const allPeople: Array<{
       id: number;
       phone_normalized: string;
@@ -1949,7 +2023,6 @@ Provide your analysis in JSON format:
     const seenPhones = new Set<string>();
     let totalFetched = 0;
 
-    // Helper: normalize phone to 10-digit US
     const normalizePhone = (raw: string): string => {
       const digits = raw.replace(/\D/g, '');
       if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
@@ -1957,7 +2030,6 @@ Provide your analysis in JSON format:
       return '';
     };
 
-    // Helper: fetch one stage with pagination and extract phones
     const fetchStage = async (stage: string) => {
       let offset = 0;
       for (let page = 0; page < 50; page++) {
@@ -1992,7 +2064,6 @@ Provide your analysis in JSON format:
       }
     };
 
-    // FUB stages to pull
     const stages = [
       'Lead', 'New Lead', 'Prospect', 'Active Client',
       'Past Client', 'Closed', 'Archived', 'Dead',
@@ -2007,14 +2078,13 @@ Provide your analysis in JSON format:
       }
     }
 
-    // Now upsert all phones into crm_exclusions
     _event.sender.send('dialer:fub-sync-progress', {
       stage: 'Saving to DNC...',
       fetched: totalFetched,
       phones: allPeople.length,
     });
 
-    const result = await syncFubPeopleToDNC(supabase, allPeople);
+    const result = syncFubPeopleToDNC(db, allPeople);
 
     return {
       ...result,
@@ -2023,52 +2093,138 @@ Provide your analysis in JSON format:
     };
   });
 
-  // ===== AI DIALER — LOCAL CACHE + BATCH DIAL + INBOUND =====
+  ipcMain.handle('dialer:syncFubExceptUnreachedToDNC', async (_event) => {
+    const { getFubConfig, fetchAllPeople } = await import('./fub-client.js');
+    const { syncFubPeopleToDNC } = await import('./dialer-queries.js');
 
-  ipcMain.handle('dialer:getLocalCallQueue', async (_event, limit?: number) => {
-    const { getLocalCallQueue } = await import('./dialer-queries.js');
-    return getLocalCallQueue(db, limit);
-  });
+    const config = getFubConfig(db);
+    if (!config) throw new Error('FUB API key not configured — set it in Settings.');
 
-  ipcMain.handle('dialer:getLocalCallHistory', async (_event, limit?: number, filters?: any) => {
-    const { getLocalCallHistory } = await import('./dialer-queries.js');
-    return getLocalCallHistory(db, limit, filters);
-  });
+    const allPeople: Array<{
+      id: number;
+      phone_normalized: string;
+      first_name?: string;
+      last_name?: string;
+      stage?: string;
+    }> = [];
 
-  ipcMain.handle('dialer:getLocalDNCList', async () => {
-    const { getLocalDNCList } = await import('./dialer-queries.js');
-    return getLocalDNCList(db);
-  });
+    const seenPhones = new Set<string>();
+    let totalFetched = 0;
+    let skippedUnreached = 0;
 
-  ipcMain.handle('dialer:getLocalDNCStats', async () => {
-    const { getLocalDNCStats } = await import('./dialer-queries.js');
-    return getLocalDNCStats(db);
-  });
+    const normalizePhone = (raw: string): string => {
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
+      if (digits.length === 10) return digits;
+      return '';
+    };
 
-  ipcMain.handle('dialer:getLocalInboundCalls', async (_event, limit?: number) => {
-    const { getLocalInboundCalls } = await import('./dialer-queries.js');
-    return getLocalInboundCalls(db, limit);
+    // Fetch ALL people from FUB (paginated)
+    let offset = 0;
+    for (let page = 0; page < 200; page++) {
+      const result = await fetchAllPeople(config, 100, offset);
+      totalFetched += result.people.length;
+
+      for (const person of result.people) {
+        // Skip people in "Unreached" stage (case-insensitive)
+        const stage = (person.stage || '').trim();
+        if (stage.toLowerCase() === 'unreached') {
+          skippedUnreached++;
+          continue;
+        }
+
+        const phones = person.phones || [];
+        for (const ph of phones) {
+          const normalized = normalizePhone(ph.value || '');
+          if (normalized && !seenPhones.has(normalized)) {
+            seenPhones.add(normalized);
+            allPeople.push({
+              id: person.id,
+              phone_normalized: normalized,
+              first_name: person.firstName,
+              last_name: person.lastName,
+              stage: person.stage,
+            });
+          }
+        }
+      }
+
+      _event.sender.send('dialer:fub-sync-progress', {
+        stage: `All people (excl. Unreached)`,
+        fetched: totalFetched,
+        phones: allPeople.length,
+      });
+
+      if (!result.hasMore) break;
+      offset += 100;
+    }
+
+    _event.sender.send('dialer:fub-sync-progress', {
+      stage: 'Saving to DNC...',
+      fetched: totalFetched,
+      phones: allPeople.length,
+    });
+
+    const result = syncFubPeopleToDNC(db, allPeople);
+
+    return {
+      ...result,
+      fub_people_fetched: totalFetched,
+      unique_phones: allPeople.length,
+      skippedUnreached,
+    };
   });
 
   ipcMain.handle('dialer:getInboundCalls', async (_event, limit?: number) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
     const { getInboundCalls } = await import('./dialer-queries.js');
-    return getInboundCalls(supabase, limit);
+    return getInboundCalls(db, limit);
   });
 
-  ipcMain.handle('dialer:batchDial', async (_event, leadIds: string[]) => {
-    const { getSupabaseClient } = await import('./supabase-client.js');
-    const supabase = getSupabaseClient(db);
-    const { batchDialLeads } = await import('./dialer-queries.js');
+  ipcMain.handle('dialer:getLocalInboundCalls', async (_event, limit?: number) => {
+    const { getInboundCalls } = await import('./dialer-queries.js');
+    return getInboundCalls(db, limit);
+  });
 
-    return batchDialLeads(supabase, db, leadIds, 10, 30000, (progress) => {
+  ipcMain.handle('dialer:batchDial', async (_event, leadIds: string[], fromNumbers?: string | string[]) => {
+    const { batchDialLeads } = await import('./dialer-queries.js');
+    // Support both legacy single string and new array format
+    const numbersArray = fromNumbers
+      ? (Array.isArray(fromNumbers) ? fromNumbers : [fromNumbers])
+      : [];
+    return batchDialLeads(db, leadIds, 10, 30000, (progress) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) {
           win.webContents.send('dialer:batch-dial-progress', progress);
         }
       }
-    });
+    }, false, numbersArray);
+  });
+
+  ipcMain.handle('dialer:getNumberHealth', async (_event, fromNumbers: string[]) => {
+    const { getNumberHealthStats } = await import('./dialer-queries.js');
+    return getNumberHealthStats(db, fromNumbers);
+  });
+
+  ipcMain.handle('dialer:getNumberThrottle', async (_event, fromNumbers: string[]) => {
+    const { getNumberThrottleStatus } = await import('./dialer-queries.js');
+    return getNumberThrottleStatus(db, fromNumbers);
+  });
+
+  ipcMain.handle('dialer:setNumberLimits', async (_event, phone: string, dailyLimit?: number, hourlyLimit?: number) => {
+    const { setNumberLimits } = await import('./dialer-queries.js');
+    setNumberLimits(db, phone, dailyLimit, hourlyLimit);
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:setNumberPaused', async (_event, phone: string, paused: boolean, reason?: string) => {
+    const { setNumberPaused } = await import('./dialer-queries.js');
+    setNumberPaused(db, phone, paused, reason);
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:getCampaignCapacity', async (_event, fromNumbers: string[]) => {
+    const { getCampaignCapacity } = await import('./dialer-queries.js');
+    return getCampaignCapacity(db, fromNumbers);
   });
 
   ipcMain.handle('dialer:forceSync', async () => {
@@ -2077,13 +2233,16 @@ Provide your analysis in JSON format:
     return { success: true };
   });
 
-  // Force an immediate Retell poll (manual trigger from UI)
+  ipcMain.handle('dialer:getRetellPhoneNumbers', async () => {
+    const { fetchRetellPhoneNumbers } = await import('./dialer-queries.js');
+    return fetchRetellPhoneNumbers(db);
+  });
+
   ipcMain.handle('dialer:forcePollRetell', async () => {
     const { pollRetellCalls } = await import('./retell-call-poller.js');
     return pollRetellCalls();
   });
 
-  // Backfill historical calls from Retell (one-time bulk import)
   ipcMain.handle('dialer:backfillRetell', async (_event, daysBack: number) => {
     const { backfillRetellCalls } = await import('./retell-call-poller.js');
     return backfillRetellCalls(daysBack, (progress) => {
@@ -2095,12 +2254,10 @@ Provide your analysis in JSON format:
     });
   });
 
-  // Get sync + poller health status
   ipcMain.handle('dialer:syncStatus', async () => {
     const { getSyncStatus } = await import('./dialer-sync.js');
     const syncStatus = getSyncStatus();
 
-    // Also check if Retell poller has prerequisites
     let retellConfigured = false;
     try {
       const retellKey = db.prepare("SELECT value FROM settings WHERE key = 'retell_api_key'").get() as any;
@@ -2123,6 +2280,250 @@ Provide your analysis in JSON format:
       LIMIT ?
     `).all(limit || 50);
   });
+
+  // ── Campaign Pause/Resume ──
+
+  ipcMain.handle('dialer:pauseBatchDial', async () => {
+    const { pauseBatchDial } = await import('./dialer-queries.js');
+    pauseBatchDial();
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:resumeBatchDial', async () => {
+    const { resumeBatchDial } = await import('./dialer-queries.js');
+    resumeBatchDial();
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:isBatchPaused', async () => {
+    const { isBatchPaused } = await import('./dialer-queries.js');
+    return isBatchPaused();
+  });
+
+  // ── Lead Actions ──
+
+  ipcMain.handle('dialer:setLeadOutcome', async (_event, phoneNormalized: string, outcome: string, reason?: string) => {
+    const { setLeadOutcome } = await import('./dialer-queries.js');
+    setLeadOutcome(db, phoneNormalized, outcome, reason);
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:clearLeadOutcome', async (_event, phoneNormalized: string) => {
+    const { clearLeadOutcome } = await import('./dialer-queries.js');
+    clearLeadOutcome(db, phoneNormalized);
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:setLeadCallback', async (_event, phoneNormalized: string, callbackDatetime: string | null) => {
+    const { setLeadCallback } = await import('./dialer-queries.js');
+    setLeadCallback(db, phoneNormalized, callbackDatetime);
+    return { success: true };
+  });
+
+  ipcMain.handle('dialer:addLeadNote', async (_event, phoneNormalized: string, note: string) => {
+    const { addLeadNote } = await import('./dialer-queries.js');
+    return addLeadNote(db, phoneNormalized, note);
+  });
+
+  ipcMain.handle('dialer:getLeadNotes', async (_event, phoneNormalized: string) => {
+    const { getLeadNotes } = await import('./dialer-queries.js');
+    return getLeadNotes(db, phoneNormalized);
+  });
+
+  ipcMain.handle('dialer:deleteLeadNote', async (_event, noteId: string) => {
+    const { deleteLeadNote } = await import('./dialer-queries.js');
+    deleteLeadNote(db, noteId);
+    return { success: true };
+  });
+
+  // ── Lead Search ──
+
+  ipcMain.handle('dialer:searchLeads', async (_event, query: string, limit?: number) => {
+    const { searchLeads } = await import('./dialer-queries.js');
+    return searchLeads(db, query, limit);
+  });
+
+  // ── Paginated Call History ──
+
+  ipcMain.handle('dialer:getCallHistoryPaginated', async (_event, limit?: number, offset?: number, filters?: any) => {
+    const { getCallHistoryPaginated } = await import('./dialer-queries.js');
+    return getCallHistoryPaginated(db, limit, offset, filters);
+  });
+
+  // ── RAG: Transcript search + conversation memory ──
+
+  ipcMain.handle('dialer:searchTranscripts', async (_event, query: string, options?: any) => {
+    const { searchTranscripts } = await import('./dialer-memory.js');
+    return searchTranscripts(db, query, undefined, options);
+  });
+
+  ipcMain.handle('dialer:getPreCallContext', async (_event, phoneNormalized: string) => {
+    const { getPreCallContext } = await import('./dialer-memory.js');
+    return getPreCallContext(db, phoneNormalized);
+  });
+
+  ipcMain.handle('dialer:backfillEmbeddings', async (_event) => {
+    const { backfillTranscriptEmbeddings } = await import('./dialer-memory.js');
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    return backfillTranscriptEmbeddings(db, undefined, (progress) => {
+      mainWindow?.webContents.send('dialer:embedding-progress', progress);
+    });
+  });
+
+  // ===== DEAL SUMMARIES (AI-generated) =====
+
+  ipcMain.handle('deal:generateSummary', async (_event, dealId: string) => {
+    let anthropic: Anthropic;
+    try {
+      anthropic = getAnthropicClient();
+    } catch {
+      return { success: false, error: 'AI not configured' };
+    }
+
+    try {
+      // Gather deal data
+      const deal = db.prepare('SELECT * FROM deals WHERE id = ?').get(dealId) as any;
+      if (!deal) return { success: false, error: 'Deal not found' };
+
+      // Top 3 deadlines
+      const deadlines = db.prepare(
+        `SELECT label, due_date FROM deadlines WHERE deal_id = ? ORDER BY due_date ASC LIMIT 3`
+      ).all(dealId) as any[];
+
+      // PDF summaries
+      const pdfSummaries = db.prepare(
+        `SELECT file_name, summary FROM pdf_extractions WHERE deal_id = ? AND summary IS NOT NULL LIMIT 5`
+      ).all(dealId) as any[];
+
+      const spread = (deal.expected_sales_price || 0) - (deal.purchase_price || 0);
+      const margin = deal.expected_sales_price > 0
+        ? Math.round((spread / deal.expected_sales_price) * 100)
+        : 0;
+
+      const prompt = `You are an expert real estate transaction coordinator. Generate a concise 2-3 sentence deal status summary.
+
+Deal: ${deal.deal_name}
+Stage: ${deal.stage}
+Type: ${deal.deal_type || 'Standard Flip'}
+County/State: ${[deal.county, deal.state].filter(Boolean).join(', ')}
+Purchase Price: $${(deal.purchase_price || 0).toLocaleString()}
+Expected Sales Price: $${(deal.expected_sales_price || 0).toLocaleString()}
+Spread: $${spread.toLocaleString()} (${margin}% margin)
+Contract Execution: ${deal.contract_execution_date || 'N/A'}
+Expected Close: ${deal.expected_close_date || 'N/A'}
+Title Company: ${deal.title_company_name || 'N/A'}
+
+${deadlines.length > 0 ? `Upcoming Deadlines:\n${deadlines.map(d => `- ${d.label}: ${d.due_date}`).join('\n')}` : 'No deadlines set.'}
+
+${pdfSummaries.length > 0 ? `Document Summaries:\n${pdfSummaries.map(p => `- ${p.file_name}: ${p.summary}`).join('\n')}` : ''}
+
+Instructions:
+- Line 1: Current status (stage, title company, closing date)
+- Line 2: Key risk or next action needed (deadline urgency, missing docs)
+- Line 3: Financial snapshot (spread, margin)
+- Be extremely concise. No headers or labels.`;
+
+      const message = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const summary = message.content[0]?.type === 'text' ? message.content[0].text : '';
+      if (!summary) return { success: false, error: 'Empty response' };
+
+      // Upsert into deal_summaries
+      db.prepare(`
+        INSERT INTO deal_summaries (deal_id, summary, generated_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(deal_id) DO UPDATE SET summary = excluded.summary, generated_at = excluded.generated_at
+      `).run(dealId, summary);
+
+      return { success: true, summary };
+    } catch (e: any) {
+      console.error('[DealSummary] Generation failed:', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('deal:getSummary', (_event, dealId: string) => {
+    return db.prepare('SELECT * FROM deal_summaries WHERE deal_id = ?').get(dealId) || null;
+  });
+
+  // ===== EMBEDDING BACKFILL =====
+
+  ipcMain.handle('ai:backfillEmbeddings', async (_event) => {
+    const voyageKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('voyage_api_key') as any)?.value || '';
+    if (!voyageKey) {
+      return { embedded: 0, errors: 0, total: 0, error: 'Voyage AI API key not configured. Set voyage_api_key in Settings.' };
+    }
+
+    const mainWindow = BrowserWindow.getAllWindows()[0];
+    const result = await backfillAllEmbeddings(db, voyageKey, (progress) => {
+      mainWindow?.webContents.send('ai:backfill-progress', progress);
+    });
+
+    return result;
+  });
+
+  // ===== DEAL NOTES =====
+
+  ipcMain.handle('notes:create', async (_event, dealId: string, content: string, pushToFub: boolean) => {
+    const result = db.prepare(
+      `INSERT INTO deal_notes (deal_id, content, pushed_to_fub) VALUES (?, ?, ?)`
+    ).run(dealId, content, pushToFub ? 0 : 0); // pushed_to_fub is set to 1 after FUB push succeeds
+
+    const noteId = result.lastInsertRowid;
+
+    // If push to FUB requested, enqueue post_note in fub_outbox
+    if (pushToFub) {
+      const deal = db.prepare('SELECT fub_person_id FROM deals WHERE id = ?').get(dealId) as any;
+      if (deal?.fub_person_id) {
+        try {
+          db.prepare(`
+            INSERT INTO fub_outbox (deal_id, action, payload, status)
+            VALUES (?, 'post_note', ?, 'pending')
+          `).run(dealId, JSON.stringify({
+            fub_person_id: deal.fub_person_id,
+            note: content,
+            note_id: noteId,
+          }));
+        } catch (e) {
+          console.error('[Notes] Failed to enqueue FUB push:', e);
+        }
+      }
+    }
+
+    // Audit log
+    db.prepare('INSERT INTO audit_log (deal_id, event_type, details) VALUES (?, ?, ?)').run(
+      dealId, 'note_created', JSON.stringify({ note_id: noteId, pushed_to_fub: pushToFub })
+    );
+
+    return { success: true, id: noteId };
+  });
+
+  ipcMain.handle('notes:list', (_event, dealId: string) => {
+    return db.prepare(
+      `SELECT * FROM deal_notes WHERE deal_id = ? ORDER BY created_at DESC`
+    ).all(dealId);
+  });
+
+  // ===== CHAT MESSAGE PERSISTENCE =====
+
+  ipcMain.handle('chat:saveMessage', (_event, dealId: string, role: string, content: string, sources?: string) => {
+    return db.prepare(
+      `INSERT INTO deal_chat_messages (deal_id, role, content, sources) VALUES (?, ?, ?, ?)`
+    ).run(dealId, role, content, sources || null);
+  });
+
+  ipcMain.handle('chat:getMessages', (_event, dealId: string) => {
+    return db.prepare(
+      `SELECT * FROM deal_chat_messages WHERE deal_id = ? ORDER BY created_at ASC`
+    ).all(dealId);
+  });
+
+  // ===== FUB BROWSER SYNC =====
+  registerBrowserSyncHandlers();
 }
 
 // Old chunkText removed — replaced by paragraph-aware chunker in electron/chunker.ts

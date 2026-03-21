@@ -1,6 +1,6 @@
 /**
  * Phone number utilities — ported from autodialer
- * Normalizes US phone numbers to 10-digit format for Supabase matching.
+ * Normalizes US phone numbers to 10-digit format for local database matching.
  */
 
 export function normalizePhone(phone: string | null | undefined): string {

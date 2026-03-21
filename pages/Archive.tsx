@@ -64,15 +64,16 @@ export const Archive: React.FC = () => {
     return result;
   }, [deals, search, sortBy]);
 
-  const handleRestore = async (dealId: string, dealName: string) => {
-    setRestoringId(dealId);
+  const handleRestore = async (deal: Deal) => {
+    setRestoringId(deal.id);
     try {
-      await updateDealFields(dealId, { stage: 'Purchase Agreement Signed' });
+      const restoreStage = deal.previous_stage || 'Purchase Agreement Signed';
+      await updateDealFields(deal.id, { stage: restoreStage });
       await loadData();
-      showToast({ message: `${dealName} restored to Pipeline`, type: 'success' });
+      showToast({ message: `${deal.deal_name} restored to ${restoreStage}`, type: 'success' });
     } catch (err) {
       console.error('Restore failed:', err);
-      showToast({ message: 'Failed to restore deal', type: 'error' });
+      showToast({ message: `Failed to restore ${deal.deal_name}`, type: 'error' });
     } finally {
       setRestoringId(null);
     }
@@ -189,7 +190,7 @@ export const Archive: React.FC = () => {
                         )}
                       </div>
                       <button
-                        onClick={() => handleRestore(deal.id, deal.deal_name)}
+                        onClick={() => handleRestore(deal)}
                         disabled={restoringId === deal.id}
                         className={cn(
                           'flex items-center gap-1 text-caption font-medium px-2.5 py-1.5 rounded-md transition-colors',

@@ -35,6 +35,9 @@ supabase/.temp/
 electron-dist/
 *.db
 
+# Claude Code
+.claude/
+
 # Electron Builder output
 release/
 build/icons.iconset/

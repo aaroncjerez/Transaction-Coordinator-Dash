@@ -143,7 +143,7 @@ app.whenReady().then(() => {
     // Start FUB file sync runner (checks every 5 min)
     startFubFileSync();
 
-    // Start AI Dialer sync runner (polls Supabase every 60s, auto-reviews calls)
+    // Start AI Dialer background processor (reviews calls, builds memory, embeds transcripts)
     startDialerSync();
 
     // Start Retell call poller (polls Retell List Calls API every 30s, replaces n8n)

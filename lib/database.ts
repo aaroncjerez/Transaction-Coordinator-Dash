@@ -135,6 +135,10 @@ export async function deleteFile(fileId: string): Promise<void> {
   await api.files.deleteFile(fileId);
 }
 
+export async function readPdfFile(filePath: string): Promise<{ data: string | null; error: string | null }> {
+  return api.files.readPdf(filePath);
+}
+
 // ---- deadlines ----
 
 export async function createDeadline(deadline: { deal_id: string; label: string; due_date: string }): Promise<any> {
@@ -255,12 +259,36 @@ export async function getAllFubFileSyncStatuses(): Promise<any[]> {
   return api.fub.getAllFileSyncStatuses();
 }
 
-export async function triggerFubFileSync(dealId?: string): Promise<{ success: boolean; synced: number; errors: number }> {
+export async function triggerFubFileSync(dealId?: string): Promise<{ success: boolean; synced: number; errors: number; reason?: string }> {
   return api.fub.triggerFileSync(dealId);
 }
 
 export async function getDealsWithFubLinks(): Promise<{ id: string; deal_name: string; fub_person_id: string }[]> {
   return api.fub.getDealsWithFubLinks();
+}
+
+// ---- FUB browser file sync ----
+
+export async function browserSyncDealFiles(dealId: string): Promise<{ filesFound: number; filesDownloaded: number; filesAnalyzed: number }> {
+  return api.fub.browserSyncDeal(dealId);
+}
+
+export async function browserSyncAllFiles(): Promise<{ totalDeals: number; totalFilesFound: number; totalFilesDownloaded: number; errors: number }> {
+  return api.fub.browserSyncAll();
+}
+
+export function onFubBrowserProgress(callback: (data: any) => void): () => void {
+  api.fub.onBrowserSyncProgress(callback);
+  return () => api.fub.offBrowserSyncProgress();
+}
+
+export function onFubBrowserBulkComplete(callback: (data: any) => void): () => void {
+  api.fub.onBrowserBulkComplete(callback);
+  return () => api.fub.offBrowserBulkComplete();
+}
+
+export async function closeFubBrowser(): Promise<void> {
+  await api.fub.closeFubBrowser();
 }
 
 // ---- FUB activities ----
@@ -275,7 +303,7 @@ export async function syncFubActivities(dealId: string): Promise<{ success: bool
 
 // ---- AI ----
 
-export async function askAI(query: string, dealId: string): Promise<{ answer: string }> {
+export async function askAI(query: string, dealId: string): Promise<{ answer: string; sources?: Array<{ file_name: string; chunk_index: number }> }> {
   return api.ai.askQuestion(query, dealId);
 }
 
@@ -311,6 +339,42 @@ export async function getDealAnalysis(dealId: string): Promise<any> {
   return api.ai.getDealAnalysis(dealId);
 }
 
+// ---- Deal Summaries (AI-generated) ----
+
+export async function generateDealSummary(dealId: string): Promise<{ success: boolean; summary?: string; error?: string }> {
+  return api.dealSummary.generate(dealId);
+}
+
+export async function getDealSummary(dealId: string): Promise<{ deal_id: string; summary: string; generated_at: string } | null> {
+  return api.dealSummary.get(dealId);
+}
+
+// ---- Deal Notes ----
+
+export async function createDealNote(dealId: string, content: string, pushToFub: boolean): Promise<{ success: boolean; id?: number }> {
+  return api.notes.create(dealId, content, pushToFub);
+}
+
+export async function listDealNotes(dealId: string): Promise<any[]> {
+  return api.notes.list(dealId);
+}
+
+// ---- Chat Message Persistence ----
+
+export async function saveChatMessage(dealId: string, role: string, content: string, sources?: string): Promise<void> {
+  await api.chat.saveMessage(dealId, role, content, sources);
+}
+
+export async function getChatMessages(dealId: string): Promise<any[]> {
+  return api.chat.getMessages(dealId);
+}
+
+// ---- Embeddings ----
+
+export async function backfillEmbeddings(): Promise<{ embedded: number; errors: number; total: number; error?: string }> {
+  return api.ai.backfillEmbeddings();
+}
+
 // ---- KPI Dashboard ----
 
 export async function fetchKpiDashboardData(): Promise<any> {
@@ -327,7 +391,7 @@ export async function getCfoInsights(data: any): Promise<any> {
   return api.cfo.getInsights(data);
 }
 
-// ---- AI Dialer (Supabase) ----
+// ---- AI Dialer ----
 
 export async function fetchDialerCallQueue(limit?: number): Promise<any[]> {
   return api.dialer.getCallQueue(limit);
@@ -393,28 +457,32 @@ export async function fetchDialerTodayCallCount(): Promise<number> {
   return api.dialer.getTodayCallCount();
 }
 
-export function onDialerReviewProgress(callback: (data: { current: number; total: number; callId: string }) => void): void {
-  api.dialer.onReviewProgress(callback);
+export function onDialerReviewProgress(callback: (data: { current: number; total: number; callId: string }) => void): () => void {
+  return api.dialer.onReviewProgress(callback);
 }
 
-export function onDialerNewCalls(callback: (data: { count: number }) => void): void {
-  api.dialer.onNewCalls(callback);
+export function onDialerNewCalls(callback: (data: { count: number }) => void): () => void {
+  return api.dialer.onNewCalls(callback);
 }
 
-export async function uploadDialerLeads(leads: any[], batchId: string): Promise<import('../types').UploadBatchResult> {
-  return api.dialer.uploadLeads(leads, batchId);
+export async function uploadDialerLeads(leads: any[], batchId: string, listName?: string): Promise<import('../types').UploadBatchResult> {
+  return api.dialer.uploadLeads(leads, batchId, listName);
 }
 
-export function onDialerUploadProgress(callback: (data: { processed: number; total: number }) => void): void {
-  api.dialer.onUploadProgress(callback);
+export function onDialerUploadProgress(callback: (data: { processed: number; total: number }) => void): () => void {
+  return api.dialer.onUploadProgress(callback);
 }
 
 export async function syncDialerFubDNC(): Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number }> {
   return api.dialer.syncFubDNC();
 }
 
-export function onDialerFubSyncProgress(callback: (data: { stage: string; fetched: number; phones: number }) => void): void {
-  api.dialer.onFubSyncProgress(callback);
+export async function syncDialerFubExceptUnreachedToDNC(): Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number; skippedUnreached: number }> {
+  return api.dialer.syncFubExceptUnreachedToDNC();
+}
+
+export function onDialerFubSyncProgress(callback: (data: { stage: string; fetched: number; phones: number }) => void): () => void {
+  return api.dialer.onFubSyncProgress(callback);
 }
 
 export async function fetchDialerUploadBatches(): Promise<Array<{ batch_id: string; lead_count: number; uploaded_at: string }>> {
@@ -435,8 +503,16 @@ export async function dialerCallLead(lead: any): Promise<{ call_id: string; stat
 
 // ---- AI Dialer — Local Cache + Batch Dial + Inbound ----
 
-export async function fetchLocalDialerCallQueue(limit?: number): Promise<any[]> {
-  return api.dialer.getLocalCallQueue(limit);
+export async function fetchLocalDialerCallQueue(limit?: number, listIds?: string[]): Promise<any[]> {
+  return api.dialer.getLocalCallQueue(limit, listIds);
+}
+
+export async function fetchLeadsByList(listIds: string[], limit?: number): Promise<any[]> {
+  return api.dialer.getLeadsByList(listIds, limit);
+}
+
+export async function fetchDialerLists(): Promise<Array<{ id: string; name: string; lead_count: number; actual_lead_count: number; created_at: string }>> {
+  return api.dialer.getLists();
 }
 
 export async function fetchLocalDialerCallHistory(limit?: number, filters?: any): Promise<any[]> {
@@ -459,24 +535,52 @@ export async function fetchDialerInboundCalls(limit?: number): Promise<any[]> {
   return api.dialer.getInboundCalls(limit);
 }
 
-export async function startBatchDial(leadIds: string[]): Promise<import('../types').BatchDialResult> {
-  return api.dialer.batchDial(leadIds);
+export async function startBatchDial(leadIds: string[], fromNumbers?: string | string[]): Promise<import('../types').BatchDialResult> {
+  return api.dialer.batchDial(leadIds, fromNumbers);
 }
 
-export function onBatchDialProgress(callback: (data: import('../types').BatchDialProgress) => void): void {
-  api.dialer.onBatchDialProgress(callback);
+export function onBatchDialProgress(callback: (data: import('../types').BatchDialProgress) => void): () => void {
+  return api.dialer.onBatchDialProgress(callback);
 }
 
-export function onDialerInboundCall(callback: (data: import('../types').InboundCallNotification) => void): void {
-  api.dialer.onInboundCall(callback);
+export async function fetchNumberHealth(fromNumbers: string[]): Promise<Array<{ phone: string; totalCalls: number; connected: number; connectRate: number; flagged: boolean }>> {
+  return api.dialer.getNumberHealth(fromNumbers);
 }
 
-export function onDialerCacheUpdated(callback: (data: { type: string }) => void): void {
-  api.dialer.onCacheUpdated(callback);
+export async function fetchNumberThrottle(fromNumbers: string[]) {
+  return api.dialer.getNumberThrottle(fromNumbers);
+}
+
+export async function setNumberLimits(phone: string, dailyLimit?: number, hourlyLimit?: number) {
+  return api.dialer.setNumberLimits(phone, dailyLimit, hourlyLimit);
+}
+
+export async function setNumberPaused(phone: string, paused: boolean, reason?: string) {
+  return api.dialer.setNumberPaused(phone, paused, reason);
+}
+
+export async function fetchCampaignCapacity(fromNumbers: string[]) {
+  return api.dialer.getCampaignCapacity(fromNumbers);
+}
+
+export function onDialerInboundCall(callback: (data: import('../types').InboundCallNotification) => void): () => void {
+  return api.dialer.onInboundCall(callback);
+}
+
+export function onDialerCacheUpdated(callback: (data: { type: string }) => void): () => void {
+  return api.dialer.onCacheUpdated(callback);
 }
 
 export async function forceDialerSync(): Promise<{ success: boolean }> {
   return api.dialer.forceSync();
+}
+
+export async function fetchRetellPhoneNumbers(): Promise<Array<{
+  phone_number: string;
+  phone_number_pretty: string;
+  nickname: string | null;
+}>> {
+  return api.dialer.getRetellPhoneNumbers();
 }
 
 export async function forcePollRetell(): Promise<{ fetched: number; newRecords: number; errors: number }> {
@@ -489,10 +593,8 @@ export async function backfillRetellCalls(daysBack: number): Promise<{ fetched: 
 
 export async function getDialerSyncStatus(): Promise<{
   running: boolean;
-  supabaseConfigured: boolean;
   retellConfigured: boolean;
-  fastSync: { ok: boolean; error: string | null; lastRun: string | null };
-  fullSync: { ok: boolean; error: string | null; lastRun: string | null };
+  sync: { ok: boolean; error: string | null; lastRun: string | null };
 }> {
   return api.dialer.getSyncStatus();
 }
@@ -509,4 +611,89 @@ export async function fetchDialerGuardLog(limit?: number): Promise<Array<{
   created_at: string;
 }>> {
   return api.dialer.getGuardLog(limit);
+}
+
+// ---- Campaign Pause/Resume ----
+
+export async function pauseBatchDial(): Promise<{ success: boolean }> {
+  return api.dialer.pauseBatchDial();
+}
+
+export async function resumeBatchDial(): Promise<{ success: boolean }> {
+  return api.dialer.resumeBatchDial();
+}
+
+export async function isBatchPaused(): Promise<boolean> {
+  return api.dialer.isBatchPaused();
+}
+
+// ---- Lead Actions ----
+
+export async function setDialerLeadOutcome(phoneNormalized: string, outcome: string, reason?: string): Promise<{ success: boolean }> {
+  return api.dialer.setLeadOutcome(phoneNormalized, outcome, reason);
+}
+
+export async function clearDialerLeadOutcome(phoneNormalized: string): Promise<{ success: boolean }> {
+  return api.dialer.clearLeadOutcome(phoneNormalized);
+}
+
+export async function setDialerLeadCallback(phoneNormalized: string, callbackDatetime: string | null): Promise<{ success: boolean }> {
+  return api.dialer.setLeadCallback(phoneNormalized, callbackDatetime);
+}
+
+export async function addDialerLeadNote(phoneNormalized: string, note: string): Promise<{ id: string }> {
+  return api.dialer.addLeadNote(phoneNormalized, note);
+}
+
+export async function fetchDialerLeadNotes(phoneNormalized: string): Promise<Array<{ id: string; phone_normalized: string; note: string; created_at: string }>> {
+  return api.dialer.getLeadNotes(phoneNormalized);
+}
+
+export async function deleteDialerLeadNote(noteId: string): Promise<{ success: boolean }> {
+  return api.dialer.deleteLeadNote(noteId);
+}
+
+// ---- Lead Search ----
+
+export async function searchDialerLeads(query: string, limit?: number): Promise<any[]> {
+  return api.dialer.searchLeads(query, limit);
+}
+
+// ---- Paginated Call History ----
+
+export async function fetchDialerCallHistoryPaginated(
+  limit?: number,
+  offset?: number,
+  filters?: { direction?: string; sentiment?: string }
+): Promise<{ calls: any[]; total: number }> {
+  return api.dialer.getCallHistoryPaginated(limit, offset, filters);
+}
+
+export async function searchDialerTranscripts(
+  query: string,
+  options?: { phoneNormalized?: string; topN?: number }
+): Promise<any[]> {
+  return api.dialer.searchTranscripts(query, options);
+}
+
+export async function getDialerPreCallContext(
+  phoneNormalized: string
+): Promise<{
+  hasMemory: boolean;
+  summary: string | null;
+  keyFacts: string[];
+  sentiment: string | null;
+  totalCalls: number;
+  lastCallDate: string | null;
+}> {
+  return api.dialer.getPreCallContext(phoneNormalized);
+}
+
+export async function backfillDialerEmbeddings(): Promise<{
+  total: number;
+  chunked: number;
+  embedded: number;
+  errors: number;
+}> {
+  return api.dialer.backfillEmbeddings();
 }

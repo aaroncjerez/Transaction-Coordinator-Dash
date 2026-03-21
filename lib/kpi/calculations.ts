@@ -6,6 +6,8 @@ import type {
   Bottleneck,
   TeamScorecard,
   StatusColor,
+  WoWAnalysis,
+  WoWAlert,
 } from './types.js';
 import { TEAM_MEMBERS, TARGETS, STATUS_THRESHOLDS, getStatus } from './constants.js';
 
@@ -227,8 +229,8 @@ export function buildTeamScorecards(
   return TEAM_MEMBERS.filter((m) => m.isActive).map((member) => {
     const kpi = aggregate.byTeamMember[member.name.toLowerCase()];
 
-    let primaryMetric: TeamScorecard['primaryMetric'];
-    let secondaryMetric: TeamScorecard['secondaryMetric'];
+    let primaryMetric: TeamScorecard['primaryMetric'] = { label: '', current: 0, target: 0, unit: '' };
+    let secondaryMetric: TeamScorecard['secondaryMetric'] = { label: '', value: 0, unit: '' };
     let hotLeadsMetric: TeamScorecard['hotLeadsMetric'];
     let postCallTimeMetric: TeamScorecard['postCallTimeMetric'];
     let funnelMetrics: TeamScorecard['funnelMetrics'];
@@ -268,10 +270,10 @@ export function buildTeamScorecards(
           conversion2: qualificationRate,
         };
 
-        // Hot leads vs $500K target: 10 hot leads/week per cold texter
+        // Hot leads: 1/day = 5/week
         hotLeadsMetric = {
           current: hotLeads,
-          target: 10,
+          target: 5,
         };
 
         // Status based on CONVERSION RATES, not volume
@@ -283,50 +285,6 @@ export function buildTeamScorecards(
           status = 'green';
           isCrushingIt = leadsPerText >= 0.2 && qualificationRate >= 30; // Exceptional
         } else if (goodTextToLead || qualificationRate >= 20) {
-          status = 'yellow';
-        } else {
-          status = 'red';
-        }
-        break;
-
-      case 'cold_caller':
-        const conversations = kpi?.conversations || 0;
-        const conversationsTarget = member.targets.conversations || 125;
-        const callHotLeads = kpi?.hotLeadsCall || 0;
-        const avgPostCallTime = kpi?.avgPostCallTime || 0;
-
-        // Primary: Conversations (60s+) — meaningful phone interactions
-        // Floor: 75–125, Good: 125–200, Strong: 200–300, Elite: 300–400+
-        primaryMetric = {
-          label: 'conversations (60s+)',
-          current: conversations,
-          target: conversationsTarget,
-          unit: 'convos',
-        };
-        secondaryMetric = {
-          label: 'hot leads',
-          value: callHotLeads,
-          unit: '',
-        };
-
-        // Post-call time metric (lower is better — goal: under 60s)
-        if (avgPostCallTime > 0) {
-          const pctStatus: StatusColor =
-            avgPostCallTime <= 60 ? 'green' :
-            avgPostCallTime <= 90 ? 'yellow' : 'red';
-          postCallTimeMetric = {
-            value: avgPostCallTime,
-            target: 60,
-            status: pctStatus,
-          };
-        }
-
-        // Status based on conversations (60s+)
-        // Green: ≥125 (Good tier), Yellow: ≥75 (Floor tier), Red: <75
-        if (conversations >= conversationsTarget) {
-          status = 'green';
-          isCrushingIt = conversations >= 200; // Strong tier = crushing it
-        } else if (conversations >= 75) {
           status = 'yellow';
         } else {
           status = 'red';
@@ -359,34 +317,32 @@ export function buildTeamScorecards(
         }
         break;
 
-      case 'comper':
-        const leadsPriced = kpi?.leadsPriced || 0;
-        const medianSpeed = kpi?.medianPricingSpeed || 0;
-        const leadsPricedTarget = 30; // Target: 30 leads priced per week
+      case 'lead_manager':
+        const edOffers = kpi?.offersSent || 0;
+        const edOfferTarget = member.targets.offersSent || 20;
 
         primaryMetric = {
-          label: 'leads priced',
-          current: leadsPriced,
-          target: leadsPricedTarget,
-          unit: 'leads',
+          label: 'offers sent',
+          current: edOffers,
+          target: edOfferTarget,
+          unit: 'offers',
         };
-
         secondaryMetric = {
-          label: 'median pricing time',
-          value: medianSpeed,
-          unit: 'min',
+          label: 'hot leads worked',
+          value: (kpi?.hotLeadsText || 0) + (kpi?.hotLeadsCall || 0),
+          unit: '',
         };
 
-        // Status based on leads priced volume
-        if (leadsPriced >= leadsPricedTarget) {
+        if (edOffers >= edOfferTarget) {
           status = 'green';
-          isCrushingIt = leadsPriced >= leadsPricedTarget * 1.2; // 120% = crushing (36+ leads)
-        } else if (leadsPriced >= leadsPricedTarget * 0.7) { // 70% threshold (21+ leads)
+          isCrushingIt = edOffers >= edOfferTarget * 1.2;
+        } else if (edOffers >= edOfferTarget * 0.6) {
           status = 'yellow';
         } else {
           status = 'red';
         }
         break;
+
     }
 
     return {
@@ -406,4 +362,142 @@ export function buildTeamScorecards(
 export function isTeamWinning(aggregate: WeeklyAggregate | null): boolean {
   if (!aggregate) return false;
   return aggregate.totalContractsSigned >= TARGETS.weeklyContractsSigned * 0.8;
+}
+
+// Week-over-week analysis — detect major front-end issues
+export function analyzeWeekOverWeek(
+  current: WeeklyAggregate | null,
+  previous: WeeklyAggregate | null,
+): WoWAnalysis | null {
+  if (!current || !previous) return null;
+
+  const alerts: WoWAlert[] = [];
+
+  function pctChange(curr: number, prev: number): number {
+    if (prev === 0) return curr > 0 ? 100 : 0;
+    return ((curr - prev) / prev) * 100;
+  }
+
+  function check(
+    metric: string,
+    curr: number,
+    prev: number,
+    owner: string,
+    opts: {
+      criticalDropPct?: number;
+      warningDropPct?: number;
+      positiveLiftPct?: number;
+      higherIsBetter?: boolean;
+    } = {},
+  ) {
+    const {
+      criticalDropPct = -40,
+      warningDropPct = -20,
+      positiveLiftPct = 30,
+      higherIsBetter = true,
+    } = opts;
+    const change = pctChange(curr, prev);
+    const direction = higherIsBetter ? 1 : -1;
+    const adjustedChange = change * direction;
+
+    if (adjustedChange <= criticalDropPct) {
+      alerts.push({
+        severity: 'critical',
+        metric,
+        message: `${metric} dropped ${Math.abs(Math.round(change))}% WoW (${prev.toLocaleString()} → ${curr.toLocaleString()})`,
+        currentValue: curr,
+        previousValue: prev,
+        changePercent: Math.round(change),
+        owner,
+      });
+    } else if (adjustedChange <= warningDropPct) {
+      alerts.push({
+        severity: 'warning',
+        metric,
+        message: `${metric} down ${Math.abs(Math.round(change))}% WoW (${prev.toLocaleString()} → ${curr.toLocaleString()})`,
+        currentValue: curr,
+        previousValue: prev,
+        changePercent: Math.round(change),
+        owner,
+      });
+    } else if (adjustedChange >= positiveLiftPct && curr > 0) {
+      alerts.push({
+        severity: 'positive',
+        metric,
+        message: `${metric} up ${Math.round(change)}% WoW (${prev.toLocaleString()} → ${curr.toLocaleString()})`,
+        currentValue: curr,
+        previousValue: prev,
+        changePercent: Math.round(change),
+        owner,
+      });
+    }
+  }
+
+  // --- Top-of-funnel: Text volume ---
+  check('Text Volume', current.totalTexts, previous.totalTexts, 'John');
+
+  // --- Gross Lead Yield (goal: 1 per 600 texts = 1.67 per 1000) ---
+  const currGrossLeads = current.totalLeadsText + current.totalLeadsCall;
+  const prevGrossLeads = previous.totalLeadsText + previous.totalLeadsCall;
+  const currYield = current.totalTexts > 0 ? (currGrossLeads / current.totalTexts) * 1000 : 0;
+  const prevYield = previous.totalTexts > 0 ? (prevGrossLeads / previous.totalTexts) * 1000 : 0;
+  if (prevYield > 0) {
+    check('Gross Lead Yield', Math.round(currYield * 100) / 100, Math.round(prevYield * 100) / 100, 'John',
+      { criticalDropPct: -30, warningDropPct: -15 });
+  }
+  // Absolute yield alert: if yield drops below 1 per 1000 (half the goal)
+  if (currYield > 0 && currYield < 1.0 && current.totalTexts >= 3000) {
+    alerts.push({
+      severity: 'critical',
+      metric: 'Gross Lead Yield',
+      message: `Yield critically low at ${(currYield).toFixed(2)}/1000 texts (goal: 1.67). Check list quality.`,
+      currentValue: currYield,
+      previousValue: prevYield,
+      changePercent: prevYield > 0 ? Math.round(pctChange(currYield, prevYield)) : 0,
+      owner: 'John',
+    });
+  }
+
+  // --- Hot Leads (goal: 1/day = 5/week) ---
+  check('Hot Leads', current.totalHotLeads, previous.totalHotLeads, 'John');
+
+  // --- Edward (lead manager) offers ---
+  const edCurr = current.byTeamMember['edward'];
+  const edPrev = previous.byTeamMember['edward'];
+  if (edCurr && edPrev) {
+    check('Edward Offers', edCurr.offersSent, edPrev.offersSent, 'Edward');
+  }
+
+  // --- Real Offers (Aaron) ---
+  check('Real Offers Sent', current.totalOffersSent, previous.totalOffersSent, 'Aaron');
+
+  // --- Contracts Sent ---
+  check('Contracts Sent', current.totalContractsSent, previous.totalContractsSent, 'Aaron',
+    { criticalDropPct: -50, warningDropPct: -25 });
+
+  // --- Deals Closed ---
+  check('Deals Closed', current.totalContractsSigned, previous.totalContractsSigned, 'Aaron',
+    { criticalDropPct: -50, warningDropPct: -25 });
+
+  // Sort: critical first, then warning, then positive
+  const severityOrder: Record<string, number> = { critical: 0, warning: 1, positive: 2 };
+  alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+  // Build summary
+  const critCount = alerts.filter(a => a.severity === 'critical').length;
+  const warnCount = alerts.filter(a => a.severity === 'warning').length;
+  const posCount = alerts.filter(a => a.severity === 'positive').length;
+
+  let summary: string;
+  if (critCount > 0) {
+    summary = `${critCount} critical issue${critCount > 1 ? 's' : ''} detected. Immediate attention needed.`;
+  } else if (warnCount > 0) {
+    summary = `${warnCount} metric${warnCount > 1 ? 's' : ''} trending down. Monitor closely.`;
+  } else if (posCount > 0) {
+    summary = `Strong week — ${posCount} metric${posCount > 1 ? 's' : ''} improving.`;
+  } else {
+    summary = 'Holding steady — no major changes week-over-week.';
+  }
+
+  return { alerts, summary };
 }

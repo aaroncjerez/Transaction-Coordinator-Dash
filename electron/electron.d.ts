@@ -36,9 +36,11 @@ export interface ElectronAPI {
   };
 
   ai: {
-    askQuestion: (query: string, dealId: string) => Promise<{ answer: string }>;
+    askQuestion: (query: string, dealId: string) => Promise<{ answer: string; sources?: Array<{ file_name: string; chunk_index: number }> }>;
     analyzeDeal: (dealId: string) => Promise<any>;
     getDealAnalysis: (dealId: string) => Promise<any>;
+    backfillEmbeddings: () => Promise<{ embedded: number; errors: number; total: number; error?: string }>;
+    onBackfillProgress: (callback: (data: { current: number; total: number }) => void) => void;
   };
 
   pdf: {
@@ -54,6 +56,7 @@ export interface ElectronAPI {
     listFiles: (dealId: string, category?: string) => Promise<any[]>;
     deleteFile: (fileId: string) => Promise<{ success: boolean }>;
     getFilePath: (relativePath: string) => Promise<string>;
+    readPdf: (filePath: string) => Promise<{ data: string | null; error: string | null }>;
   };
 
   deadlines: {
@@ -95,6 +98,29 @@ export interface ElectronAPI {
     getAllFileSyncStatuses: () => Promise<FubFileSyncState[]>;
     triggerFileSync: (dealId?: string) => Promise<{ success: boolean; synced: number; errors: number }>;
     getDealsWithFubLinks: () => Promise<{ id: string; deal_name: string; fub_person_id: string }[]>;
+    // Browser file sync
+    browserSyncDeal: (dealId: string) => Promise<{ filesFound: number; filesDownloaded: number; filesAnalyzed: number }>;
+    browserSyncAll: () => Promise<{ totalDeals: number; totalFilesFound: number; totalFilesDownloaded: number; errors: number }>;
+    closeFubBrowser: () => Promise<{ success: boolean }>;
+    onBrowserSyncProgress: (callback: (data: BrowserSyncProgress) => void) => void;
+    offBrowserSyncProgress: () => void;
+    onBrowserBulkComplete: (callback: (data: { totalDeals: number; totalFilesFound: number; totalFilesDownloaded: number; errors: number }) => void) => void;
+    offBrowserBulkComplete: () => void;
+  };
+
+  dealSummary: {
+    generate: (dealId: string) => Promise<{ success: boolean; summary?: string; error?: string }>;
+    get: (dealId: string) => Promise<{ deal_id: string; summary: string; generated_at: string } | null>;
+  };
+
+  notes: {
+    create: (dealId: string, content: string, pushToFub: boolean) => Promise<{ success: boolean; id?: number }>;
+    list: (dealId: string) => Promise<Array<{ id: number; deal_id: string; content: string; pushed_to_fub: number; created_at: string }>>;
+  };
+
+  chat: {
+    saveMessage: (dealId: string, role: string, content: string, sources?: string) => Promise<any>;
+    getMessages: (dealId: string) => Promise<Array<{ id: number; deal_id: string; role: string; content: string; sources: string | null; created_at: string }>>;
   };
 
   leads: {
@@ -129,7 +155,7 @@ export interface ElectronAPI {
   };
 
   dialer: {
-    getCallQueue: (limit?: number) => Promise<any[]>;
+    getCallQueue: (limit?: number, listIds?: string[]) => Promise<any[]>;
     getCallHistory: (limit?: number, filters?: { search?: string; status?: string; sentiment?: string }) => Promise<any[]>;
     getCallsForLead: (phoneNormalized: string) => Promise<any[]>;
     getLeadById: (id: string) => Promise<any>;
@@ -145,36 +171,65 @@ export interface ElectronAPI {
     reviewCall: (callId: string) => Promise<any>;
     reviewRecentCalls: (limit?: number) => Promise<any>;
     getTodayCallCount: () => Promise<number>;
-    onReviewProgress: (callback: (data: { current: number; total: number; callId: string }) => void) => void;
-    onNewCalls: (callback: (data: { count: number }) => void) => void;
-    uploadLeads: (leads: any[], batchId: string) => Promise<import('../types').UploadBatchResult>;
-    onUploadProgress: (callback: (data: { processed: number; total: number }) => void) => void;
+    onReviewProgress: (callback: (data: { current: number; total: number; callId: string }) => void) => () => void;
+    onNewCalls: (callback: (data: { count: number }) => void) => () => void;
+    uploadLeads: (leads: any[], batchId: string, listName?: string) => Promise<import('../types').UploadBatchResult>;
+    onUploadProgress: (callback: (data: { processed: number; total: number }) => void) => () => void;
     syncFubDNC: () => Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number }>;
-    onFubSyncProgress: (callback: (data: { stage: string; fetched: number; phones: number }) => void) => void;
+    syncFubExceptUnreachedToDNC: () => Promise<{ total: number; added: number; duplicates: number; errors: number; fub_people_fetched: number; unique_phones: number; skippedUnreached: number }>;
+    onFubSyncProgress: (callback: (data: { stage: string; fetched: number; phones: number }) => void) => () => void;
     getUploadBatches: () => Promise<Array<{ batch_id: string; lead_count: number; uploaded_at: string }>>;
     getUploadBatchLeads: (batchId: string) => Promise<Array<{ id: string; first_name: string; last_name: string; phone_normalized: string; county: string; state: string; created_at: string }>>;
     deleteUploadBatch: (batchId: string) => Promise<{ deleted: number }>;
     callLead: (lead: any) => Promise<{ call_id: string; status: string }>;
 
+    // Lists
+    getLists: () => Promise<Array<{ id: string; name: string; lead_count: number; actual_lead_count: number; created_at: string }>>;
+
+    // Browse all leads in a list (no cadence filtering)
+    getLeadsByList: (listIds: string[], limit?: number) => Promise<any[]>;
+
     // Local cache reads
-    getLocalCallQueue: (limit?: number) => Promise<any[]>;
+    getLocalCallQueue: (limit?: number, listIds?: string[]) => Promise<any[]>;
     getLocalCallHistory: (limit?: number, filters?: any) => Promise<any[]>;
     getLocalDNCList: () => Promise<any[]>;
     getLocalDNCStats: () => Promise<any>;
     getLocalInboundCalls: (limit?: number) => Promise<any[]>;
 
-    // Inbound calls (Supabase fallback)
+    // Inbound calls
     getInboundCalls: (limit?: number) => Promise<any[]>;
 
     // Batch dial
-    batchDial: (leadIds: string[]) => Promise<import('../types').BatchDialResult>;
-    onBatchDialProgress: (callback: (data: any) => void) => void;
+    batchDial: (leadIds: string[], fromNumbers?: string | string[]) => Promise<import('../types').BatchDialResult>;
+    getNumberHealth: (fromNumbers: string[]) => Promise<Array<{ phone: string; totalCalls: number; connected: number; connectRate: number; flagged: boolean }>>;
+    getNumberThrottle: (fromNumbers: string[]) => Promise<Array<{
+      phone: string; callsToday: number; callsThisHour: number;
+      dailyLimit: number; hourlyLimit: number; dailyRemaining: number; hourlyRemaining: number;
+      paused: boolean; pausedReason: string | null; lastCallAt: string | null;
+      throttled: boolean; throttleReason: string | null;
+    }>>;
+    setNumberLimits: (phone: string, dailyLimit?: number, hourlyLimit?: number) => Promise<{ success: boolean }>;
+    setNumberPaused: (phone: string, paused: boolean, reason?: string) => Promise<{ success: boolean }>;
+    getCampaignCapacity: (fromNumbers: string[]) => Promise<{
+      totalDailyRemaining: number; totalHourlyRemaining: number;
+      availableNumbers: string[]; throttledNumbers: string[];
+    }>;
+    onBatchDialProgress: (callback: (data: any) => void) => () => void;
 
     // Inbound call notification
-    onInboundCall: (callback: (data: any) => void) => void;
+    onInboundCall: (callback: (data: any) => void) => () => void;
 
     // Cache update notification
-    onCacheUpdated: (callback: (data: { type: string }) => void) => void;
+    onCacheUpdated: (callback: (data: { type: string }) => void) => () => void;
+
+    // Retell phone numbers
+    getRetellPhoneNumbers: () => Promise<Array<{
+      phone_number: string;
+      phone_number_pretty: string;
+      nickname: string | null;
+      inbound_agent_id: string | null;
+      outbound_agent_id: string | null;
+    }>>;
 
     // Force sync
     forceSync: () => Promise<{ success: boolean }>;
@@ -189,11 +244,43 @@ export interface ElectronAPI {
     // Sync + poller health status
     getSyncStatus: () => Promise<{
       running: boolean;
-      supabaseConfigured: boolean;
       retellConfigured: boolean;
-      fastSync: { ok: boolean; error: string | null; lastRun: string | null };
-      fullSync: { ok: boolean; error: string | null; lastRun: string | null };
+      sync: { ok: boolean; error: string | null; lastRun: string | null };
     }>;
+
+    // Campaign pause/resume
+    pauseBatchDial: () => Promise<{ success: boolean }>;
+    resumeBatchDial: () => Promise<{ success: boolean }>;
+    isBatchPaused: () => Promise<boolean>;
+
+    // Lead actions
+    setLeadOutcome: (phoneNormalized: string, outcome: string, reason?: string) => Promise<{ success: boolean }>;
+    clearLeadOutcome: (phoneNormalized: string) => Promise<{ success: boolean }>;
+    setLeadCallback: (phoneNormalized: string, callbackDatetime: string | null) => Promise<{ success: boolean }>;
+    addLeadNote: (phoneNormalized: string, note: string) => Promise<{ id: string }>;
+    getLeadNotes: (phoneNormalized: string) => Promise<Array<{ id: string; phone_normalized: string; note: string; created_at: string }>>;
+    deleteLeadNote: (noteId: string) => Promise<{ success: boolean }>;
+
+    // Lead search
+    searchLeads: (query: string, limit?: number) => Promise<Array<{
+      id: string; phone_normalized: string; first_name: string; last_name: string;
+      county: string; state: string; rapport_level: string; final_outcome: string | null; list_name: string;
+    }>>;
+
+    // Paginated call history
+    getCallHistoryPaginated: (limit?: number, offset?: number, filters?: any) => Promise<{ calls: any[]; total: number }>;
+
+    // RAG: Transcript search + conversation memory
+    searchTranscripts: (query: string, options?: { phoneNormalized?: string; topN?: number }) => Promise<any[]>;
+    getPreCallContext: (phoneNormalized: string) => Promise<{
+      hasMemory: boolean;
+      summary: string | null;
+      keyFacts: string[];
+      sentiment: string | null;
+      totalCalls: number;
+      lastCallDate: string | null;
+    }>;
+    backfillEmbeddings: () => Promise<{ total: number; chunked: number; embedded: number; errors: number }>;
 
     // Call guard audit log
     getGuardLog: (limit?: number) => Promise<Array<{
@@ -208,6 +295,18 @@ export interface ElectronAPI {
       created_at: string;
     }>>;
   };
+}
+
+export interface BrowserSyncProgress {
+  dealId: string;
+  dealName: string;
+  status: 'navigating' | 'waiting_login' | 'scanning' | 'downloading' | 'analyzing' | 'done' | 'error' | 'skipped';
+  filesFound: number;
+  filesDownloaded: number;
+  currentFile?: string;
+  error?: string;
+  dealIndex?: number;
+  dealTotal?: number;
 }
 
 export interface FubActivity {

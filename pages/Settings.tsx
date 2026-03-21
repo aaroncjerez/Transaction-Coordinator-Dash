@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders, Search, Loader2, Wrench } from 'lucide-react';
-import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync, testSlackWebhook, crawlAllDeadlines } from '../lib/database';
+import { Key, Database, RefreshCw, CheckCircle, XCircle, Cloud, AlertTriangle, Sliders, Search, Loader2, Wrench, Globe } from 'lucide-react';
+import { getSetting, setSetting, getAllSettings, getAllFubFileSyncStatuses, getDealsWithFubLinks, triggerFubFileSync, getFubPersonSyncStatus, triggerFubPersonSync, testSlackWebhook, crawlAllDeadlines, browserSyncAllFiles, onFubBrowserProgress, onFubBrowserBulkComplete } from '../lib/database';
 import { Button } from '../components/ui/Button';
 import { TopBar } from '../components/TopBar';
 import { useOpenCommandPalette } from '../components/Layout';
@@ -20,12 +20,12 @@ const API_KEYS: ApiKeyConfig[] = [
   { key: 'fub_account_name', label: 'FUB Account Name', placeholder: 'jerezland', envFallback: 'FUB_ACCOUNT_NAME' },
   { key: 'anthropic_api_key', label: 'Anthropic API Key', placeholder: 'sk-ant-...', envFallback: 'ANTHROPIC_API_KEY' },
   { key: 'slack_webhook_url', label: 'Slack Webhook URL', placeholder: 'https://hooks.slack.com/services/...', envFallback: 'SLACK_WEBHOOK_URL' },
-  { key: 'supabase_url', label: 'Supabase URL (AI Dialer)', placeholder: 'https://xxx.supabase.co', envFallback: 'SUPABASE_URL' },
-  { key: 'supabase_anon_key', label: 'Supabase Anon Key (AI Dialer)', placeholder: 'eyJ...', envFallback: 'SUPABASE_ANON_KEY' },
+  { key: 'voyage_api_key', label: 'Voyage AI API Key (Embeddings)', placeholder: 'pa-...', envFallback: 'VOYAGE_API_KEY' },
   { key: 'n8n_trigger_webhook', label: 'n8n Cadence Webhook (Railway)', placeholder: 'https://cheerful-kindness-production.up.railway.app/webhook/...', envFallback: 'N8N_TRIGGER_WEBHOOK' },
   { key: 'retell_api_key', label: 'Retell API Key', placeholder: 'key_...', envFallback: 'RETELL_API_KEY' },
   { key: 'retell_agent_id', label: 'Retell Agent ID', placeholder: 'agent_...', envFallback: 'RETELL_AGENT_ID' },
-  { key: 'retell_from_number', label: 'Retell From Number', placeholder: '+16401234567', envFallback: 'RETELL_FROM_NUMBER' },
+  { key: 'retell_from_number', label: 'Retell From Number (default)', placeholder: '+16401234567', envFallback: 'RETELL_FROM_NUMBER' },
+  { key: 'retell_from_numbers', label: 'All From Numbers (comma-separated)', placeholder: '+16402529810,+16018212103', envFallback: 'RETELL_FROM_NUMBERS' },
 ];
 
 export const Settings: React.FC = () => {
@@ -45,6 +45,8 @@ export const Settings: React.FC = () => {
   const [testingSlack, setTestingSlack] = useState(false);
   const [scanningDocs, setScanningDocs] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [browserSyncing, setBrowserSyncing] = useState(false);
+  const [browserProgress, setBrowserProgress] = useState<string>('');
 
   useEffect(() => {
     loadSettings();
@@ -114,6 +116,39 @@ export const Settings: React.FC = () => {
       showToast({ message: 'FUB sync failed', type: 'error' });
     } finally {
       setFubSyncing(false);
+    }
+  };
+
+  const handleBrowserSyncAll = async () => {
+    setBrowserSyncing(true);
+    setBrowserProgress('Starting browser sync...');
+    const cleanupProgress = onFubBrowserProgress((data: any) => {
+      const labels: Record<string, string> = {
+        navigating: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: Opening...`,
+        waiting_login: 'Please log in to FUB in the browser window...',
+        scanning: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: Scanning files...`,
+        downloading: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: Downloading ${data.filesDownloaded}/${data.filesFound}...`,
+        analyzing: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: Analyzing PDFs...`,
+        done: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: ${data.filesDownloaded} files downloaded`,
+        error: `[${data.dealIndex || '?'}/${data.dealTotal || '?'}] ${data.dealName}: Error`,
+      };
+      setBrowserProgress(labels[data.status] || data.status);
+    });
+    const cleanupComplete = onFubBrowserBulkComplete((data: any) => {
+      setBrowserProgress(`Complete: ${data.totalFilesDownloaded} files from ${data.totalDeals} deals${data.errors > 0 ? ` (${data.errors} errors)` : ''}`);
+      setTimeout(() => { setBrowserSyncing(false); setBrowserProgress(''); }, 5000);
+      loadFubStatus();
+    });
+    try {
+      await browserSyncAllFiles();
+    } catch (e: any) {
+      console.error('Browser sync all failed:', e);
+      showToast({ message: 'Browser sync failed', type: 'error' });
+      setBrowserSyncing(false);
+      setBrowserProgress('');
+    } finally {
+      cleanupProgress();
+      cleanupComplete();
     }
   };
 
@@ -275,7 +310,7 @@ export const Settings: React.FC = () => {
           {/* FUB Person Sync Section */}
           <Section icon={<RefreshCw size={16} />} title="FUB Person Sync">
             <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-3">
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <StatBox label="Total Deals" value={fubPersonSync?.totalDeals ?? '\u2014'} />
                 <StatBox label="Synced" value={fubPersonSync?.synced ?? '\u2014'} color="text-emerald-600" />
                 <StatBox label="Errors" value={fubPersonSync?.errors ?? '\u2014'} />
@@ -302,7 +337,7 @@ export const Settings: React.FC = () => {
           {/* FUB File Sync Section */}
           <Section icon={<Cloud size={16} />} title="FUB File Sync">
             <div className="bg-white rounded-card border border-gray-200 shadow-xs p-4 space-y-4">
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <StatBox label="Linked Deals" value={fubLinkedDeals.length} />
                 <StatBox label="Synced" value={fubSyncStatuses.filter(s => s.last_status === 'synced').length} color="text-emerald-600" />
                 <StatBox label="Pending" value={fubSyncStatuses.filter(s => s.last_status === 'pending' || s.last_status === 'syncing').length} />
@@ -343,17 +378,37 @@ export const Settings: React.FC = () => {
                 <p className="text-micro text-gray-400">
                   Background sync runs every 5 minutes for deals linked to FUB.
                 </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleFubSyncAll}
-                  disabled={fubSyncing || fubLinkedDeals.length === 0}
-                  isLoading={fubSyncing}
-                >
-                  <RefreshCw size={12} className="mr-1.5" />
-                  Sync All Now
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleBrowserSyncAll}
+                    disabled={browserSyncing || fubLinkedDeals.length === 0}
+                    isLoading={browserSyncing}
+                  >
+                    <Globe size={12} className="mr-1.5" />
+                    Browser Sync All
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleFubSyncAll}
+                    disabled={fubSyncing || fubLinkedDeals.length === 0}
+                    isLoading={fubSyncing}
+                  >
+                    <RefreshCw size={12} className="mr-1.5" />
+                    API Sync All
+                  </Button>
+                </div>
               </div>
+
+              {/* Browser Sync Progress */}
+              {browserProgress && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
+                  {browserSyncing && <Loader2 size={12} className="animate-spin text-blue-600" />}
+                  <span className="text-micro text-blue-700 truncate">{browserProgress}</span>
+                </div>
+              )}
             </div>
           </Section>
 

@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Home, LayoutGrid, CheckSquare, TrendingUp, Archive, Settings, Landmark, Phone } from 'lucide-react';
+import { TrendingUp, Settings, Landmark, Phone } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { getFubPersonSyncStatus, fetchAllDeals, fetchAllTasks, fetchDialerTodayCallCount } from '../lib/database';
+import { getFubPersonSyncStatus, fetchDialerTodayCallCount } from '../lib/database';
 
 interface NavItemProps {
   to: string;
   icon: any;
   label: string;
   count?: number;
+  onClick?: () => void;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, count }) => (
+const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, count, onClick }) => (
   <NavLink
     to={to}
     end={to === '/'}
+    onClick={onClick}
     className={({ isActive }) =>
       cn(
         'flex items-center gap-2.5 px-3 py-2 text-sm font-medium transition-all border-l-[3px] group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:rounded-r',
@@ -34,28 +36,19 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, count }) => (
   </NavLink>
 );
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  /** Render in mobile drawer mode (no fixed positioning) */
+  mobile?: boolean;
+  /** Called after navigation click (to close drawer) */
+  onNavigate?: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ mobile = false, onNavigate } = {}) => {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
-  const [dealCount, setDealCount] = useState(0);
-  const [pendingTaskCount, setPendingTaskCount] = useState(0);
   const [dialerCallCount, setDialerCallCount] = useState(0);
 
   useEffect(() => {
     const loadCounts = async () => {
-      try {
-        const [deals, tasks] = await Promise.all([fetchAllDeals(), fetchAllTasks()]);
-        const cancelledDealIds = new Set(
-          (deals as any[]).filter(d => d.stage === 'Cancelled').map(d => d.id)
-        );
-        setDealCount((deals as any[]).length - cancelledDealIds.size);
-        setPendingTaskCount(
-          (tasks as any[]).filter(t =>
-            (t.status === 'To Do' || t.status === 'In Progress') &&
-            !cancelledDealIds.has(t.deal_id)
-          ).length
-        );
-      } catch { /* ignore */ }
-
       try {
         const calls = await fetchDialerTodayCallCount();
         setDialerCallCount(calls);
@@ -80,7 +73,12 @@ export const Sidebar: React.FC = () => {
   }, []);
 
   return (
-    <aside className="hidden md:flex w-56 bg-sidebar flex-col h-screen fixed left-0 top-0 z-40">
+    <aside className={cn(
+      'w-56 bg-sidebar flex-col',
+      mobile
+        ? 'flex h-full'
+        : 'hidden md:flex h-screen fixed left-0 top-0 z-40'
+    )}>
       {/* Logo */}
       <div className="px-4 pt-8 pb-4 flex items-center gap-2.5">
         <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
@@ -94,13 +92,9 @@ export const Sidebar: React.FC = () => {
 
       {/* Nav Links */}
       <nav className="flex-1 mt-1 space-y-0.5" aria-label="Main navigation">
-        <NavItem to="/" icon={Home} label="Dashboard" />
-        <NavItem to="/pipeline" icon={LayoutGrid} label="Pipeline" count={dealCount} />
-        <NavItem to="/tasks" icon={CheckSquare} label="Tasks" count={pendingTaskCount} />
-        <NavItem to="/dialer" icon={Phone} label="AI Dialer" count={dialerCallCount} />
-        <NavItem to="/kpis" icon={TrendingUp} label="KPIs" />
-        <NavItem to="/archive" icon={Archive} label="Archive" />
-        <NavItem to="/settings" icon={Settings} label="Settings" />
+        <NavItem to="/kpis" icon={TrendingUp} label="KPIs" onClick={onNavigate} />
+        <NavItem to="/dialer" icon={Phone} label="AI Dialer" count={dialerCallCount} onClick={onNavigate} />
+        <NavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
       </nav>
 
       {/* Bottom: compact sync status */}

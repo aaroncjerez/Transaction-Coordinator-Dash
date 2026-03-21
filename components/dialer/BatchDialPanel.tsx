@@ -1,45 +1,61 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, Pause, Play, Square, Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
-import { startBatchDial, onBatchDialProgress } from '../../lib/database';
+import { Phone, Pause, Play, Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { startBatchDial, onBatchDialProgress, pauseBatchDial, resumeBatchDial } from '../../lib/database';
 import { useToast } from '../ui/Toast';
 import type { BatchDialProgress, BatchDialResult } from '../../types';
 
 interface BatchDialPanelProps {
   selectedLeadIds: string[];
   onClear: () => void;
+  /** When true, start dialing immediately on mount without waiting for button click */
+  autoStart?: boolean;
+  /** Override from_number for outbound calls */
+  fromNumber?: string;
 }
 
-export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds, onClear }) => {
+export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds, onClear, autoStart, fromNumber }) => {
   const { showToast } = useToast();
   const [running, setRunning] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState<BatchDialProgress | null>(null);
   const [result, setResult] = useState<BatchDialResult | null>(null);
 
   useEffect(() => {
-    onBatchDialProgress((data) => {
+    const unsub = onBatchDialProgress((data) => {
       setProgress(data);
+      if (data.status === 'paused') {
+        setPaused(true);
+      } else if (data.status === 'running') {
+        setPaused(false);
+      }
       if (data.status === 'completed' || data.status === 'failed') {
         setRunning(false);
+        setPaused(false);
       }
     });
+    return () => unsub();
   }, []);
+
+  // Auto-start dialing on mount when autoStart is true
+  useEffect(() => {
+    if (autoStart && selectedLeadIds.length > 0 && !running && !result) {
+      handleStart();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart]);
 
   const handleStart = async () => {
     if (selectedLeadIds.length === 0) {
       showToast({ message: 'No leads selected', type: 'error' });
       return;
     }
-    if (selectedLeadIds.length > 50) {
-      showToast({ message: 'Max 50 leads per batch', type: 'error' });
-      return;
-    }
-
     setRunning(true);
     setResult(null);
     setProgress(null);
+    setPaused(false);
 
     try {
-      const res = await startBatchDial(selectedLeadIds);
+      const res = await startBatchDial(selectedLeadIds, fromNumber);
       setResult(res);
       showToast({
         message: `Batch complete: ${res.dialed} dialed, ${res.connected} connected`,
@@ -49,7 +65,18 @@ export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds,
       showToast({ message: err.message || 'Batch dial failed', type: 'error' });
     } finally {
       setRunning(false);
+      setPaused(false);
     }
+  };
+
+  const handlePause = async () => {
+    await pauseBatchDial();
+    setPaused(true);
+  };
+
+  const handleResume = async () => {
+    await resumeBatchDial();
+    setPaused(false);
   };
 
   if (selectedLeadIds.length === 0 && !running && !result) return null;
@@ -89,10 +116,30 @@ export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds,
           )}
 
           {running && (
-            <span className="text-caption text-blue-600 font-medium flex items-center gap-1.5">
-              <Loader2 size={12} className="animate-spin" />
-              Dialing...
-            </span>
+            <div className="flex items-center gap-2">
+              {paused ? (
+                <button
+                  onClick={handleResume}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-caption font-medium rounded-md hover:bg-emerald-700 transition-colors"
+                >
+                  <Play size={12} /> Resume
+                </button>
+              ) : (
+                <button
+                  onClick={handlePause}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white text-caption font-medium rounded-md hover:bg-amber-600 transition-colors"
+                >
+                  <Pause size={12} /> Pause
+                </button>
+              )}
+              <span className={`text-caption font-medium flex items-center gap-1.5 ${paused ? 'text-amber-600' : 'text-blue-600'}`}>
+                {paused ? (
+                  <><Pause size={12} /> Paused</>
+                ) : (
+                  <><Loader2 size={12} className="animate-spin" /> Dialing...</>
+                )}
+              </span>
+            </div>
           )}
         </div>
       </div>
@@ -102,15 +149,17 @@ export const BatchDialPanel: React.FC<BatchDialPanelProps> = ({ selectedLeadIds,
         <div className="space-y-2">
           <div className="bg-blue-100 rounded-full h-2 overflow-hidden">
             <div
-              className="bg-blue-500 h-full rounded-full transition-all duration-500"
+              className={`h-full rounded-full transition-all duration-500 ${paused ? 'bg-amber-400' : 'bg-blue-500'}`}
               style={{ width: `${pct}%` }}
             />
           </div>
           <div className="flex items-center justify-between text-micro text-gray-600">
             <span>
-              {progress.currentLeadName
-                ? `Calling ${progress.currentLeadName}...`
-                : `Batch ${progress.currentBatch}/${progress.totalBatches}`}
+              {paused
+                ? 'Campaign paused — click Resume to continue'
+                : progress.currentLeadName
+                  ? `Calling ${progress.currentLeadName}...`
+                  : `Batch ${progress.currentBatch}/${progress.totalBatches}`}
             </span>
             <span className="tabular-nums">{progress.dialedCount}/{progress.totalLeads} ({pct}%)</span>
           </div>

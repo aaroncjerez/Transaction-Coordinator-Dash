@@ -56,6 +56,8 @@ export const LEGACY_FUB_STAGE_MAP: Record<string, DealStage> = {
   'Sale Pending': 'Sale escrow',
   'Closed': 'Sold',
   'Dead': 'Cancelled',
+  'Nurture': 'Cancelled',
+  'Trash': 'Cancelled',
 };
 
 /**
@@ -103,6 +105,8 @@ export const QUALIFYING_FUB_STAGES: string[] = [
   'Sale Pending',
   'Closed',
   'Dead',
+  'Nurture',
+  'Trash',
 ];
 
 /**
@@ -121,8 +125,86 @@ export function resolveFubStage(fubStage: string): DealStage | null {
   if (LEGACY_FUB_STAGE_MAP[fubStage]) {
     return LEGACY_FUB_STAGE_MAP[fubStage];
   }
-  // Trash or unknown → filter out
-  if (fubStage === 'Trash') return null;
+  // Unknown → filter out
   console.warn(`[StageMap] Unknown FUB stage: "${fubStage}"`);
   return null;
+}
+
+// ==========================================
+// FUB Deal Pipeline Stage Mapping
+// ==========================================
+
+/**
+ * App stage → FUB Deal Pipeline stage name.
+ * The FUB Deal Pipeline uses different stage names than person stages.
+ * Cancelled deals are not pushed to the pipeline.
+ */
+export const APP_TO_FUB_DEAL_STAGE: Record<string, string> = {
+  'Purchase Agreement Signed': 'Purchase Contract',
+  'Due Diligence': 'Hold',
+  'Send to escrow': 'Purchase Pending',
+  'Purchase escrow': 'Purchase Pending',
+  'Purchased': 'Purchase Closed',
+  'Listed For Sale': 'Listed',
+  'Sale escrow': 'Pending Sale',
+  'Sold': 'Sale Closed',
+};
+
+/**
+ * FUB Deal Pipeline stage name → app stage.
+ * Used for FUB→App reverse sync.
+ * Note: "Purchase Pending" maps to "Send to escrow" (first of two app stages).
+ */
+export const FUB_DEAL_STAGE_TO_APP: Record<string, DealStage> = {
+  'Purchase Contract': 'Purchase Agreement Signed',
+  'Hold': 'Due Diligence',
+  'Purchase Pending': 'Send to escrow',
+  'Purchase Closed': 'Purchased',
+  'Listed': 'Listed For Sale',
+  'Pending Sale': 'Sale escrow',
+  'Sale Closed': 'Sold',
+};
+
+/**
+ * Convert an app stage to the FUB Deal Pipeline stage name.
+ * Returns null for Cancelled (skip push).
+ */
+export function toFubDealStageName(appStage: string): string | null {
+  return APP_TO_FUB_DEAL_STAGE[appStage] || null;
+}
+
+/**
+ * Resolve a FUB Deal Pipeline stage name to an app DealStage.
+ */
+export function resolveFubDealStage(fubDealStageName: string): DealStage | null {
+  return FUB_DEAL_STAGE_TO_APP[fubDealStageName] || null;
+}
+
+/**
+ * Resolve an app stage to a FUB Deal Pipeline stageId (integer).
+ * Reads from fub_pipeline_cache table (populated by refreshPipelineCache).
+ * Returns null if cache is empty or stage not found.
+ */
+export function resolveDealStageId(db: any, appStage: string): number | null {
+  const fubStageName = toFubDealStageName(appStage);
+  if (!fubStageName) return null;
+
+  const row = db.prepare(
+    'SELECT stage_id FROM fub_pipeline_cache WHERE stage_name = ? LIMIT 1'
+  ).get(fubStageName) as any;
+
+  return row?.stage_id ?? null;
+}
+
+/**
+ * Resolve a FUB stageId (integer) to an app DealStage.
+ * Reads from fub_pipeline_cache.
+ */
+export function resolveStageIdToApp(db: any, stageId: number): DealStage | null {
+  const row = db.prepare(
+    'SELECT stage_name FROM fub_pipeline_cache WHERE stage_id = ? LIMIT 1'
+  ).get(stageId) as any;
+
+  if (!row?.stage_name) return null;
+  return resolveFubDealStage(row.stage_name);
 }

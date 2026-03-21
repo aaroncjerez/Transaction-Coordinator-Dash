@@ -1,13 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
-  FileText, Plus, ExternalLink, Cloud, CheckCircle, AlertTriangle,
-  Loader2, RefreshCw, Sparkles,
+  FileText, ExternalLink, Cloud,
+  Loader2, Sparkles, Upload, Eye,
 } from 'lucide-react';
-import { listFiles, analyzePdf, getPdfAnalysesByDeal, getFubFileSyncStatus, triggerFubFileSync } from '../../lib/database';
-import { FILE_CATEGORIES } from '../../constants';
+import { listFiles, analyzePdf, getPdfAnalysesByDeal } from '../../lib/database';
 import { cn } from '../../lib/utils';
 import { uploadFileLocal } from '../../lib/uploadHandler';
-import { PdfAnalysisCard } from '../PdfAnalysisCard';
+import { DocumentAnalysisCard } from './DocumentAnalysisCard';
+import { DocumentTimeline } from './DocumentTimeline';
+import { PdfViewer } from './PdfViewer';
 
 interface DealFilesProps {
   dealId: string;
@@ -23,13 +24,23 @@ interface FileItem {
   fub_attachment_id?: string;
 }
 
-export const DealFiles: React.FC<DealFilesProps> = ({ dealId, fubPersonId }) => {
+export const DealFiles: React.FC<DealFilesProps> = ({ dealId }) => {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [analyses, setAnalyses] = useState<Record<string, any>>({});
   const [analyzing, setAnalyzing] = useState<string | null>(null);
-  const [fubSyncStatus, setFubSyncStatus] = useState<any>(null);
-  const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // Drag-and-drop state
+  const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Upload progress
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // PDF viewer state
+  const [viewingFile, setViewingFile] = useState<FileItem | null>(null);
 
   const fetchData = async () => {
     try {
@@ -48,15 +59,6 @@ export const DealFiles: React.FC<DealFilesProps> = ({ dealId, fubPersonId }) => 
       const map: Record<string, any> = {};
       (analysisData || []).forEach((a: any) => { map[a.file_path] = a; });
       setAnalyses(map);
-
-      if (fubPersonId) {
-        try {
-          const status = await getFubFileSyncStatus(dealId);
-          setFubSyncStatus(status);
-        } catch (e) {
-          console.warn('Failed to load FUB sync status:', e);
-        }
-      }
     } catch (err) {
       console.error('Failed to load files:', err);
     } finally {
@@ -67,41 +69,6 @@ export const DealFiles: React.FC<DealFilesProps> = ({ dealId, fubPersonId }) => 
   useEffect(() => {
     if (dealId) fetchData();
   }, [dealId]);
-
-  const handleFubSync = async () => {
-    setSyncing(true);
-    try {
-      await triggerFubFileSync(dealId);
-      await fetchData();
-    } catch (e) {
-      console.error('FUB sync failed:', e);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>, categoryKey: string) => {
-    if (!event.target.files || event.target.files.length === 0) return;
-    const file = event.target.files[0];
-    try {
-      const result = await uploadFileLocal(dealId, file, categoryKey, (msg) => console.log(msg));
-      await fetchData();
-
-      // Auto-analyze PDFs on upload
-      if (file.name.toLowerCase().endsWith('.pdf') && result?.file_path) {
-        handleAnalyze({
-          id: result.id,
-          name: result.file_name,
-          url: `file://${result.file_path}`,
-          categoryKey: result.category || categoryKey,
-          source: 'local',
-        });
-      }
-    } catch (error: any) {
-      console.error('Error uploading file:', error);
-      alert(error.message || 'Failed to upload file.');
-    }
-  };
 
   const handleAnalyze = async (file: FileItem) => {
     const filePath = file.url.replace('file://', '');
@@ -121,129 +88,217 @@ export const DealFiles: React.FC<DealFilesProps> = ({ dealId, fubPersonId }) => 
     }
   };
 
+  // --- Multi-file upload ---
+
+  const handleMultiUpload = async (fileList: File[]) => {
+    setUploading(true);
+    setUploadProgress({ current: 0, total: fileList.length });
+    const uploaded: { result: any; file: File }[] = [];
+    for (let i = 0; i < fileList.length; i++) {
+      setUploadProgress({ current: i + 1, total: fileList.length });
+      try {
+        const result = await uploadFileLocal(dealId, fileList[i], 'other');
+        uploaded.push({ result, file: fileList[i] });
+      } catch (err: any) {
+        console.error(`Failed to upload ${fileList[i].name}:`, err);
+      }
+    }
+    await fetchData();
+    setUploading(false);
+    setUploadProgress(null);
+
+    // Auto-analyze PDFs
+    for (const { result, file } of uploaded) {
+      if (file.name.toLowerCase().endsWith('.pdf') && result?.file_path) {
+        handleAnalyze({
+          id: result.id,
+          name: result.file_name,
+          url: `file://${result.file_path}`,
+          categoryKey: result.category || 'other',
+          source: 'local',
+        });
+      }
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    handleMultiUpload(Array.from(e.target.files));
+    e.target.value = '';
+  };
+
+  // --- Drag-and-drop handlers ---
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (e.dataTransfer.items?.length) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
+      await handleMultiUpload(droppedFiles);
+    }
+  };
+
   if (loading) return <div className="py-8 text-center text-gray-400 text-caption">Loading files...</div>;
 
-  return (
-    <div className="space-y-4 py-1">
-      {/* FUB Sync Banner */}
-      {fubPersonId && (
-        <div className="flex items-center justify-between bg-subtle rounded-md border border-gray-200 px-3 py-2.5">
-          <div className="flex items-center gap-2.5">
-            <Cloud size={14} className="text-primary" />
-            <span className="text-caption font-medium text-gray-700">FUB Files</span>
-            {fubSyncStatus ? (
-              <span>
-                {fubSyncStatus.last_status === 'synced' && (
-                  <span className="inline-flex items-center gap-1 text-micro text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-                    <CheckCircle size={10} /> Synced
-                  </span>
-                )}
-                {fubSyncStatus.last_status === 'mismatch' && (
-                  <span className="inline-flex items-center gap-1 text-micro text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">
-                    <AlertTriangle size={10} /> Mismatch
-                  </span>
-                )}
-                {fubSyncStatus.last_status === 'error' && (
-                  <span className="text-micro text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Error</span>
-                )}
-                {(fubSyncStatus.last_status === 'pending' || fubSyncStatus.last_status === 'syncing') && (
-                  <span className="inline-flex items-center gap-1 text-micro text-primary bg-primary-light px-1.5 py-0.5 rounded">
-                    <Loader2 size={10} className="animate-spin" /> Syncing
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span className="text-micro text-gray-400">Not synced</span>
-            )}
+  // PDF Viewer overlay
+  if (viewingFile) {
+    const filePath = viewingFile.url.replace('file://', '');
+    const analysis = analyses[filePath];
+    const isAnalyzing = analyzing === filePath;
+    return (
+      <div className="flex flex-col flex-1 min-h-0">
+        <PdfViewer
+          filePath={filePath}
+          fileName={viewingFile.name}
+          onBack={() => setViewingFile(null)}
+        />
+        {analysis && (
+          <div className="border-t border-gray-200 px-3 py-2 bg-white flex-shrink-0">
+            <DocumentAnalysisCard analysis={analysis} onReanalyze={() => handleAnalyze(viewingFile)} isReanalyzing={isAnalyzing} />
           </div>
-          <button
-            onClick={handleFubSync}
-            disabled={syncing}
-            className="flex items-center gap-1 text-micro font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
-          >
-            {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            Sync
-          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="space-y-2"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Document Timeline */}
+      {Object.keys(analyses).length >= 2 && (
+        <DocumentTimeline
+          documents={Object.values(analyses)}
+          onSelectDocument={(fp) => {
+            const file = files.find(f => f.url.replace('file://', '') === fp);
+            if (file) setViewingFile(file);
+          }}
+        />
+      )}
+
+      {/* Drop Zone — compact inline */}
+      <div
+        className={cn(
+          'relative border border-dashed rounded-md px-3 py-2 transition-colors cursor-pointer flex items-center gap-2',
+          isDragging
+            ? 'border-primary bg-primary/5'
+            : 'border-gray-200 hover:border-gray-300 bg-subtle'
+        )}
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileInputChange}
+        />
+        <Upload size={14} className={cn('flex-shrink-0', isDragging ? 'text-primary' : 'text-gray-400')} />
+        <span className="text-caption text-gray-500">
+          {isDragging ? 'Drop files here' : 'Drop files or click to browse'}
+        </span>
+      </div>
+
+      {/* Upload Progress */}
+      {uploading && uploadProgress && (
+        <div className="flex items-center gap-2 px-1">
+          <Loader2 size={12} className="animate-spin text-primary" />
+          <span className="text-micro text-gray-500">
+            Uploading {uploadProgress.current} of {uploadProgress.total}...
+          </span>
+          <div className="flex-1 bg-gray-100 rounded-full h-1 overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all"
+              style={{ width: `${Math.round((uploadProgress.current / uploadProgress.total) * 100)}%` }}
+            />
+          </div>
         </div>
       )}
 
-      {/* File Categories */}
-      <div className="space-y-3">
-        {FILE_CATEGORIES.map(category => {
-          const categoryFiles = files.filter(f => f.categoryKey === category.key);
+      {/* File List */}
+      <div className="space-y-1">
+        {files.length === 0 && !uploading && (
+          <p className="text-center text-gray-400 text-caption py-3">No files yet</p>
+        )}
+        {files.map((file) => {
+          const filePath = file.url.replace('file://', '');
+          const isPdf = file.name.toLowerCase().endsWith('.pdf');
+          const analysis = analyses[filePath];
+          const isAnalyzing = analyzing === filePath;
           return (
-            <div key={category.key} className="bg-subtle rounded-md border border-gray-200 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-caption font-semibold text-gray-700 flex items-center gap-1.5">
-                  {category.label}
-                  <span className="bg-gray-200 text-gray-500 text-micro px-1.5 py-0.5 rounded-full">
-                    {categoryFiles.length}
-                  </span>
-                </h3>
-                <div className="relative">
-                  <input
-                    type="file"
-                    id={`drawer-upload-${category.key}`}
-                    className="hidden"
-                    onChange={(e) => handleFileUpload(e, category.key)}
-                  />
-                  <label
-                    htmlFor={`drawer-upload-${category.key}`}
-                    className="cursor-pointer p-1 text-primary hover:bg-primary-light rounded transition-colors"
-                    title="Upload File"
-                    aria-label={`Upload file to ${category.label}`}
+            <div key={file.id} className="space-y-1">
+              <div
+                className={cn(
+                  "group flex items-center justify-between p-2 bg-white rounded border border-gray-100 transition-colors hover:border-gray-200",
+                  isPdf && "cursor-pointer"
+                )}
+                onClick={() => isPdf && filePath ? setViewingFile(file) : undefined}
+              >
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <FileText size={12} className="text-primary flex-shrink-0" />
+                  <span className="text-micro text-gray-700 truncate" title={file.name}>{file.name}</span>
+                  {file.source === 'fub' && <Cloud size={9} className="text-blue-400 flex-shrink-0" />}
+                </div>
+                <div className="flex items-center gap-0.5">
+                  {isPdf && filePath && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setViewingFile(file); }}
+                      className="p-1 text-gray-400 hover:text-primary hover:bg-primary-light rounded transition-colors"
+                      title="View PDF"
+                      aria-label="View PDF inline"
+                    >
+                      <Eye size={11} />
+                    </button>
+                  )}
+                  {isPdf && !analysis && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAnalyze(file); }}
+                      disabled={isAnalyzing}
+                      className="p-1 text-primary hover:bg-primary-light rounded transition-colors disabled:opacity-50"
+                      title="Analyze PDF"
+                      aria-label="Analyze PDF"
+                    >
+                      {isAnalyzing ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                    </button>
+                  )}
+                  <a
+                    href={file.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-primary transition-all"
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Open ${file.name}`}
                   >
-                    <Plus size={14} />
-                  </label>
+                    <ExternalLink size={11} />
+                  </a>
                 </div>
               </div>
-              <div className="space-y-1 max-h-[200px] overflow-y-auto scrollbar-thin">
-                {categoryFiles.map((file) => {
-                  const filePath = file.url.replace('file://', '');
-                  const isPdf = file.name.toLowerCase().endsWith('.pdf');
-                  const analysis = analyses[filePath];
-                  const isAnalyzing = analyzing === filePath;
-                  return (
-                    <div key={file.id} className="space-y-1">
-                      <div className="group flex items-center justify-between p-2 bg-white rounded border border-gray-100 transition-colors hover:border-gray-200">
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <FileText size={12} className="text-primary flex-shrink-0" />
-                          <span className="text-micro text-gray-700 truncate" title={file.name}>{file.name}</span>
-                          {file.source === 'fub' && <Cloud size={9} className="text-blue-400 flex-shrink-0" />}
-                        </div>
-                        <div className="flex items-center gap-0.5">
-                          {isPdf && !analysis && (
-                            <button
-                              onClick={() => handleAnalyze(file)}
-                              disabled={isAnalyzing}
-                              className="p-1 text-primary hover:bg-primary-light rounded transition-colors disabled:opacity-50"
-                              title="Analyze PDF"
-                              aria-label="Analyze PDF"
-                            >
-                              {isAnalyzing ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                            </button>
-                          )}
-                          <a
-                            href={file.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-primary transition-all"
-                            aria-label={`Open ${file.name}`}
-                          >
-                            <ExternalLink size={11} />
-                          </a>
-                        </div>
-                      </div>
-                      {analysis && <PdfAnalysisCard analysis={analysis} onReanalyze={() => handleAnalyze(file)} isReanalyzing={isAnalyzing} />}
-                    </div>
-                  );
-                })}
-                {categoryFiles.length === 0 && (
-                  <div className="h-10 flex items-center justify-center text-gray-400 border border-dashed border-gray-200 rounded text-micro">
-                    No files
-                  </div>
-                )}
-              </div>
+              {analysis && <DocumentAnalysisCard analysis={analysis} onReanalyze={() => handleAnalyze(file)} isReanalyzing={isAnalyzing} compact />}
             </div>
           );
         })}

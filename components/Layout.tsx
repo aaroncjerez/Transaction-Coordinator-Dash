@@ -6,6 +6,8 @@ import { useCommandPalette } from '../hooks/useCommandPalette';
 import { ToastProvider } from './ui/Toast';
 import { PreferencesProvider } from '../contexts/PreferencesContext';
 import { ReminderNotification } from './ReminderNotification';
+import { MobileSidebarProvider, useMobileSidebar } from '../contexts/MobileSidebarContext';
+import { cn } from '../lib/utils';
 
 // Context to share command palette open function
 const CommandPaletteContext = createContext<{ openCommandPalette: () => void; openShortcutsHelp: () => void }>({
@@ -15,6 +17,35 @@ const CommandPaletteContext = createContext<{ openCommandPalette: () => void; op
 
 export const useOpenCommandPalette = () => useContext(CommandPaletteContext).openCommandPalette;
 export const useOpenShortcutsHelp = () => useContext(CommandPaletteContext).openShortcutsHelp;
+
+/** Mobile slide-in drawer overlay */
+const MobileSidebarOverlay: React.FC = () => {
+  const { isOpen, close } = useMobileSidebar();
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={cn(
+          'fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-200',
+          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        )}
+        onClick={close}
+        aria-hidden="true"
+      />
+
+      {/* Drawer */}
+      <div
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 w-56 transform transition-transform duration-200 ease-out md:hidden',
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        <Sidebar mobile onNavigate={close} />
+      </div>
+    </>
+  );
+};
 
 interface LayoutProps {
   children: ReactNode;
@@ -45,26 +76,31 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
     <PreferencesProvider>
       <ToastProvider>
-        <CommandPaletteContext.Provider value={{ openCommandPalette: open, openShortcutsHelp }}>
-          <div className="flex h-screen bg-background text-foreground font-sans">
-            {/* Desktop Sidebar */}
-            <Sidebar />
+        <MobileSidebarProvider>
+          <CommandPaletteContext.Provider value={{ openCommandPalette: open, openShortcutsHelp }}>
+            <div className="flex h-screen bg-background text-foreground font-sans">
+              {/* Desktop Sidebar */}
+              <Sidebar />
 
-            {/* Main Content — offset for sidebar, TopBar rendered per-page */}
-            <main className="flex-1 md:ml-56 flex flex-col overflow-hidden">
-              {children}
-            </main>
+              {/* Mobile Sidebar Drawer */}
+              <MobileSidebarOverlay />
 
-            {/* Global Command Palette */}
-            <CommandPalette isOpen={isOpen} onClose={close} />
+              {/* Main Content — offset for sidebar, TopBar rendered per-page */}
+              <main className="flex-1 md:ml-56 flex flex-col overflow-hidden">
+                {children}
+              </main>
 
-            {/* Keyboard Shortcuts Help */}
-            <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={closeShortcutsHelp} />
+              {/* Global Command Palette */}
+              <CommandPalette isOpen={isOpen} onClose={close} />
 
-            {/* Global Reminder Notifications */}
-            <ReminderNotification />
-          </div>
-        </CommandPaletteContext.Provider>
+              {/* Keyboard Shortcuts Help */}
+              <KeyboardShortcutsHelp isOpen={shortcutsOpen} onClose={closeShortcutsHelp} />
+
+              {/* Global Reminder Notifications */}
+              <ReminderNotification />
+            </div>
+          </CommandPaletteContext.Provider>
+        </MobileSidebarProvider>
       </ToastProvider>
     </PreferencesProvider>
   );

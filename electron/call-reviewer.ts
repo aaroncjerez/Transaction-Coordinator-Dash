@@ -7,13 +7,12 @@
  * - Hot lead detection (interest signals, price negotiation, urgency)
  * - Call quality scoring
  *
- * Pattern: follows lead-analyzer.ts (same Anthropic SDK, retry logic, progress notifications)
+ * Pure local — reads/writes directly to SQLite, no Supabase.
  */
 
 import type Database from 'better-sqlite3';
 import { BrowserWindow } from 'electron';
 import Anthropic from '@anthropic-ai/sdk';
-import { getSupabaseClient } from './supabase-client.js';
 import {
   getUnreviewedCalls,
   updateCallReview,
@@ -84,6 +83,12 @@ function buildReviewPrompt(call: any): string {
   const duration = call.duration_seconds ? `${call.duration_seconds}s` : 'unknown';
   const direction = call.call_direction || 'outbound';
 
+  // Parse extracted_data if it's a string
+  let extractedData = call.extracted_data;
+  if (typeof extractedData === 'string') {
+    try { extractedData = JSON.parse(extractedData); } catch { extractedData = null; }
+  }
+
   return `
 Review this ${direction} call transcript.
 
@@ -93,7 +98,7 @@ CALL METADATA:
 - Duration: ${duration}
 - Direction: ${direction}
 ${call.summary ? `- Existing Summary: ${call.summary}` : ''}
-${call.extracted_data ? `- Extracted Data: ${JSON.stringify(call.extracted_data)}` : ''}
+${extractedData ? `- Extracted Data: ${JSON.stringify(extractedData)}` : ''}
 
 TRANSCRIPT:
 ${call.transcript || 'No transcript available'}
@@ -121,9 +126,6 @@ OUTPUT FORMAT (JSON ONLY):
 `;
 }
 
-/**
- * Call Claude with retry on rate-limit.
- */
 async function callClaudeWithRetry(
   anthropic: Anthropic,
   prompt: string,
@@ -165,45 +167,32 @@ async function callClaudeWithRetry(
 // ── Public API ──
 
 /**
- * Review a single call transcript and update Supabase.
+ * Review a single call transcript. Reads/writes local SQLite only.
  */
 export async function reviewCall(
   db: Database.Database,
   callId: string
 ): Promise<AICallReviewResult> {
-  const supabase = getSupabaseClient(db);
   const anthropic = getAnthropicClient(db);
 
-  // Fetch the call
-  const { data: call, error } = await supabase
-    .from('call_records')
-    .select('*')
-    .eq('id', callId)
-    .single();
-
-  if (error || !call) throw new Error(`Call not found: ${callId}`);
+  // Fetch call from local SQLite
+  const call = db.prepare('SELECT * FROM dialer_call_records WHERE id = ?').get(callId) as any;
+  if (!call) throw new Error(`Call not found: ${callId}`);
   if (!call.transcript) throw new Error(`Call ${callId} has no transcript`);
 
   const prompt = buildReviewPrompt(call);
   const review = await callClaudeWithRetry(anthropic, prompt);
 
-  // Write review back to Supabase
-  await updateCallReview(supabase, callId, review);
+  // Write review to local SQLite
+  updateCallReview(db, callId, review);
 
-  // Also update local cache
-  try {
-    db.prepare(`
-      UPDATE dialer_call_records SET custom_analysis = ? WHERE id = ?
-    `).run(JSON.stringify(review), callId);
-  } catch (_) { /* table may not exist yet */ }
-
-  // Handle DNC detection — auto-protect the lead
+  // Handle DNC detection
   if (review.dnc_detected) {
     const phone = call.seller_phone_normalized || call.phone_normalized;
     if (phone) {
       console.warn(`[CallReviewer] DNC DETECTED for ${phone}: ${review.dnc_evidence}`);
       try {
-        await markLeadDNC(supabase, phone, `AI Review: ${review.dnc_evidence || 'DNC request detected in transcript'}`);
+        markLeadDNC(db, phone, `AI Review: ${review.dnc_evidence || 'DNC request detected in transcript'}`);
       } catch (err) {
         console.error(`[CallReviewer] Failed to mark DNC for ${phone}:`, err);
       }
@@ -216,7 +205,7 @@ export async function reviewCall(
     if (phone) {
       console.log(`[CallReviewer] HOT LEAD detected for ${phone}: ${review.hot_lead_reason}`);
       try {
-        await markLeadHot(supabase, phone);
+        markLeadHot(db, phone);
       } catch (err) {
         console.error(`[CallReviewer] Failed to mark hot lead for ${phone}:`, err);
       }
@@ -229,15 +218,15 @@ export async function reviewCall(
 /**
  * Review all un-reviewed calls with transcripts.
  * Called by dialer-sync.ts on a 60-second interval.
+ * All reads/writes are local SQLite — no Supabase.
  */
 export async function reviewRecentCalls(
   db: Database.Database,
   limit = 10
 ): Promise<ReviewBatchResult> {
-  const supabase = getSupabaseClient(db);
   const anthropic = getAnthropicClient(db);
 
-  const calls = await getUnreviewedCalls(supabase, limit);
+  const calls = getUnreviewedCalls(db, limit);
   if (calls.length === 0) {
     return { success: true, reviewed: 0, errors: 0, dncDetected: 0, hotLeadsFound: 0 };
   }
@@ -250,7 +239,7 @@ export async function reviewRecentCalls(
   let hotLeadsFound = 0;
 
   for (let i = 0; i < calls.length; i++) {
-    const call = calls[i];
+    const call = calls[i] as any;
 
     notifyRenderer('dialer:review-progress', {
       current: i + 1,
@@ -267,15 +256,7 @@ export async function reviewRecentCalls(
       const prompt = buildReviewPrompt(call);
       const review = await callClaudeWithRetry(anthropic, prompt);
 
-      await updateCallReview(supabase, call.id, review);
-
-      // Also update local cache
-      try {
-        db.prepare(`
-          UPDATE dialer_call_records SET custom_analysis = ? WHERE id = ?
-        `).run(JSON.stringify(review), call.id);
-      } catch (_) { /* table may not exist yet */ }
-
+      updateCallReview(db, call.id, review);
       reviewed++;
 
       // Handle DNC
@@ -285,7 +266,7 @@ export async function reviewRecentCalls(
         if (phone) {
           console.warn(`[CallReviewer] DNC DETECTED for ${phone}: ${review.dnc_evidence}`);
           try {
-            await markLeadDNC(supabase, phone, `AI Review: ${review.dnc_evidence || 'DNC request detected'}`);
+            markLeadDNC(db, phone, `AI Review: ${review.dnc_evidence || 'DNC request detected'}`);
           } catch (err) {
             console.error(`[CallReviewer] Failed to mark DNC:`, err);
           }
@@ -299,7 +280,7 @@ export async function reviewRecentCalls(
         if (phone) {
           console.log(`[CallReviewer] HOT LEAD: ${phone} — ${review.hot_lead_reason}`);
           try {
-            await markLeadHot(supabase, phone);
+            markLeadHot(db, phone);
           } catch (err) {
             console.error(`[CallReviewer] Failed to mark hot lead:`, err);
           }
@@ -350,8 +331,6 @@ export async function reviewRecentCalls(
   }
 
   console.log(`[CallReviewer] Batch done. Reviewed: ${reviewed}, Errors: ${errors}, DNC: ${dncDetected}, Hot: ${hotLeadsFound}`);
-
-  // Clear the progress bar in the UI
   notifyRenderer('dialer:review-progress', null);
 
   return { success: true, reviewed, errors, dncDetected, hotLeadsFound };

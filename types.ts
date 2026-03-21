@@ -102,6 +102,7 @@ export interface Deal {
   drone_photo_link?: string;
   reference_number?: string;
   misc_deal_expenses?: string;
+  possession_date?: string;
   // Fee tracking (v13)
   transactional_funding_fee?: number;
   realtor_fee_percent?: number;
@@ -305,7 +306,7 @@ export interface DailyLead {
   _priorityScore?: number;
 }
 
-// ===== AI Dialer Types (Supabase) =====
+// ===== AI Dialer Types =====
 
 export type DialerCallDirection = 'inbound' | 'outbound';
 export type DialerCallStatus = 'completed' | 'no_answer' | 'voicemail' | 'busy' | 'failed' | 'declined' | 'transferred';
@@ -536,12 +537,13 @@ export interface UploadBatchResult {
   duplicates: number;
   errors: number;
   skipped: number;
+  dncMatches: number;
   details: UploadLeadResult[];
 }
 
 // ===== Batch Auto-Dial Types =====
 
-export type BatchDialStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed';
+export type BatchDialStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'throttled';
 
 export interface BatchDialProgress {
   sessionId: string;
@@ -583,7 +585,8 @@ export type CallGuardBlockReason =
   | 'final_outcome_set'
   | 'real_conversation'
   | 'called_recently'
-  | 'cadence_not_due';
+  | 'cadence_not_due'
+  | 'same_number_used';
 
 export interface CallGuardVerdict {
   allowed: boolean;

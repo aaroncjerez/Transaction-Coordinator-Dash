@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { PhoneIncoming, PhoneOutgoing, Clock, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { SentimentBadge } from './SentimentBadge';
 import { AIReviewBadge } from './AIReviewBadge';
-import { SentimentSummaryCard } from './SentimentSummaryCard';
 import { cn } from '../../lib/utils';
 import { formatPhone } from '../../lib/utils/phone';
 import type { DialerCallRecord } from '../../types';
@@ -10,6 +9,8 @@ import type { DialerCallRecord } from '../../types';
 interface CallCardProps {
   call: DialerCallRecord;
   onLeadClick?: (phoneNormalized: string) => void;
+  /** When true, show AI summary + key facts by default; hide transcript behind a toggle */
+  showSummaryFirst?: boolean;
 }
 
 const statusColors: Record<string, string> = {
@@ -34,8 +35,9 @@ function formatTime(iso: string): string {
   });
 }
 
-export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
+export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick, showSummaryFirst = false }) => {
   const [expanded, setExpanded] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
 
   // Support both Supabase join (leads_cache) and local cache (flat lead_ columns)
   const firstName = (call as any).lead_first_name || call.leads_cache?.first_name;
@@ -97,11 +99,12 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
 
         {/* Badges */}
         <div className="flex items-center gap-1.5">
-          {call.call_direction === 'inbound' && (
-            <span className="px-1.5 py-0.5 rounded-full text-micro font-medium bg-blue-50 text-blue-700">
-              Inbound
-            </span>
-          )}
+          <span className={cn(
+            'px-1.5 py-0.5 rounded-full text-micro font-medium',
+            call.call_direction === 'inbound' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'
+          )}>
+            {call.call_direction === 'inbound' ? 'Inbound' : 'Outbound'}
+          </span>
           <AIReviewBadge review={aiReview} />
           <SentimentBadge sentiment={call.sentiment} />
           {call.call_status && (
@@ -127,9 +130,38 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
             </div>
           )}
 
-          {aiReview && <SentimentSummaryCard review={aiReview} />}
-
-          {call.transcript && (
+          {showSummaryFirst && call.transcript ? (
+            <div>
+              {!showTranscript ? (
+                <button
+                  onClick={() => setShowTranscript(true)}
+                  className="text-micro text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                >
+                  Show full transcript
+                </button>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <button
+                      onClick={() => setShowTranscript(false)}
+                      className="text-micro text-blue-500 hover:text-blue-700 font-medium transition-colors"
+                    >
+                      Hide transcript
+                    </button>
+                    <button
+                      className="text-micro text-gray-400 hover:text-gray-600 flex items-center gap-0.5"
+                      onClick={() => navigator.clipboard.writeText(call.transcript || '')}
+                    >
+                      <Copy size={10} /> Copy
+                    </button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto bg-gray-50 rounded-md p-2.5 text-caption text-gray-600 leading-relaxed whitespace-pre-wrap">
+                    {call.transcript}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : call.transcript ? (
             <div>
               <div className="flex items-center justify-between mb-1">
                 <p className="text-micro text-gray-500 font-medium">Transcript</p>
@@ -144,7 +176,7 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick }) => {
                 {call.transcript}
               </div>
             </div>
-          )}
+          ) : null}
 
           {call.cost_cents != null && (
             <p className="text-micro text-gray-400">

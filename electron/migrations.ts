@@ -948,6 +948,292 @@ const migrations: Migration[] = [
       console.log('[Migration v20] Call guard audit log table created');
     },
   },
+  {
+    version: 21,
+    description: 'FUB Deal Pipeline sync — fub_deal_id column + pipeline stage cache',
+    up(db: Database.Database) {
+      // Add fub_deal_id to deals table (links local deal to FUB Deal Pipeline deal)
+      try {
+        db.exec(`ALTER TABLE deals ADD COLUMN fub_deal_id TEXT`);
+      } catch {
+        // Column may already exist
+      }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_deals_fub_deal_id ON deals(fub_deal_id)`);
+
+      // Cache for FUB pipeline stages (maps stage names ↔ integer IDs)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS fub_pipeline_cache (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pipeline_id INTEGER NOT NULL,
+          pipeline_name TEXT,
+          stage_id INTEGER NOT NULL,
+          stage_name TEXT NOT NULL,
+          updated_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(pipeline_id, stage_id)
+        );
+      `);
+
+      console.log('[Migration v21] FUB Deal Pipeline columns + cache table created');
+    },
+  },
+  {
+    version: 22,
+    description: 'Deal summaries cache, chat message persistence, inline notes, enhanced PDF metadata',
+    up(db: Database.Database) {
+      // 1. Deal summaries cache (AI-generated)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deal_summaries (
+          deal_id TEXT PRIMARY KEY,
+          summary TEXT NOT NULL,
+          generated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // 2. Chat message persistence (survive modal close/reopen)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deal_chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+          content TEXT NOT NULL,
+          sources TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_deal_chat_deal ON deal_chat_messages(deal_id);
+      `);
+
+      // 3. Inline notes with FUB push tracking
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deal_notes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          deal_id TEXT NOT NULL,
+          content TEXT NOT NULL,
+          pushed_to_fub INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_deal_notes_deal ON deal_notes(deal_id);
+      `);
+
+      // 4. Enhanced PDF analysis metadata
+      try { db.exec(`ALTER TABLE pdf_extractions ADD COLUMN doc_type TEXT`); } catch { /* exists */ }
+      try { db.exec(`ALTER TABLE pdf_extractions ADD COLUMN doc_date TEXT`); } catch { /* exists */ }
+
+      console.log('[Migration v22] deal_summaries, deal_chat_messages, deal_notes tables + pdf_extractions columns');
+    },
+  },
+  {
+    version: 23,
+    description: 'Add possession_date column to deals',
+    up(db: Database.Database) {
+      try { db.exec(`ALTER TABLE deals ADD COLUMN possession_date TEXT`); } catch { /* exists */ }
+      console.log('[Migration v23] possession_date column added');
+    },
+  },
+  {
+    version: 24,
+    description: 'Add dialer_conversation_memory and dialer_transcript_chunks for local RAG',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_conversation_memory (
+          id TEXT PRIMARY KEY,
+          phone_normalized TEXT NOT NULL UNIQUE,
+          lead_id TEXT,
+          summary TEXT,
+          key_facts TEXT,
+          seller_sentiment TEXT,
+          last_updated TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dcm_phone ON dialer_conversation_memory(phone_normalized);
+
+        CREATE TABLE IF NOT EXISTS dialer_transcript_chunks (
+          id TEXT PRIMARY KEY,
+          call_id TEXT NOT NULL,
+          phone_normalized TEXT NOT NULL,
+          lead_id TEXT,
+          content TEXT NOT NULL,
+          chunk_index INTEGER DEFAULT 0,
+          token_count INTEGER,
+          embedding TEXT,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dtc_phone ON dialer_transcript_chunks(phone_normalized);
+        CREATE INDEX IF NOT EXISTS idx_dtc_call ON dialer_transcript_chunks(call_id);
+      `);
+
+      // Add missing columns to dialer_leads_cache for local-first operation
+      try { db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN airtable_record_id TEXT`); } catch { /* exists */ }
+      try { db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN final_outcome_date TEXT`); } catch { /* exists */ }
+      try { db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN final_outcome_reason TEXT`); } catch { /* exists */ }
+
+      console.log('[Migration v24] dialer_conversation_memory + dialer_transcript_chunks tables + leads_cache columns');
+    },
+  },
+  {
+    version: 25,
+    description: 'Add dialer_lists table and list_id column for list-based dialing',
+    up(db: Database.Database) {
+      // Create dialer_lists table
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_lists (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          lead_count INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // Add list_id and list_name to leads
+      try { db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN list_id TEXT`); } catch { /* exists */ }
+      try { db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN list_name TEXT`); } catch { /* exists */ }
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_dlc_list ON dialer_leads_cache(list_id)`);
+
+      // Backfill: parse existing csv_upload_ records into proper lists
+      const leads = db.prepare(
+        "SELECT id, airtable_record_id, created_at FROM dialer_leads_cache WHERE airtable_record_id LIKE 'csv_upload_%'"
+      ).all() as any[];
+
+      const batches = new Map<string, { batchId: string; createdAt: string; count: number }>();
+      for (const lead of leads) {
+        const parts = (lead.airtable_record_id as string).split('_');
+        const batchId = parts.length >= 4 ? `${parts[2]}_${parts[3]}` : null;
+        if (!batchId || !/^\d+_[a-z0-9]+$/i.test(batchId)) continue;
+        if (!batches.has(batchId)) {
+          batches.set(batchId, { batchId, createdAt: lead.created_at, count: 0 });
+        }
+        batches.get(batchId)!.count++;
+      }
+
+      const insertList = db.prepare(
+        'INSERT OR IGNORE INTO dialer_lists (id, name, lead_count, created_at) VALUES (?, ?, ?, ?)'
+      );
+      const updateLead = db.prepare(
+        "UPDATE dialer_leads_cache SET list_id = ?, list_name = ? WHERE airtable_record_id LIKE ?"
+      );
+
+      const tx = db.transaction(() => {
+        for (const [batchId, info] of batches) {
+          const listId = `list_${batchId}`;
+          const date = info.createdAt ? new Date(info.createdAt).toLocaleDateString() : 'Unknown';
+          const listName = `Upload ${date}`;
+          insertList.run(listId, listName, info.count, info.createdAt);
+          updateLead.run(listId, listName, `csv_upload_${batchId}%`);
+        }
+      });
+      tx();
+
+      console.log(`[Migration v25] dialer_lists table + list_id column, backfilled ${batches.size} lists`);
+    },
+  },
+  {
+    version: 26,
+    description: 'Add unique index on retell_call_id for fast dedup lookups',
+    up(db: Database.Database) {
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_dcr_retell_call_id ON dialer_call_records(retell_call_id)`);
+    },
+  },
+  {
+    version: 27,
+    description: 'Add dialer_number_health table for scam likely detection',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_number_health (
+          phone TEXT PRIMARY KEY,
+          total_calls INTEGER DEFAULT 0,
+          connected INTEGER DEFAULT 0,
+          connect_rate REAL,
+          flagged_at TEXT,
+          last_checked TEXT
+        )
+      `);
+    },
+  },
+  {
+    version: 28,
+    description: 'Add index on our_phone for same-number dedup queries',
+    up(db: Database.Database) {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_dcr_our_phone ON dialer_call_records(our_phone)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_dcr_seller_our ON dialer_call_records(seller_phone_normalized, our_phone)`);
+    },
+  },
+  {
+    version: 29,
+    description: 'Number throttle system + last_called_by tracking on leads',
+    up(db: Database.Database) {
+      // Add last_called_by to leads cache
+      const cols = db.prepare("PRAGMA table_info(dialer_leads_cache)").all() as any[];
+      if (!cols.find((c: any) => c.name === 'last_called_by')) {
+        db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN last_called_by TEXT`);
+      }
+      if (!cols.find((c: any) => c.name === 'last_called_at')) {
+        db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN last_called_at TEXT`);
+      }
+      if (!cols.find((c: any) => c.name === 'total_call_attempts')) {
+        db.exec(`ALTER TABLE dialer_leads_cache ADD COLUMN total_call_attempts INTEGER DEFAULT 0`);
+      }
+
+      // Expand dialer_number_health with throttle columns
+      const nhCols = db.prepare("PRAGMA table_info(dialer_number_health)").all() as any[];
+      if (!nhCols.find((c: any) => c.name === 'calls_today')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN calls_today INTEGER DEFAULT 0`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'calls_this_hour')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN calls_this_hour INTEGER DEFAULT 0`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'daily_limit')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN daily_limit INTEGER DEFAULT 100`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'hourly_limit')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN hourly_limit INTEGER DEFAULT 15`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'paused')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN paused INTEGER DEFAULT 0`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'paused_reason')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN paused_reason TEXT`);
+      }
+      if (!nhCols.find((c: any) => c.name === 'last_call_at')) {
+        db.exec(`ALTER TABLE dialer_number_health ADD COLUMN last_call_at TEXT`);
+      }
+
+      // Backfill last_called_by from most recent call record per lead
+      db.exec(`
+        UPDATE dialer_leads_cache SET
+          last_called_by = (
+            SELECT our_phone FROM dialer_call_records
+            WHERE dialer_call_records.seller_phone_normalized = dialer_leads_cache.phone_normalized
+              AND call_direction = 'outbound' AND our_phone IS NOT NULL
+            ORDER BY call_started_at DESC LIMIT 1
+          ),
+          last_called_at = (
+            SELECT call_started_at FROM dialer_call_records
+            WHERE dialer_call_records.seller_phone_normalized = dialer_leads_cache.phone_normalized
+              AND call_direction = 'outbound'
+            ORDER BY call_started_at DESC LIMIT 1
+          ),
+          total_call_attempts = (
+            SELECT COUNT(*) FROM dialer_call_records
+            WHERE dialer_call_records.seller_phone_normalized = dialer_leads_cache.phone_normalized
+              AND call_direction = 'outbound'
+          )
+      `);
+    },
+  },
+  {
+    version: 30,
+    description: 'Lead notes table for dialer lead annotations',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dialer_lead_notes (
+          id TEXT PRIMARY KEY,
+          phone_normalized TEXT NOT NULL,
+          note TEXT NOT NULL,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dln_phone ON dialer_lead_notes(phone_normalized);
+      `);
+    },
+  },
 ];
 
 /**

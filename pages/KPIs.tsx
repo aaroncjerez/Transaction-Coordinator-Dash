@@ -13,6 +13,7 @@ import { GoalsDashboard } from '../components/kpi/GoalsDashboard';
 import { PerformancePillars } from '../components/kpi/PerformancePillars';
 import { InsightsPanel } from '../components/kpi/InsightsPanel';
 import { TeamPerformance } from '../components/kpi/TeamPerformance';
+import { WoWAnalysis } from '../components/kpi/WoWAnalysis';
 import { KpiLoadingSkeleton } from '../components/kpi/KpiLoadingSkeleton';
 import { KpiErrorState } from '../components/kpi/KpiErrorState';
 
@@ -149,7 +150,11 @@ export const KPIs: React.FC = () => {
               {/* Header */}
               <KpiHeader
                 weekEnding={dashboardData.currentWeek.weekEnding}
-                weekStarting={dashboardData.currentWeek.weekEnding}
+                weekStarting={(() => {
+                  const end = new Date(dashboardData.currentWeek.weekEnding);
+                  end.setDate(end.getDate() - 6);
+                  return end.toISOString().split('T')[0];
+                })()}
                 overallProgress={overallProgress}
                 achievements={achievements}
               />
@@ -181,6 +186,11 @@ export const KPIs: React.FC = () => {
                 isLoading={isBriefLoading}
                 onGenerate={generateBrief}
               />
+
+              {/* Week-over-Week Analysis */}
+              {dashboardData.wowAnalysis && (
+                <WoWAnalysis analysis={dashboardData.wowAnalysis} />
+              )}
 
               {/* Team Performance */}
               {dashboardData.teamScorecards && dashboardData.teamScorecards.length > 0 && (

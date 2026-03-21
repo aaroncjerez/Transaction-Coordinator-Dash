@@ -270,7 +270,7 @@ export const Leads: React.FC = () => {
           )}
 
           {/* Stats cards */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             <StatCard label="New Leads" sublabel="48h" value={stats.newLeads48h} />
             <StatCard label="Today's Queue" value={todaysActions.length} />
             <StatCard label="Done Today" value={stats.doneToday} accent="emerald" />

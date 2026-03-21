@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 interface Toast {
   id: string;
   message: string;
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   action?: { label: string; onClick: () => void };
 }
 
@@ -50,6 +50,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             activeToast.type === 'success' && 'bg-white border-emerald-200 text-emerald-700',
             activeToast.type === 'error' && 'bg-white border-red-200 text-red-700',
             activeToast.type === 'info' && 'bg-white border-blue-200 text-blue-700',
+            activeToast.type === 'warning' && 'bg-white border-amber-200 text-amber-700',
           )}
         >
           <div className={cn(
@@ -57,6 +58,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             activeToast.type === 'success' && 'bg-emerald-500',
             activeToast.type === 'error' && 'bg-red-500',
             activeToast.type === 'info' && 'bg-blue-500',
+            activeToast.type === 'warning' && 'bg-amber-500',
           )} />
           <span className="flex-1">{activeToast.message}</span>
           {activeToast.action && (

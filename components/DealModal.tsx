@@ -8,13 +8,13 @@ import { cn } from '../lib/utils';
 import { DealOverview } from './deal/DealOverview';
 import { DealTasks } from './deal/DealTasks';
 import { DealFilesAndActivity } from './deal/DealFilesAndActivity';
-import { DealChat } from './DealChat';
+import { DealNotes } from './deal/DealNotes';
 import { SkeletonModal } from './ui/Skeleton';
 import { SaveIndicator } from './ui/SaveIndicator';
 import type { UndoAction } from '../hooks/useUndoStack';
 import { useAutoSave } from '../hooks/useAutoSave';
 
-type ModalTab = 'summary' | 'tasks' | 'files-activity' | 'chat';
+type ModalTab = 'tasks' | 'details' | 'files-activity' | 'notes';
 
 interface DealModalProps {
   dealId: string | null;
@@ -23,42 +23,33 @@ interface DealModalProps {
   onUndoableAction?: (action: UndoAction) => void;
 }
 
-/** Returns current modal size tier based on viewport width */
-function useModalSize(): 'default' | 'wide' | 'xl' {
-  const [size, setSize] = useState<'default' | 'wide' | 'xl'>(() => {
-    if (typeof window === 'undefined') return 'default';
-    if (window.innerWidth >= 1536) return 'xl';
-    if (window.innerWidth >= 1280) return 'wide';
-    return 'default';
-  });
+const tabs: { id: ModalTab; label: string }[] = [
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'details', label: 'Details' },
+  { id: 'files-activity', label: 'Files' },
+  { id: 'notes', label: 'Notes' },
+];
 
-  useEffect(() => {
-    const calc = () => {
-      if (window.innerWidth >= 1536) setSize('xl');
-      else if (window.innerWidth >= 1280) setSize('wide');
-      else setSize('default');
-    };
-    window.addEventListener('resize', calc);
-    return () => window.removeEventListener('resize', calc);
-  }, []);
+const formatPrice = (price: number): string => {
+  if (price == null || price === 0) return '—';
+  if (price >= 1000000) return `$${(price / 1000000).toFixed(1)}M`;
+  if (price >= 1000) return `$${(price / 1000).toFixed(0)}K`;
+  return `$${price.toLocaleString()}`;
+};
 
-  return size;
-}
-
-const modalSizeClass: Record<string, string> = {
-  default: 'max-w-3xl',
-  wide: 'max-w-5xl',
-  xl: 'max-w-6xl',
+const formatProfitValue = (val: number): string => {
+  if (val == null || val === 0) return '—';
+  if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+  if (val >= 10000) return `$${(val / 1000).toFixed(0)}K`;
+  return `$${val.toLocaleString()}`;
 };
 
 export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpdate, onUndoableAction }) => {
   const [deal, setDeal] = useState<DealViewData | null>(null);
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<ModalTab>('summary');
+  const [activeTab, setActiveTab] = useState<ModalTab>('tasks');
   const [fubSyncStatus, setFubSyncStatus] = useState<'idle' | 'synced' | 'pending' | null>(null);
-  const modalSize = useModalSize();
-  const isTwoCol = modalSize !== 'default';
   const prevDealIdRef = useRef<string | null>(null);
 
   // Auto-save: debounced persistence for deal field edits
@@ -132,7 +123,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
   useEffect(() => {
     if (dealId) {
       fetchDeal(dealId);
-      setActiveTab('summary');
+      setActiveTab('tasks');
     }
   }, [dealId, fetchDeal]);
 
@@ -174,22 +165,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
   if (!isOpen) return null;
 
   const stageColor = deal ? getStageColor(deal.stage) : null;
-
-  // In two-column mode, Summary + Tasks are shown inline; tabs only cover remaining views
-  const tabs: { id: ModalTab; label: string }[] = isTwoCol
-    ? [
-        { id: 'files-activity', label: 'Files & Activity' },
-        { id: 'chat', label: 'Chat' },
-      ]
-    : [
-        { id: 'summary', label: 'Summary' },
-        { id: 'tasks', label: 'Tasks' },
-        { id: 'files-activity', label: 'Files & Activity' },
-        { id: 'chat', label: 'Chat' },
-      ];
-
-  // In two-col mode, default to files-activity tab (since summary & tasks are always visible)
-  const effectiveTab = isTwoCol && (activeTab === 'summary' || activeTab === 'tasks') ? null : activeTab;
+  const hasRealizedProfit = deal ? (deal.realized_gross_profit != null && deal.realized_gross_profit !== 0) : false;
 
   return (
     <>
@@ -202,10 +178,7 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
       {/* Centered Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={handleClose}>
         <div
-          className={cn(
-            'bg-white rounded-drawer shadow-lg w-full flex flex-col animate-modal-scale-in max-h-[90vh]',
-            modalSizeClass[modalSize],
-          )}
+          className="bg-white rounded-drawer shadow-lg w-full flex flex-col animate-modal-scale-in max-h-[90vh] max-w-4xl xl:max-w-5xl"
           onClick={e => e.stopPropagation()}
           role="dialog"
           aria-label="Deal details"
@@ -220,8 +193,8 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
           ) : (
             <>
               {/* Header */}
-              <div className={cn('border-b border-gray-200 px-5 pt-4 pb-3 flex-shrink-0')}>
-                <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="border-b border-gray-200 px-5 pt-4 pb-3 flex-shrink-0">
+                <div className="flex items-start justify-between gap-3 mb-2">
                   <div className="min-w-0">
                     <h2 className="text-base font-semibold text-gray-900 truncate leading-tight">
                       {deal.deal_name}
@@ -280,6 +253,22 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                   )}
                 </div>
 
+                {/* Compact financial summary */}
+                {(deal.purchase_price > 0 || hasRealizedProfit) && (
+                  <div className="flex items-center gap-3 mt-2 px-1 text-micro">
+                    {deal.purchase_price > 0 && (
+                      <span className="text-gray-500">
+                        {formatPrice(deal.purchase_price)}
+                      </span>
+                    )}
+                    {hasRealizedProfit && (
+                      <span className="font-semibold text-emerald-600">
+                        Profit: {formatProfitValue(deal.realized_gross_profit!)}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Tabs */}
                 <div className="flex gap-1 mt-3 -mb-3" role="tablist" aria-label="Deal sections">
                   {tabs.map(tab => (
@@ -287,10 +276,10 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
                       role="tab"
-                      aria-selected={effectiveTab === tab.id}
+                      aria-selected={activeTab === tab.id}
                       className={cn(
                         'px-3 py-2 text-caption font-medium border-b-2 transition-colors',
-                        effectiveTab === tab.id
+                        activeTab === tab.id
                           ? 'border-primary text-primary'
                           : 'border-transparent text-gray-500 hover:text-gray-700'
                       )}
@@ -301,50 +290,22 @@ export const DealModal: React.FC<DealModalProps> = ({ dealId, onClose, onDealUpd
                 </div>
               </div>
 
-              {/* Content */}
-              {isTwoCol ? (
-                /* Two-column layout (>=1280px) */
-                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                  {/* Top: Summary + Tasks side-by-side */}
-                  <div className="flex-1 flex overflow-hidden min-h-0">
-                    {/* Left column — Overview */}
-                    <div className="w-[58%] overflow-y-auto scrollbar-thin px-5 py-4 border-r border-gray-100">
-                      <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} onDeadlinesRefresh={refreshDeadlines} />
-                    </div>
-                    {/* Right column — Tasks */}
-                    <div className="w-[42%] overflow-y-auto scrollbar-thin px-4 py-4">
-                      {stageColor && <DealTasks dealId={deal.id} stageHex={stageColor.hex} onUndoableAction={onUndoableAction} />}
-                    </div>
-                  </div>
-                  {/* Bottom: tabbed content for Files & Activity / Chat */}
-                  {effectiveTab && (
-                    <div className="border-t border-gray-200 max-h-[40%] overflow-y-auto scrollbar-thin px-5 py-4">
-                      {effectiveTab === 'files-activity' && (
-                        <DealFilesAndActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
-                      )}
-                      {effectiveTab === 'chat' && (
-                        <DealChat dealId={deal.id} dealName={deal.deal_name} />
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* Single-column layout (<1280px) */
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
-                  {activeTab === 'summary' && (
-                    <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} onDeadlinesRefresh={refreshDeadlines} />
-                  )}
-                  {activeTab === 'tasks' && stageColor && (
-                    <DealTasks dealId={deal.id} stageHex={stageColor.hex} onUndoableAction={onUndoableAction} />
-                  )}
-                  {activeTab === 'files-activity' && (
-                    <DealFilesAndActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
-                  )}
-                  {activeTab === 'chat' && (
-                    <DealChat dealId={deal.id} dealName={deal.deal_name} />
-                  )}
-                </div>
-              )}
+              {/* Content — full height for active tab */}
+              <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 min-h-0">
+                {activeTab === 'tasks' && stageColor && (
+                  <DealTasks dealId={deal.id} stageHex={stageColor.hex} onUndoableAction={onUndoableAction} />
+                )}
+                {activeTab === 'details' && (
+                  <DealOverview deal={deal} onDealChange={handleLocalChange} onDealPersisted={handlePersisted} queueSave={queueSave} deadlines={deadlines} onDeadlinesRefresh={refreshDeadlines} />
+                )}
+                {activeTab === 'files-activity' && (
+                  <DealFilesAndActivity dealId={deal.id} fubPersonId={deal.fub_person_id} />
+                )}
+                {activeTab === 'notes' && (
+                  <DealNotes dealId={deal.id} fubPersonId={deal.fub_person_id} />
+                )}
+
+              </div>
             </>
           )}
         </div>

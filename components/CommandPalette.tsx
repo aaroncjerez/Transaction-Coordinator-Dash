@@ -1,47 +1,74 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search, ArrowRight, Home, LayoutDashboard, CheckSquare, Archive, Settings,
-  Plus, RefreshCw, Folder,
+  Search, ArrowRight, Home, Settings, Phone, User, RefreshCw, BarChart3, Zap,
 } from 'lucide-react';
-import { Deal } from '../types';
-import { fetchAllDeals } from '../lib/database';
+import { searchDialerLeads, forceDialerSync, triggerDialerCadence } from '../lib/database';
 import { cn } from '../lib/utils';
-import { getStageColor } from '../constants';
+import { formatPhone } from '../lib/utils/phone';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
+  onLeadClick?: (phoneNormalized: string) => void;
 }
 
 interface Command {
   id: string;
   label: string;
-  section: 'deals' | 'navigation' | 'actions';
+  section: 'leads' | 'navigation' | 'actions';
   icon: React.ReactNode;
   onSelect: () => void;
   keywords?: string;
   rightLabel?: string;
 }
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose }) => {
+export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose, onLeadClick }) => {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
-  const [deals, setDeals] = useState<Deal[]>([]);
+  const [leads, setLeads] = useState<any[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>();
 
-  // Load deals when palette opens
+  // Focus input when palette opens
   useEffect(() => {
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
-      fetchAllDeals().then(d => setDeals(d as Deal[]));
-      // Focus input after animation
+      setLeads([]);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
+
+  // Debounced lead search
+  useEffect(() => {
+    if (!isOpen) return;
+    if (searchTimeout.current) clearTimeout(searchTimeout.current);
+
+    if (query.trim().length >= 2) {
+      setSearching(true);
+      searchTimeout.current = setTimeout(async () => {
+        try {
+          const results = await searchDialerLeads(query.trim(), 10);
+          setLeads(results || []);
+        } catch {
+          setLeads([]);
+        } finally {
+          setSearching(false);
+        }
+      }, 200);
+    } else {
+      setLeads([]);
+      setSearching(false);
+    }
+
+    return () => {
+      if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    };
+  }, [query, isOpen]);
 
   const navigateAndClose = useCallback((path: string) => {
     navigate(path);
@@ -52,60 +79,74 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
   const commands = useMemo((): Command[] => {
     const cmds: Command[] = [];
 
+    // Lead search results
+    for (const lead of leads) {
+      const name = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unknown';
+      const location = [lead.county, lead.state].filter(Boolean).join(', ');
+      cmds.push({
+        id: `lead-${lead.id}`,
+        label: name,
+        section: 'leads',
+        icon: <User size={14} />,
+        onSelect: () => {
+          if (onLeadClick) {
+            onLeadClick(lead.phone_normalized);
+          } else {
+            navigateAndClose('/dialer');
+          }
+          onClose();
+        },
+        keywords: `${lead.phone_normalized} ${name} ${location}`,
+        rightLabel: location || formatPhone(lead.phone_normalized),
+      });
+    }
+
     // Navigation commands
     cmds.push({
-      id: 'nav-dashboard', label: 'Dashboard', section: 'navigation',
-      icon: <Home size={14} />, onSelect: () => navigateAndClose('/'),
-      keywords: 'dashboard home today overview',
+      id: 'nav-kpis', label: 'KPIs', section: 'navigation',
+      icon: <BarChart3 size={14} />, onSelect: () => navigateAndClose('/kpis'),
+      keywords: 'kpis metrics performance dashboard analytics',
     });
     cmds.push({
-      id: 'nav-pipeline', label: 'Pipeline', section: 'navigation',
-      icon: <LayoutDashboard size={14} />, onSelect: () => navigateAndClose('/pipeline'),
-      keywords: 'pipeline kanban board deals',
-    });
-    cmds.push({
-      id: 'nav-tasks', label: 'Tasks', section: 'navigation',
-      icon: <CheckSquare size={14} />, onSelect: () => navigateAndClose('/tasks'),
-      keywords: 'tasks todo checklist',
-    });
-    cmds.push({
-      id: 'nav-archive', label: 'Archive', section: 'navigation',
-      icon: <Archive size={14} />, onSelect: () => navigateAndClose('/archive'),
-      keywords: 'archive cancelled closed',
+      id: 'nav-dialer', label: 'AI Dialer', section: 'navigation',
+      icon: <Phone size={14} />, onSelect: () => navigateAndClose('/dialer'),
+      keywords: 'dialer calls phone ai cold calling campaign',
     });
     cmds.push({
       id: 'nav-settings', label: 'Settings', section: 'navigation',
       icon: <Settings size={14} />, onSelect: () => navigateAndClose('/settings'),
-      keywords: 'settings preferences config api keys',
+      keywords: 'settings preferences config api keys retell fub',
     });
 
-    // Action commands
+    // Actions
     cmds.push({
-      id: 'action-new-deal', label: 'New Deal', section: 'actions',
-      icon: <Plus size={14} />, onSelect: () => navigateAndClose('/pipeline'),
-      keywords: 'create new deal add',
+      id: 'action-sync', label: 'Force Sync', section: 'actions',
+      icon: <RefreshCw size={14} />,
+      onSelect: async () => {
+        onClose();
+        try { await forceDialerSync(); } catch {}
+      },
+      keywords: 'sync refresh reload data fub retell',
     });
-
-    // Deal commands
-    deals.forEach(deal => {
-      const sc = getStageColor(deal.stage);
-      cmds.push({
-        id: `deal-${deal.id}`, label: deal.deal_name, section: 'deals',
-        icon: <Folder size={14} />,
-        onSelect: () => navigateAndClose(`/deals/${deal.id}`),
-        keywords: `${deal.deal_name} ${deal.county} ${deal.state} ${deal.deal_type} ${deal.stage}`.toLowerCase(),
-        rightLabel: deal.stage,
-      });
+    cmds.push({
+      id: 'action-cadence', label: 'Launch Cadence', section: 'actions',
+      icon: <Zap size={14} />,
+      onSelect: async () => {
+        onClose();
+        try { await triggerDialerCadence(); } catch {}
+      },
+      keywords: 'cadence trigger dial auto call campaign',
     });
 
     return cmds;
-  }, [deals, navigateAndClose]);
+  }, [leads, navigateAndClose, onClose, onLeadClick]);
 
-  // Filter commands
+  // Filter commands (non-lead commands filtered by query)
   const filteredCommands = useMemo(() => {
-    if (!query.trim()) return commands;
+    if (!query.trim()) return commands.filter(c => c.section !== 'leads');
     const q = query.toLowerCase();
     return commands.filter(cmd => {
+      if (cmd.section === 'leads') return true; // already filtered by search
       const searchStr = `${cmd.label} ${cmd.keywords || ''}`.toLowerCase();
       return searchStr.includes(q);
     });
@@ -121,9 +162,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
     return grouped;
   }, [filteredCommands]);
 
-  const sectionOrder = ['deals', 'navigation', 'actions'] as const;
+  const sectionOrder = ['leads', 'navigation', 'actions'] as const;
   const sectionLabels: Record<string, string> = {
-    deals: 'Deals',
+    leads: 'Leads',
     navigation: 'Navigate',
     actions: 'Actions',
   };
@@ -200,12 +241,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search deals, navigate, or run actions..."
+              placeholder="Search leads by name/phone, navigate, or run actions..."
               className="flex-1 text-sm text-gray-900 placeholder-gray-400 outline-none bg-transparent"
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
             />
+            {searching && <span className="text-micro text-gray-400">Searching...</span>}
             <kbd className="text-micro text-gray-400 bg-subtle border border-gray-200 rounded px-1.5 py-0.5 flex-shrink-0">
               ESC
             </kbd>
@@ -215,7 +257,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
           <div ref={listRef} className="max-h-[50vh] overflow-y-auto scrollbar-thin py-1">
             {flatList.length === 0 ? (
               <div className="py-8 text-center text-caption text-gray-400">
-                No results for "{query}"
+                {query.trim().length >= 2
+                  ? `No results for "${query}"`
+                  : 'Type to search leads, or use commands below'}
               </div>
             ) : (
               sectionOrder.map(sectionKey => {
@@ -284,8 +328,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose 
               close
             </span>
             <span className="ml-auto flex items-center gap-1">
-              <kbd className="bg-subtle border border-gray-200 rounded px-1 py-0.5">?</kbd>
-              shortcuts
+              <kbd className="bg-subtle border border-gray-200 rounded px-1 py-0.5">⌘K</kbd>
+              toggle
             </span>
           </div>
         </div>
