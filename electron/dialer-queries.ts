@@ -16,12 +16,18 @@ function getSetting(db: Database.Database, key: string, envFallback: string): st
 
 // ── Retell Phone Numbers ──
 
+// Numbers that should NEVER be used for outbound dialing (e.g., website/inbound-only)
+const INBOUND_ONLY_NUMBERS = new Set([
+  '+16402320908', // Website number — inbound only
+]);
+
 export async function fetchRetellPhoneNumbers(db: Database.Database): Promise<Array<{
   phone_number: string;
   phone_number_pretty: string;
   nickname: string | null;
   inbound_agent_id: string | null;
   outbound_agent_id: string | null;
+  inbound_only: boolean;
 }>> {
   const RETELL_API_KEY = getSetting(db, 'retell_api_key', 'RETELL_API_KEY');
   if (!RETELL_API_KEY) return []; // Not configured yet — return empty
@@ -44,6 +50,7 @@ export async function fetchRetellPhoneNumbers(db: Database.Database): Promise<Ar
       nickname: n.nickname || null,
       inbound_agent_id: n.inbound_agent_id || null,
       outbound_agent_id: n.outbound_agent_id || null,
+      inbound_only: INBOUND_ONLY_NUMBERS.has(n.phone_number) || !n.outbound_agent_id,
     }));
   } catch (err) {
     console.error('[fetchRetellPhoneNumbers] Network error:', err);
@@ -103,6 +110,7 @@ export function checkCallGuard(
       WHERE seller_phone_normalized = ?
         AND our_phone = ?
         AND call_direction = 'outbound'
+        AND call_status != 'api_error'
       ORDER BY call_started_at DESC
       LIMIT 1
     `).get(phoneNormalized, options.fromNumber) as any;
@@ -281,6 +289,7 @@ export function getCallQueue(db: Database.Database, limit = 50, listIds?: string
         SELECT seller_phone_normalized FROM dialer_call_records
         WHERE call_direction = 'outbound'
           AND seller_phone_normalized IS NOT NULL AND seller_phone_normalized != ''
+          AND call_status != 'api_error'
           AND duration_seconds >= 30
           AND (call_successful = 1 OR (transcript IS NOT NULL AND transcript != ''))
       )
@@ -309,6 +318,7 @@ export function getLeadsByList(db: Database.Database, listIds: string[], limit =
           SELECT seller_phone_normalized FROM dialer_call_records
           WHERE call_direction = 'outbound'
             AND seller_phone_normalized IS NOT NULL AND seller_phone_normalized != ''
+            AND call_status != 'api_error'
             AND duration_seconds >= 30
             AND (call_successful = 1 OR (transcript IS NOT NULL AND transcript != ''))
         )
@@ -494,7 +504,14 @@ export function getUnreviewedCalls(db: Database.Database, limit = 10): any[] {
   return db.prepare(`
     SELECT * FROM dialer_call_records
     WHERE transcript IS NOT NULL AND transcript != ''
-      AND custom_analysis IS NULL
+      AND (
+        custom_analysis IS NULL
+        OR (
+          json_extract(custom_analysis, '$.review_error') = 1
+          AND json_extract(custom_analysis, '$.retry_after') < datetime('now')
+        )
+      )
+      AND call_status != 'api_error'
     ORDER BY call_started_at DESC
     LIMIT ?
   `).all(limit);
@@ -895,6 +912,11 @@ export async function batchDialLeads(
     numberStats[num] = { dialed: 0, connected: 0, noAnswer: 0, failed: 0 };
   }
 
+  // Track numbers that consistently fail (e.g., not configured in Retell)
+  const numberConsecutiveErrors: Record<string, number> = {};
+  const disabledNumbers = new Set<string>();
+  const MAX_CONSECUTIVE_ERRORS = 3;
+
   db.prepare(`
     INSERT INTO dialer_batch_dial_state (id, status, total_leads, batch_size, delay_seconds, lead_ids, started_at)
     VALUES (?, 'running', ?, ?, ?, ?, datetime('now'))
@@ -963,11 +985,17 @@ export async function batchDialLeads(
           : undefined;
 
         if (currentFromNumber && fromNumbers.length > 0) {
-          // Find a number that is: (a) not throttled, (b) hasn't called this person before
+          // Find a number that is: (a) not disabled, (b) not throttled, (c) hasn't called this person before
           let tried = 0;
           let foundValid = false;
           while (tried < fromNumbers.length) {
-            // Check throttle first
+            // Check if number was disabled due to repeated errors
+            if (disabledNumbers.has(currentFromNumber)) {
+              currentFromNumber = fromNumbers[numberIndex++ % fromNumbers.length];
+              tried++;
+              continue;
+            }
+            // Check throttle
             const { throttled, reason: throttleReason } = isNumberThrottled(db, currentFromNumber);
             if (throttled) {
               console.log(`[batchDial] ${currentFromNumber} throttled: ${throttleReason}, trying next`);
@@ -975,10 +1003,11 @@ export async function batchDialLeads(
               tried++;
               continue;
             }
-            // Check same-number dedup
+            // Check same-number dedup (exclude api_error records — those didn't actually connect)
             const sameNumCheck = db.prepare(`
               SELECT 1 FROM dialer_call_records
               WHERE seller_phone_normalized = ? AND our_phone = ? AND call_direction = 'outbound'
+                AND call_status != 'api_error'
               LIMIT 1
             `).get(lead.phone_normalized, currentFromNumber);
             if (sameNumCheck) {
@@ -990,8 +1019,26 @@ export async function batchDialLeads(
             break;
           }
           if (!foundValid) {
-            // Check why: all throttled or all used?
-            const allThrottled = fromNumbers.every(n => isNumberThrottled(db, n).throttled);
+            // Check why: all disabled, all throttled, or all used?
+            const allDisabled = fromNumbers.every(n => disabledNumbers.has(n));
+            if (allDisabled) {
+              onProgress({
+                sessionId,
+                status: 'failed' as const,
+                totalLeads: leadIds.length,
+                dialedCount,
+                currentBatch: batchIdx + 1,
+                totalBatches,
+                currentLeadName: null,
+                errors,
+                skippedDnc,
+                skippedGuard,
+                numberStats,
+                throttleReason: 'All numbers disabled due to Retell API errors — check Retell dashboard',
+              });
+              throw new Error('ALL_NUMBERS_DISABLED');
+            }
+            const allThrottled = fromNumbers.every(n => disabledNumbers.has(n) || isNumberThrottled(db, n).throttled);
             if (allThrottled) {
               skippedGuard++;
               details.push({
@@ -1081,6 +1128,36 @@ export async function batchDialLeads(
           if (currentFromNumber && numberStats[currentFromNumber]) {
             numberStats[currentFromNumber].failed++;
           }
+
+          // Track consecutive errors per number to auto-disable bad numbers
+          const is400 = err.message?.includes('400') || err.message?.includes('No outbound agent');
+          if (currentFromNumber && is400) {
+            numberConsecutiveErrors[currentFromNumber] = (numberConsecutiveErrors[currentFromNumber] || 0) + 1;
+            if (numberConsecutiveErrors[currentFromNumber] >= MAX_CONSECUTIVE_ERRORS && !disabledNumbers.has(currentFromNumber)) {
+              disabledNumbers.add(currentFromNumber);
+              console.warn(`[batchDial] DISABLED ${currentFromNumber} after ${MAX_CONSECUTIVE_ERRORS} consecutive 400 errors`);
+            }
+          } else if (currentFromNumber) {
+            // Reset consecutive error count on non-400 errors
+            numberConsecutiveErrors[currentFromNumber] = 0;
+          }
+
+          // Record failed attempt so 24h guard prevents re-dialing
+          try {
+            const failId = `fail_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            db.prepare(`
+              INSERT OR IGNORE INTO dialer_call_records
+                (id, lead_id, phone_normalized, seller_phone_normalized, our_phone,
+                 call_direction, call_status, call_successful, call_started_at,
+                 duration_seconds, disconnection_reason, created_at)
+              VALUES (?, ?, ?, ?, ?, 'outbound', 'api_error', 0, datetime('now'),
+                      0, ?, datetime('now'))
+            `).run(failId, lead.id, lead.phone_normalized, lead.phone_normalized,
+                   currentFromNumber || null, (err.message || 'Unknown error').slice(0, 200));
+          } catch (insertErr) {
+            console.error('[batchDial] Failed to record api_error:', insertErr);
+          }
+
           details.push({
             leadId,
             phone: lead.phone_normalized,
@@ -1162,11 +1239,12 @@ export async function batchDialLeads(
   } catch (err: any) {
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);
     const isThrottled = err.message === 'ALL_NUMBERS_THROTTLED';
-    const status = isThrottled ? 'throttled' : 'failed';
+    const isDisabled = err.message === 'ALL_NUMBERS_DISABLED';
+    const status = isThrottled ? 'throttled' : isDisabled ? 'failed' : 'failed';
     db.prepare(`UPDATE dialer_batch_dial_state SET status = ?, dialed_count = ?, results = ?, completed_at = datetime('now') WHERE id = ?`)
       .run(status, dialedCount, JSON.stringify({ error: err.message, details, numberStats }), sessionId);
-    if (isThrottled) {
-      const throttledResult = {
+    if (isThrottled || isDisabled) {
+      const earlyStopResult = {
         sessionId,
         totalLeads: leadIds.length,
         dialed: dialedCount,
@@ -1177,11 +1255,13 @@ export async function batchDialLeads(
         durationSeconds,
         details,
         numberStats,
-        throttled: true,
-        throttleReason: 'All numbers hit daily/hourly limits',
+        throttled: isThrottled,
+        throttleReason: isThrottled
+          ? 'All numbers hit daily/hourly limits'
+          : 'All numbers disabled — check Retell outbound agent configuration',
       };
-      sendSlackCampaignSummary(db, throttledResult).catch(() => {});
-      return throttledResult;
+      sendSlackCampaignSummary(db, earlyStopResult).catch(() => {});
+      return earlyStopResult;
     }
     throw err;
   }

@@ -61,6 +61,8 @@ function callStatusIndicator(lead: any): { color: string; label: string } {
     case 'declined':
     case 'error':
       return { color: 'bg-red-500', label: 'Failed' };
+    case 'api_error':
+      return { color: 'bg-red-400', label: 'API Error' };
     default:
       return { color: 'bg-gray-300', label: 'Ready' };
   }

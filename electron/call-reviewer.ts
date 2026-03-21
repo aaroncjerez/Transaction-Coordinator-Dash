@@ -322,6 +322,19 @@ export async function reviewRecentCalls(
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[CallReviewer] Error reviewing call ${call.id}:`, msg);
       errors++;
+
+      // Mark with a review_error sentinel so this call is skipped for 1 hour
+      // instead of re-triggering the progress bar every 60 seconds
+      try {
+        const retryAfter = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        db.prepare(`
+          UPDATE dialer_call_records
+          SET custom_analysis = ?
+          WHERE id = ?
+        `).run(JSON.stringify({ review_error: true, retry_after: retryAfter, error: msg.slice(0, 200) }), call.id);
+      } catch (markErr) {
+        console.error('[CallReviewer] Failed to mark review error:', markErr);
+      }
     }
 
     // Rate limit: 2s between requests

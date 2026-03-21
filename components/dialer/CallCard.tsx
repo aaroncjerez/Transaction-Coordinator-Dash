@@ -20,6 +20,7 @@ const statusColors: Record<string, string> = {
   busy: 'bg-orange-50 text-orange-700',
   failed: 'bg-red-50 text-red-700',
   declined: 'bg-red-50 text-red-600',
+  api_error: 'bg-red-50 text-red-500',
 };
 
 function formatDuration(seconds: number | null): string {
@@ -178,11 +179,26 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick, showSumma
             </div>
           ) : null}
 
-          {call.cost_cents != null && (
-            <p className="text-micro text-gray-400">
-              Cost: ${(call.cost_cents / 100).toFixed(2)}
-            </p>
-          )}
+          <div className="flex items-center gap-3 flex-wrap">
+            {call.disconnection_reason && (
+              <span className="text-micro text-gray-500">
+                <span className="text-gray-400">Disconnect:</span>{' '}
+                <span className={cn(
+                  'font-medium',
+                  ['user_hangup', 'agent_hangup', 'call_transfer'].includes(call.disconnection_reason)
+                    ? 'text-gray-600'
+                    : 'text-red-500'
+                )}>
+                  {call.disconnection_reason.replace(/_/g, ' ')}
+                </span>
+              </span>
+            )}
+            {call.cost_cents != null && (
+              <span className="text-micro text-gray-400">
+                Cost: ${(call.cost_cents / 100).toFixed(2)}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>

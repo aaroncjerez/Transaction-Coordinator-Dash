@@ -61,7 +61,7 @@ export const AIDialer: React.FC = () => {
   const [callsPerHour, setCallsPerHour] = useState<number | null>(null);
 
   // From number selection
-  const [availableNumbers, setAvailableNumbers] = useState<Array<{ phone_number: string; phone_number_pretty: string; nickname: string | null }>>([]);
+  const [availableNumbers, setAvailableNumbers] = useState<Array<{ phone_number: string; phone_number_pretty: string; nickname: string | null; inbound_only?: boolean }>>([]);
   const [selectedFromNumber, setSelectedFromNumber] = useState<string>('');
 
   // List-based dialing
@@ -159,8 +159,9 @@ export const AIDialer: React.FC = () => {
 
   useEffect(() => {
     loadNumberStats().then(() => {
-      // Auto-select all non-throttled, non-flagged numbers for campaign
-      const phones = availableNumbers.map(n => n.phone_number);
+      // Auto-select all non-throttled, non-flagged, outbound-capable numbers for campaign
+      const outboundNumbers = availableNumbers.filter(n => !n.inbound_only);
+      const phones = outboundNumbers.map(n => n.phone_number);
       const healthy = new Set(phones.filter(p => !numberHealth[p]?.flagged && !numberThrottle[p]?.throttled));
       if (healthy.size > 0) setCampaignFromNumbers(healthy);
       else setCampaignFromNumbers(new Set(phones));
@@ -444,6 +445,21 @@ export const AIDialer: React.FC = () => {
                   guardReasons['dnc_listed'] = (guardReasons['dnc_listed'] || 0) + 1;
                 }
               }
+
+              // Failed call breakdown
+              const failedDetails = details.filter(d => d.status === 'error' && d.error);
+              const failedReasons: Record<string, number> = {};
+              for (const d of failedDetails) {
+                const reason = d.error || 'Unknown error';
+                // Simplify Retell API errors to readable labels
+                const label = reason.includes('429') ? 'Rate limited (429)'
+                  : reason.includes('402') ? 'Insufficient credits (402)'
+                  : reason.includes('400') ? 'Bad request (400)'
+                  : reason.includes('Retell API error') ? reason.replace(/Retell API error /, 'API ')
+                  : reason.length > 60 ? reason.slice(0, 57) + '...'
+                  : reason;
+                failedReasons[label] = (failedReasons[label] || 0) + 1;
+              }
               const guardReasonLabels: Record<string, string> = {
                 dnc_listed: 'DNC Listed',
                 same_number_used: 'Same Number Used',
@@ -534,6 +550,21 @@ export const AIDialer: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Failed reason breakdown */}
+                  {Object.keys(failedReasons).length > 0 && (
+                    <div>
+                      <div className="text-micro font-medium text-gray-500 uppercase tracking-wide mb-1.5">Failed Breakdown</div>
+                      <div className="space-y-0.5">
+                        {Object.entries(failedReasons).sort((a, b) => b[1] - a[1]).map(([reason, count]) => (
+                          <div key={reason} className="flex items-center justify-between px-2.5 py-1 text-micro">
+                            <span className="text-red-600">{reason}</span>
+                            <span className="text-gray-500 tabular-nums font-medium">{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Follow-up needed */}
                   {connectedLeads.length > 0 && (
                     <div>
@@ -580,6 +611,27 @@ export const AIDialer: React.FC = () => {
                     const isSelected = campaignFromNumbers.has(n.phone_number);
                     const isFlagged = health?.flagged;
                     const isThrottled = throttle?.throttled;
+                    const isInboundOnly = n.inbound_only;
+
+                    if (isInboundOnly) {
+                      return (
+                        <div
+                          key={n.phone_number}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-gray-100 bg-gray-50 opacity-60 cursor-not-allowed"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-2 h-2 rounded-full flex-shrink-0 bg-gray-300" />
+                            <div className="min-w-0">
+                              <div className="text-caption font-medium text-gray-500 truncate">
+                                {n.nickname ? `${n.nickname}` : ''} {n.phone_number_pretty}
+                              </div>
+                              <span className="text-[10px] text-gray-400">Inbound only</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <button
                         key={n.phone_number}
