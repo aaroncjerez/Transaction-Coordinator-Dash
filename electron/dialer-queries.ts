@@ -904,7 +904,6 @@ export async function batchDialLeads(
   let errors = 0;
   let skippedDnc = 0;
   let skippedGuard = 0;
-  let numberIndex = 0;
 
   // Per-number stats tracking
   const numberStats: Record<string, { dialed: number; connected: number; noAnswer: number; failed: number }> = {};
@@ -916,6 +915,10 @@ export async function batchDialLeads(
   const numberConsecutiveErrors: Record<string, number> = {};
   const disabledNumbers = new Set<string>();
   const MAX_CONSECUTIVE_ERRORS = 3;
+
+  // Session-level dedup: prevents re-dialing same phone within one campaign session
+  // Closes the 30s race window between "call initiated" and "Retell poller ingests record"
+  const calledThisSession = new Set<string>();
 
   db.prepare(`
     INSERT INTO dialer_batch_dial_state (id, status, total_leads, batch_size, delay_seconds, lead_ids, started_at)
@@ -979,47 +982,27 @@ export async function batchDialLeads(
           return;
         }
 
-        // Round-robin number selection with throttle + same-number dedup
-        let currentFromNumber = fromNumbers.length > 0
-          ? fromNumbers[numberIndex++ % fromNumbers.length]
-          : undefined;
+        // Session-level dedup: prevent re-dialing within the same campaign session
+        if (calledThisSession.has(lead.phone_normalized)) {
+          skippedGuard++;
+          details.push({
+            leadId,
+            phone: lead.phone_normalized,
+            status: 'guard_blocked',
+            guardReason: 'called_recently',
+            guardDetails: 'Already dialed in this campaign session',
+          });
+          return;
+        }
 
-        if (currentFromNumber && fromNumbers.length > 0) {
-          // Find a number that is: (a) not disabled, (b) not throttled, (c) hasn't called this person before
-          let tried = 0;
-          let foundValid = false;
-          while (tried < fromNumbers.length) {
-            // Check if number was disabled due to repeated errors
-            if (disabledNumbers.has(currentFromNumber)) {
-              currentFromNumber = fromNumbers[numberIndex++ % fromNumbers.length];
-              tried++;
-              continue;
-            }
-            // Check throttle
-            const { throttled, reason: throttleReason } = isNumberThrottled(db, currentFromNumber);
-            if (throttled) {
-              console.log(`[batchDial] ${currentFromNumber} throttled: ${throttleReason}, trying next`);
-              currentFromNumber = fromNumbers[numberIndex++ % fromNumbers.length];
-              tried++;
-              continue;
-            }
-            // Check same-number dedup (exclude api_error records — those didn't actually connect)
-            const sameNumCheck = db.prepare(`
-              SELECT 1 FROM dialer_call_records
-              WHERE seller_phone_normalized = ? AND our_phone = ? AND call_direction = 'outbound'
-                AND call_status != 'api_error'
-              LIMIT 1
-            `).get(lead.phone_normalized, currentFromNumber);
-            if (sameNumCheck) {
-              currentFromNumber = fromNumbers[numberIndex++ % fromNumbers.length];
-              tried++;
-              continue;
-            }
-            foundValid = true;
-            break;
-          }
-          if (!foundValid) {
-            // Check why: all disabled, all throttled, or all used?
+        // Weighted random number selection (anti-snowshoe pattern detection)
+        let currentFromNumber: string | undefined = undefined;
+        if (fromNumbers.length > 0) {
+          const selected = selectNextNumber(db, fromNumbers, disabledNumbers, lead.phone_normalized);
+          if (selected) {
+            currentFromNumber = selected;
+          } else {
+            // No valid number found — determine why and report
             const allDisabled = fromNumbers.every(n => disabledNumbers.has(n));
             if (allDisabled) {
               onProgress({
@@ -1048,7 +1031,6 @@ export async function batchDialLeads(
                 guardReason: 'all_numbers_throttled',
                 guardDetails: 'All campaign numbers have hit their call limits',
               });
-              // If all numbers are throttled, stop the entire batch
               onProgress({
                 sessionId,
                 status: 'throttled' as const,
@@ -1063,7 +1045,6 @@ export async function batchDialLeads(
                 numberStats,
                 throttleReason: 'All numbers hit daily/hourly limits',
               });
-              // Break outer loop
               throw new Error('ALL_NUMBERS_THROTTLED');
             }
             skippedGuard++;
@@ -1109,12 +1090,20 @@ export async function batchDialLeads(
           return;
         }
 
+        // Inter-call jitter: random 2-5s delay to prevent burst detection
+        await interCallDelay();
+
         activeDialingPhones.add(lead.phone_normalized);
+        calledThisSession.add(lead.phone_normalized);
         try {
           const result = await callWithRetry(lead, currentFromNumber);
           dialedCount++;
           if (currentFromNumber && numberStats[currentFromNumber]) {
             numberStats[currentFromNumber].dialed++;
+          }
+          // Reset consecutive errors on success
+          if (currentFromNumber) {
+            numberConsecutiveErrors[currentFromNumber] = 0;
           }
           details.push({
             leadId,
@@ -1180,9 +1169,7 @@ export async function batchDialLeads(
         currentBatch: batchIdx + 1,
         totalBatches,
         currentLeadName: null,
-        currentFromNumber: fromNumbers.length > 0
-          ? fromNumbers[(numberIndex - 1) % fromNumbers.length]
-          : undefined,
+        currentFromNumber: undefined, // weighted random — no single "current" number
         errors,
         skippedDnc,
         skippedGuard,
@@ -1367,8 +1354,11 @@ export function getNumberHealthStats(
 
 // ── Number Throttle System ──
 // Safe limits based on carrier spam detection research:
-// - 40 calls/number/day (AT&T/Verizon/T-Mobile flag at ~50+)
-// - 8 calls/number/hour (burst detection triggers at 10-15)
+// Carrier spam thresholds (research 2026-03):
+// - Daily: 50-100 calls/number/day before flagging
+// - Hourly: 10-15 calls/number/hour (burst detection)
+// - Short calls: >60% under 15s triggers robocaller classification
+// - Sequential patterns: "snowshoe" detection on rapid-fire sequential dialing
 // - Auto-pause when limits hit, auto-resume next window
 
 const DEFAULT_DAILY_LIMIT = 100;
@@ -1481,6 +1471,90 @@ export function getNumberThrottleStatus(
 export function isNumberThrottled(db: Database.Database, phone: string): { throttled: boolean; reason: string | null } {
   const [status] = getNumberThrottleStatus(db, [phone]);
   return { throttled: status.throttled, reason: status.throttleReason };
+}
+
+// ── Weighted Random Number Selection (anti-snowshoe) ──
+
+const INTER_CALL_DELAY_MIN = 2000; // 2s minimum between calls
+const INTER_CALL_DELAY_MAX = 5000; // 5s maximum between calls
+
+/**
+ * Select the next outbound number using weighted random selection.
+ * Replaces strict round-robin to avoid carrier "snowshoe" pattern detection.
+ *
+ * Weighting: numbers with more daily remaining capacity get higher weight.
+ * Penalty: numbers with >60% short calls (<15s) in the last hour get halved weight.
+ */
+export function selectNextNumber(
+  db: Database.Database,
+  fromNumbers: string[],
+  disabledNumbers: Set<string>,
+  leadPhone: string
+): string | null {
+  if (fromNumbers.length === 0) return null;
+
+  // Get throttle status for all numbers
+  const statuses = getNumberThrottleStatus(db, fromNumbers);
+
+  // Build candidates with weights
+  const candidates: { phone: string; weight: number }[] = [];
+
+  for (const status of statuses) {
+    // Skip disabled
+    if (disabledNumbers.has(status.phone)) continue;
+    // Skip throttled
+    if (status.throttled) continue;
+
+    // Skip same-number dedup (already called this lead from this number)
+    const sameNumCheck = db.prepare(`
+      SELECT 1 FROM dialer_call_records
+      WHERE seller_phone_normalized = ? AND our_phone = ? AND call_direction = 'outbound'
+        AND call_status != 'api_error'
+      LIMIT 1
+    `).get(leadPhone, status.phone);
+    if (sameNumCheck) continue;
+
+    // Base weight: proportion of daily capacity remaining (0.1 to 1.0)
+    let weight = Math.max(0.1, status.dailyRemaining / status.dailyLimit);
+
+    // Short-call penalty: if >60% of calls in the last hour are <15s, halve weight
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const hourCalls = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN duration_seconds < 15 THEN 1 ELSE 0 END) as short_calls
+      FROM dialer_call_records
+      WHERE our_phone = ? AND call_direction = 'outbound' AND call_started_at >= ?
+    `).get(status.phone, hourAgo) as any;
+
+    if (hourCalls?.total >= 5 && hourCalls.short_calls / hourCalls.total > 0.6) {
+      weight *= 0.5;
+      console.log(`[selectNextNumber] ${status.phone} penalized: ${hourCalls.short_calls}/${hourCalls.total} short calls in last hour`);
+    }
+
+    candidates.push({ phone: status.phone, weight });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Weighted random selection
+  const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+  let roll = Math.random() * totalWeight;
+  for (const candidate of candidates) {
+    roll -= candidate.weight;
+    if (roll <= 0) return candidate.phone;
+  }
+
+  // Fallback (shouldn't happen)
+  return candidates[candidates.length - 1].phone;
+}
+
+/**
+ * Sleep for a random duration between min and max ms (inter-call jitter).
+ */
+function interCallDelay(): Promise<void> {
+  const delay = INTER_CALL_DELAY_MIN + Math.random() * (INTER_CALL_DELAY_MAX - INTER_CALL_DELAY_MIN);
+  return new Promise(resolve => setTimeout(resolve, delay));
 }
 
 /**

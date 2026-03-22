@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { KPIs } from './pages/KPIs';
 import { Settings } from './pages/Settings';
 import { AIDialer } from './pages/AIDialer';
+import { CFO } from './pages/CFO';
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/kpis" replace />} />
           <Route path="/kpis" element={<KPIs />} />
+          <Route path="/cfo" element={<CFO />} />
           <Route path="/dialer" element={<AIDialer />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/kpis" replace />} />

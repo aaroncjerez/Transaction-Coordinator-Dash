@@ -11,6 +11,7 @@ import { startFubPersonSync } from './fub-person-sync.js';
 import { startFubFileSync } from './fub-file-sync.js';
 import { startDialerSync } from './dialer-sync.js';
 import { startRetellPoller } from './retell-call-poller.js';
+import { startMercurySync } from './mercury-sync.js';
 
 // Suppress EPIPE errors on stdout/stderr — GUI apps launched from Finder
 // have no connected terminal, so console.log can throw when the pipe breaks.
@@ -149,6 +150,9 @@ app.whenReady().then(() => {
 
     // Start Retell call poller (polls Retell List Calls API every 30s, replaces n8n)
     startRetellPoller();
+
+    // Start Mercury bank sync (syncs accounts + transactions every 15 min)
+    startMercurySync();
 
     // Schedule automatic database backups every 30 minutes (keeps last 5)
     setInterval(() => {

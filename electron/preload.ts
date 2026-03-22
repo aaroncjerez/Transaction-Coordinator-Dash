@@ -228,6 +228,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('cfo:getInsights', data),
   },
 
+  mercury: {
+    getAccounts: () =>
+      ipcRenderer.invoke('mercury:getAccounts'),
+    getTransactions: (opts?: { days?: number; category?: string; dealId?: string; limit?: number }) =>
+      ipcRenderer.invoke('mercury:getTransactions', opts),
+    getSummary: () =>
+      ipcRenderer.invoke('mercury:getSummary'),
+    getMonthlySpend: (months?: number) =>
+      ipcRenderer.invoke('mercury:getMonthlySpend', months),
+    getCategoryBreakdown: (days?: number) =>
+      ipcRenderer.invoke('mercury:getCategoryBreakdown', days),
+    syncNow: () =>
+      ipcRenderer.invoke('mercury:syncNow'),
+    getActiveDealPipeline: () =>
+      ipcRenderer.invoke('mercury:getActiveDealPipeline'),
+  },
+
   reminders: {
     create: (taskId: string, remindAt: string) =>
       ipcRenderer.invoke('reminders:create', taskId, remindAt),

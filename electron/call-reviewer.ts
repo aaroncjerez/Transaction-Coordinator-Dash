@@ -228,6 +228,8 @@ export async function reviewRecentCalls(
 
   const calls = getUnreviewedCalls(db, limit);
   if (calls.length === 0) {
+    // Explicitly clear any stale progress bar
+    notifyRenderer('dialer:review-progress', null);
     return { success: true, reviewed: 0, errors: 0, dncDetected: 0, hotLeadsFound: 0 };
   }
 
@@ -238,6 +240,7 @@ export async function reviewRecentCalls(
   let dncDetected = 0;
   let hotLeadsFound = 0;
 
+  try {
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i] as any;
 
@@ -344,7 +347,10 @@ export async function reviewRecentCalls(
   }
 
   console.log(`[CallReviewer] Batch done. Reviewed: ${reviewed}, Errors: ${errors}, DNC: ${dncDetected}, Hot: ${hotLeadsFound}`);
-  notifyRenderer('dialer:review-progress', null);
+  } finally {
+    // ALWAYS clear the progress bar — even if an error interrupted the loop
+    notifyRenderer('dialer:review-progress', null);
+  }
 
   return { success: true, reviewed, errors, dncDetected, hotLeadsFound };
 }

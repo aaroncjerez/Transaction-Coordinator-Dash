@@ -1234,6 +1234,59 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 31,
+    description: 'Mercury bank accounts and transactions cache for CFO dashboard',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mercury_accounts (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          nickname TEXT,
+          kind TEXT,
+          current_balance REAL DEFAULT 0,
+          available_balance REAL DEFAULT 0,
+          routing_number TEXT,
+          account_number TEXT,
+          status TEXT,
+          legal_business_name TEXT,
+          dashboard_link TEXT,
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS mercury_transactions (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL,
+          amount REAL NOT NULL,
+          counterparty_name TEXT,
+          counterparty_id TEXT,
+          note TEXT,
+          bank_description TEXT,
+          external_memo TEXT,
+          kind TEXT,
+          status TEXT,
+          posted_at TEXT,
+          created_at TEXT,
+          mercury_category TEXT,
+          category TEXT DEFAULT 'other',
+          deal_id TEXT,
+          synced_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mt_account ON mercury_transactions(account_id);
+        CREATE INDEX IF NOT EXISTS idx_mt_posted ON mercury_transactions(posted_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_mt_category ON mercury_transactions(category);
+        CREATE INDEX IF NOT EXISTS idx_mt_deal ON mercury_transactions(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_mt_counterparty ON mercury_transactions(counterparty_name);
+
+        CREATE TABLE IF NOT EXISTS mercury_sync_state (
+          key TEXT PRIMARY KEY,
+          value TEXT,
+          updated_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
 ];
 
 /**

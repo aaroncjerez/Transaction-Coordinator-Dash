@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, Settings, Landmark, Phone } from 'lucide-react';
+import { TrendingUp, Settings, Landmark, Phone, DollarSign } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { getFubPersonSyncStatus, fetchDialerTodayCallCount } from '../lib/database';
@@ -93,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobile = false, onNavigate } =
       {/* Nav Links */}
       <nav className="flex-1 mt-1 space-y-0.5" aria-label="Main navigation">
         <NavItem to="/kpis" icon={TrendingUp} label="KPIs" onClick={onNavigate} />
+        <NavItem to="/cfo" icon={DollarSign} label="CFO" onClick={onNavigate} />
         <NavItem to="/dialer" icon={Phone} label="AI Dialer" count={dialerCallCount} onClick={onNavigate} />
         <NavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
       </nav>

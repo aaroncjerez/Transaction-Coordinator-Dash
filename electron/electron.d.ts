@@ -146,6 +146,25 @@ export interface ElectronAPI {
     }>;
   };
 
+  mercury: {
+    getAccounts: () => Promise<any[]>;
+    getTransactions: (opts?: { days?: number; category?: string; dealId?: string; limit?: number }) => Promise<any[]>;
+    getSummary: () => Promise<{
+      totalBalance: number;
+      accounts: any[];
+      monthlyBurn: number;
+      runway: number;
+      last30DaysIn: number;
+      last30DaysOut: number;
+      transactionCount30d: number;
+      lastSync: string | null;
+    }>;
+    getMonthlySpend: (months?: number) => Promise<any[]>;
+    getCategoryBreakdown: (days?: number) => Promise<any[]>;
+    syncNow: () => Promise<{ accounts: number; transactions: number; error?: string }>;
+    getActiveDealPipeline: () => Promise<any[]>;
+  };
+
   reminders: {
     create: (taskId: string, remindAt: string) => Promise<any>;
     getByTask: (taskId: string) => Promise<any[]>;

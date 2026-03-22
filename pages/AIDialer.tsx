@@ -225,7 +225,14 @@ export const AIDialer: React.FC = () => {
 
   useEffect(() => {
     const unsub1 = onDialerNewCalls(() => { loadCounts(); });
-    const unsub2 = onDialerReviewProgress((data) => setReviewProgress(data));
+    const unsub2 = onDialerReviewProgress((data) => {
+      setReviewProgress(data);
+      // Auto-dismiss after 15 seconds if progress stalls
+      if (data) {
+        clearTimeout((window as any).__reviewProgressTimeout);
+        (window as any).__reviewProgressTimeout = setTimeout(() => setReviewProgress(null), 15000);
+      }
+    });
     const unsub3 = onDialerInboundCall((data) => {
       showToast({
         message: `Inbound call from ${data.leadName || data.phone}`,

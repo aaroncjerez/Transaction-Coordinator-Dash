@@ -23,6 +23,32 @@ const statusColors: Record<string, string> = {
   api_error: 'bg-red-50 text-red-500',
 };
 
+/** Human-friendly disconnect reason labels */
+const disconnectLabels: Record<string, { label: string; color: string }> = {
+  dial_no_answer: { label: 'No Answer', color: 'text-gray-500' },
+  voicemail_reached: { label: 'Voicemail', color: 'text-yellow-600' },
+  user_hangup: { label: 'User Hung Up', color: 'text-gray-600' },
+  agent_hangup: { label: 'Agent Hung Up', color: 'text-emerald-600' },
+  call_transfer: { label: 'Transferred', color: 'text-blue-600' },
+  machine_detected: { label: 'Machine', color: 'text-orange-500' },
+  no_answer: { label: 'No Answer', color: 'text-gray-500' },
+  busy: { label: 'Busy', color: 'text-orange-500' },
+  error_no_audio: { label: 'No Audio', color: 'text-red-500' },
+  error_asr: { label: 'ASR Error', color: 'text-red-500' },
+  concurrency_limit_reached: { label: 'Concurrency Limit', color: 'text-red-500' },
+  line_busy: { label: 'Line Busy', color: 'text-orange-500' },
+  registered_call_timeout: { label: 'Timeout', color: 'text-gray-500' },
+  dial_failed: { label: 'Dial Failed', color: 'text-red-500' },
+};
+
+function getDisconnectDisplay(reason: string | null | undefined): { label: string; color: string } | null {
+  if (!reason) return null;
+  if (disconnectLabels[reason]) return disconnectLabels[reason];
+  // Fallback: format unknown reasons
+  if (reason.startsWith('error')) return { label: reason.replace(/_/g, ' '), color: 'text-red-500' };
+  return { label: reason.replace(/_/g, ' '), color: 'text-gray-500' };
+}
+
 function formatDuration(seconds: number | null): string {
   if (!seconds) return '0s';
   const m = Math.floor(seconds / 60);
@@ -116,6 +142,14 @@ export const CallCard: React.FC<CallCardProps> = ({ call, onLeadClick, showSumma
               {call.call_status.replace('_', ' ')}
             </span>
           )}
+          {(() => {
+            const disc = getDisconnectDisplay(call.disconnection_reason);
+            return disc ? (
+              <span className={cn('text-micro font-medium', disc.color)}>
+                {disc.label}
+              </span>
+            ) : null;
+          })()}
         </div>
 
         {expanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}

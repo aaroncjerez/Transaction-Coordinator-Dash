@@ -1815,6 +1815,94 @@ Provide your analysis in JSON format:
     }
   });
 
+  // ===== MERCURY BANK =====
+
+  ipcMain.handle('mercury:getAccounts', () => {
+    const { getAccounts } = require('./mercury-sync.js');
+    return getAccounts(db);
+  });
+
+  ipcMain.handle('mercury:getTransactions', (_event: any, opts: any) => {
+    const { getTransactions } = require('./mercury-sync.js');
+    return getTransactions(db, opts);
+  });
+
+  ipcMain.handle('mercury:getSummary', () => {
+    const { getSummary } = require('./mercury-sync.js');
+    return getSummary(db);
+  });
+
+  ipcMain.handle('mercury:getMonthlySpend', (_event: any, months?: number) => {
+    const { getMonthlySpend } = require('./mercury-sync.js');
+    return getMonthlySpend(db, months);
+  });
+
+  ipcMain.handle('mercury:getCategoryBreakdown', (_event: any, days?: number) => {
+    const { getCategoryBreakdown } = require('./mercury-sync.js');
+    return getCategoryBreakdown(db, days);
+  });
+
+  ipcMain.handle('mercury:syncNow', async () => {
+    const { syncNow } = await import('./mercury-sync.js');
+    return syncNow();
+  });
+
+  ipcMain.handle('mercury:getActiveDealPipeline', async () => {
+    const apiKey = process.env.FUB_API_KEY?.trim();
+    if (!apiKey) return [];
+
+    const activeStages = ['Listed For Sale', 'Purchase Agreement Sent', 'Send To Escrow', 'Sale Escrow', 'Due Diligence', 'Purchase Escrow'];
+    const allDeals: any[] = [];
+
+    for (const stage of activeStages) {
+      try {
+        const url = `https://api.followupboss.com/v1/people?fields=allFields&limit=50&stage=${encodeURIComponent(stage)}`;
+        const res = await fetch(url, {
+          headers: { Authorization: 'Basic ' + Buffer.from(apiKey + ':').toString('base64') },
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        for (const p of data.people || []) {
+          const cfs: Record<string, any> = {};
+          for (const cf of p.customFields || []) {
+            if (cf.value != null) cfs[cf.name] = cf.value;
+          }
+
+          // Enrich with local DB if available (has buy price, county, state)
+          const localDeal = db.prepare(
+            `SELECT purchase_price, county, state, lot_acreage, deal_type, funder_name, realtor_price_opinion
+             FROM deals WHERE fub_person_id = ? LIMIT 1`
+          ).get(String(p.id)) as any;
+
+          allDeals.push({
+            id: String(p.id),
+            name: `${p.firstName || ''} ${p.lastName || ''}`.trim(),
+            stage: p.stage,
+            sell_price: p.price || 0,
+            buy_price: parseFloat(cfs.customPurchasePrice) || localDeal?.purchase_price || 0,
+            county: cfs.customParcelCounty || localDeal?.county || '',
+            state: cfs.customParcelState || localDeal?.state || '',
+            acreage: cfs.customLotAcreage || localDeal?.lot_acreage || '',
+            deal_type: cfs.customDealType || localDeal?.deal_type || '',
+            funder: cfs.customFunderName || localDeal?.funder_name || '',
+            realtor_opinion: parseFloat(cfs.customRealtorPriceOpinion) || localDeal?.realtor_price_opinion || 0,
+          });
+        }
+      } catch (err) {
+        console.error(`[CFO] Failed to fetch stage ${stage}:`, err);
+      }
+    }
+
+    // Sort by stage priority
+    const stageOrder: Record<string, number> = {
+      'Sale Escrow': 1, 'Send To Escrow': 2, 'Listed For Sale': 3,
+      'Purchase Agreement Sent': 4, 'Due Diligence': 5, 'Purchase Escrow': 6,
+    };
+    allDeals.sort((a, b) => (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99));
+
+    return allDeals;
+  });
+
   // ===== TASK REMINDERS =====
 
   ipcMain.handle('reminders:create', (_event, taskId: string, remindAt: string) => {

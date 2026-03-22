@@ -391,6 +391,38 @@ export async function getCfoInsights(data: any): Promise<any> {
   return api.cfo.getInsights(data);
 }
 
+// ---- Mercury Bank ----
+
+export async function fetchMercuryAccounts(): Promise<any[]> {
+  return api.mercury.getAccounts();
+}
+
+export async function fetchMercuryTransactions(opts?: {
+  days?: number; category?: string; dealId?: string; limit?: number;
+}): Promise<any[]> {
+  return api.mercury.getTransactions(opts);
+}
+
+export async function fetchMercurySummary(): Promise<any> {
+  return api.mercury.getSummary();
+}
+
+export async function fetchMercuryMonthlySpend(months?: number): Promise<any[]> {
+  return api.mercury.getMonthlySpend(months);
+}
+
+export async function fetchMercuryCategoryBreakdown(days?: number): Promise<any[]> {
+  return api.mercury.getCategoryBreakdown(days);
+}
+
+export async function syncMercuryNow(): Promise<{ accounts: number; transactions: number; error?: string }> {
+  return api.mercury.syncNow();
+}
+
+export async function fetchActiveDealPipeline(): Promise<any[]> {
+  return api.mercury.getActiveDealPipeline();
+}
+
 // ---- AI Dialer ----
 
 export async function fetchDialerCallQueue(limit?: number): Promise<any[]> {
