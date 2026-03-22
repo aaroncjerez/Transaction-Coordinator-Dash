@@ -162,7 +162,8 @@ export interface ElectronAPI {
     getMonthlySpend: (months?: number) => Promise<any[]>;
     getCategoryBreakdown: (days?: number) => Promise<any[]>;
     syncNow: () => Promise<{ accounts: number; transactions: number; error?: string }>;
-    getActiveDealPipeline: () => Promise<any[]>;
+    getActiveDealPipeline: () => Promise<{ active: any[]; closed: any[] }>;
+    getMonthlyCashflow: () => Promise<any[]>;
   };
 
   reminders: {

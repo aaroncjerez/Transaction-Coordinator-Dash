@@ -1842,6 +1842,18 @@ Provide your analysis in JSON format:
     return getCategoryBreakdown(db, days);
   });
 
+  ipcMain.handle('mercury:getMonthlyCashflow', () => {
+    const { getMonthlySpend } = require('./mercury-sync.js');
+    const months = getMonthlySpend(db, 12);
+    // Enrich with running balance estimate
+    let runningBalance = 0;
+    return months.map((m: any, i: number) => {
+      const net = (m.income || 0) - (m.expenses || 0);
+      runningBalance += net;
+      return { ...m, net, runningBalance };
+    });
+  });
+
   ipcMain.handle('mercury:syncNow', async () => {
     const { syncNow } = await import('./mercury-sync.js');
     return syncNow();
@@ -1849,58 +1861,57 @@ Provide your analysis in JSON format:
 
   ipcMain.handle('mercury:getActiveDealPipeline', async () => {
     const apiKey = process.env.FUB_API_KEY?.trim();
-    if (!apiKey) return [];
+    if (!apiKey) return { active: [], closed: [] };
 
-    const activeStages = ['Listed For Sale', 'Purchase Agreement Sent', 'Send To Escrow', 'Sale Escrow', 'Due Diligence', 'Purchase Escrow'];
+    const auth = 'Basic ' + Buffer.from(apiKey + ':').toString('base64');
     const allDeals: any[] = [];
 
-    for (const stage of activeStages) {
-      try {
-        const url = `https://api.followupboss.com/v1/people?fields=allFields&limit=50&stage=${encodeURIComponent(stage)}`;
-        const res = await fetch(url, {
-          headers: { Authorization: 'Basic ' + Buffer.from(apiKey + ':').toString('base64') },
-        });
-        if (!res.ok) continue;
+    try {
+      // Fetch all deals (active + closed) in one paginated sweep
+      let hasMore = true;
+      let nextUrl = 'https://api.followupboss.com/v1/deals?limit=100';
+
+      while (hasMore) {
+        const res = await fetch(nextUrl, { headers: { Authorization: auth } });
+        if (!res.ok) break;
         const data = await res.json();
-        for (const p of data.people || []) {
-          const cfs: Record<string, any> = {};
-          for (const cf of p.customFields || []) {
-            if (cf.value != null) cfs[cf.name] = cf.value;
-          }
-
-          // Enrich with local DB if available (has buy price, county, state)
-          const localDeal = db.prepare(
-            `SELECT purchase_price, county, state, lot_acreage, deal_type, funder_name, realtor_price_opinion
-             FROM deals WHERE fub_person_id = ? LIMIT 1`
-          ).get(String(p.id)) as any;
-
+        for (const d of data.deals || []) {
           allDeals.push({
-            id: String(p.id),
-            name: `${p.firstName || ''} ${p.lastName || ''}`.trim(),
-            stage: p.stage,
-            sell_price: p.price || 0,
-            buy_price: parseFloat(cfs.customPurchasePrice) || localDeal?.purchase_price || 0,
-            county: cfs.customParcelCounty || localDeal?.county || '',
-            state: cfs.customParcelState || localDeal?.state || '',
-            acreage: cfs.customLotAcreage || localDeal?.lot_acreage || '',
-            deal_type: cfs.customDealType || localDeal?.deal_type || '',
-            funder: cfs.customFunderName || localDeal?.funder_name || '',
-            realtor_opinion: parseFloat(cfs.customRealtorPriceOpinion) || localDeal?.realtor_price_opinion || 0,
+            id: d.id,
+            name: d.name || '',
+            stage: d.stageName || '',
+            status: d.status || '',
+            buy_price: d.price || 0,
+            profit: d.commissionValue || 0,
+            close_date: d.projectedCloseDate || null,
+            exit_strategy: d.customExitStrategy || '',
+            people: (d.people || []).map((p: any) => p.name).join(', '),
           });
         }
-      } catch (err) {
-        console.error(`[CFO] Failed to fetch stage ${stage}:`, err);
+        if (data._metadata?.nextLink) {
+          nextUrl = data._metadata.nextLink;
+        } else {
+          hasMore = false;
+        }
       }
+    } catch (err) {
+      console.error('[CFO] Failed to fetch FUB deals:', err);
     }
 
-    // Sort by stage priority
     const stageOrder: Record<string, number> = {
-      'Sale Escrow': 1, 'Send To Escrow': 2, 'Listed For Sale': 3,
-      'Purchase Agreement Sent': 4, 'Due Diligence': 5, 'Purchase Escrow': 6,
+      'Pending Sale': 1, 'Listed': 2, 'Purchase Closed': 3,
+      'Purchase Pending': 4, 'Hold': 5, 'Purchase Contract': 6,
     };
-    allDeals.sort((a, b) => (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99));
 
-    return allDeals;
+    const active = allDeals
+      .filter(d => d.stage !== 'Sale Closed' && d.status !== 'Lost')
+      .sort((a, b) => (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99));
+
+    const closed = allDeals
+      .filter(d => d.stage === 'Sale Closed')
+      .sort((a, b) => (b.close_date || '').localeCompare(a.close_date || ''));
+
+    return { active, closed };
   });
 
   // ===== TASK REMINDERS =====

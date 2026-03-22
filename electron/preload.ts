@@ -243,6 +243,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('mercury:syncNow'),
     getActiveDealPipeline: () =>
       ipcRenderer.invoke('mercury:getActiveDealPipeline'),
+    getMonthlyCashflow: () =>
+      ipcRenderer.invoke('mercury:getMonthlyCashflow'),
   },
 
   reminders: {

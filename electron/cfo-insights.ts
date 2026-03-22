@@ -2,7 +2,7 @@
  * CFO Insights Generator — Electron Main Process
  *
  * Uses Anthropic SDK to generate CFO-level financial insights
- * from deal portfolio data. Returns structured insights via tool_use.
+ * from FUB deal pipeline + Mercury bank data.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
@@ -21,26 +21,23 @@ export interface CFOInsightsResult {
   generatedAt: string;
 }
 
-export interface MonthlyProfitEntry {
-  month: string;
-  label: string;
-  dealCount: number;
-  realizedGrossProfit: number;
-  myShare: number;
-}
-
 export interface CFOInputData {
-  activeDeals: { count: number; stages: Record<string, number> };
-  totalPipelineValue: number;
-  myProjectedProfit: number;
-  myRealizedProfit: number;
-  totalRealizedGross: number;
-  monthlyProfits: MonthlyProfitEntry[];
-  trailingAverage: number;
-  overdueDeadlineCount: number;
-  staleDealsCount: number;
-  pendingTaskCount: number;
-  soldDealCount: number;
+  // Mercury bank
+  cashPosition: number;
+  monthlyBurn: number;
+  runway: number;
+  last30DaysIn: number;
+  last30DaysOut: number;
+
+  // FUB active deals
+  activeDeals: { count: number; stages: Record<string, number>; totalPipeline: number; totalExpectedProfit: number };
+  activeDealsList: { name: string; stage: string; buyPrice: number; profit: number; closeDate: string | null }[];
+
+  // FUB closed deals (historical)
+  closedDeals: { count: number; totalProfit: number; avgProfit: number; avgMargin: number };
+
+  // Monthly cashflow
+  monthlyCashflow: { month: string; income: number; expenses: number; net: number }[];
 }
 
 // ---- Generator ----
@@ -54,27 +51,27 @@ export async function generateCFOInsights(
 
   const message = await client.messages.create({
     model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 1000,
+    max_tokens: 1200,
     temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],
     tools: [
       {
         name: 'provide_cfo_insights',
-        description: 'Provide CFO financial insights for the real estate land portfolio',
+        description: 'Provide CFO financial insights for the land investment portfolio',
         input_schema: {
           type: 'object' as const,
           properties: {
             summary: {
               type: 'string',
-              description: '2-3 sentence financial health overview of the portfolio',
+              description: '2-3 sentence financial health overview — cash position, pipeline strength, burn rate assessment',
             },
             insights: {
               type: 'array',
               items: {
                 type: 'object',
                 properties: {
-                  title: { type: 'string', description: 'Short actionable headline' },
-                  detail: { type: 'string', description: '1-2 sentences with specific numbers and recommendations' },
+                  title: { type: 'string', description: 'Short actionable headline (e.g. "Capital Locked in Slow Deals")' },
+                  detail: { type: 'string', description: '1-2 sentences with specific dollar amounts and recommendations' },
                 },
                 required: ['title', 'detail'],
               },
@@ -83,7 +80,7 @@ export async function generateCFOInsights(
             },
             monthlyTrend: {
               type: 'string',
-              description: '1-2 sentences about the month-over-month profit trend and what it means',
+              description: '1-2 sentences about the month-over-month profit and cashflow trajectory',
             },
           },
           required: ['summary', 'insights', 'monthlyTrend'],
@@ -115,70 +112,71 @@ export async function generateCFOInsights(
 // ---- Prompt Builder ----
 
 function buildCFOPrompt(data: CFOInputData): string {
-  const {
-    activeDeals,
-    totalPipelineValue,
-    myProjectedProfit,
-    myRealizedProfit,
-    totalRealizedGross,
-    monthlyProfits,
-    trailingAverage,
-    overdueDeadlineCount,
-    staleDealsCount,
-    pendingTaskCount,
-    soldDealCount,
-  } = data;
-
-  // Stage breakdown
-  const stageLines = Object.entries(activeDeals.stages)
-    .map(([stage, count]) => `  - ${stage}: ${count}`)
-    .join('\n');
-
-  // Monthly profit history
-  const monthLines = monthlyProfits.length > 0
-    ? monthlyProfits.map(m =>
-        `  - ${m.label}: ${m.dealCount} deal${m.dealCount !== 1 ? 's' : ''}, Gross Profit: $${m.realizedGrossProfit.toLocaleString()}, My Share: $${m.myShare.toLocaleString()}`
-      ).join('\n')
-    : '  No sold deals yet.';
-
-  const formatCurrency = (v: number) => {
+  const fmt = (v: number) => {
     if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-    if (v >= 1_000) return `$${Math.round(v / 1_000)}K`;
+    if (v >= 1_000) return `$${Math.round(v / 1_000).toLocaleString()}K`;
     return `$${v.toLocaleString()}`;
   };
 
-  return `You are the CFO of Jerez Land, a real estate investment company that buys and flips vacant land. You're reviewing the financial health of the portfolio. Think like a numbers-driven finance executive who owns the P&L and cares about cash flow, profit margins, and capital allocation.
+  const stageLines = Object.entries(data.activeDeals.stages)
+    .map(([stage, count]) => `  - ${stage}: ${count} deal${count !== 1 ? 's' : ''}`)
+    .join('\n');
 
-## PORTFOLIO SNAPSHOT
-Active Deals: ${activeDeals.count}
-${stageLines ? `Stage Breakdown:\n${stageLines}` : ''}
-Pipeline Value (total purchase cost of active deals): ${formatCurrency(totalPipelineValue)}
-My Projected Profit (JL Share of active deals): ${formatCurrency(myProjectedProfit)}
-My Realized Profit (JL Share of sold deals): ${formatCurrency(myRealizedProfit)}
-Total Realized Gross Profit (all sold deals): ${formatCurrency(totalRealizedGross)}
-Total Sold Deals: ${soldDealCount}
+  const dealLines = data.activeDealsList
+    .map(d => `  - ${d.name} (${d.stage}): Buy ${fmt(d.buyPrice)}, Profit ${fmt(d.profit)}${d.closeDate ? `, Close ${d.closeDate.slice(0, 10)}` : ''}`)
+    .join('\n');
 
-## MONTHLY PROFIT HISTORY (My Share)
+  const monthLines = data.monthlyCashflow.length > 0
+    ? data.monthlyCashflow.map(m =>
+        `  - ${m.month}: In ${fmt(m.income)}, Out ${fmt(m.expenses)}, Net ${m.net >= 0 ? '+' : ''}${fmt(m.net)}`
+      ).join('\n')
+    : '  No monthly data yet.';
+
+  return `You are the CFO of Jerez Land LLC, a real estate company that buys vacant land at a discount and flips it for profit. Your business model:
+
+- **Revenue comes from deal profits** — you buy land parcels (typically $15K-$100K), then resell or double-close at higher prices. Revenue is lumpy, not recurring.
+- **Deal types**: Standard Flip (buy, hold, list with realtor, sell), Double Close (simultaneous buy-sell, fast but lower margin), Assignment (sell the contract), Subdivide (split into lots, highest margin but slowest).
+- **Typical margins**: 15-50% on flips, 2-10% on double closes, 30-60% on subdivides.
+- **Operating costs**: texting/calling software ($1-2K/mo), virtual assistants, CRM, title fees, earnest money deposits (EMD).
+- **Capital cycle**: Cash goes out (purchase + closing costs) → deal sits in pipeline → cash comes back (sale proceeds). Velocity matters.
+
+## BANK POSITION (Mercury)
+Cash on hand: ${fmt(data.cashPosition)}
+Monthly burn rate: ${fmt(data.monthlyBurn)}
+Runway: ${data.runway >= 99 ? '99+ months' : `${data.runway.toFixed(1)} months`}
+Last 30 days — Income: ${fmt(data.last30DaysIn)} | Expenses: ${fmt(data.last30DaysOut)} | Net: ${data.last30DaysIn - data.last30DaysOut >= 0 ? '+' : ''}${fmt(data.last30DaysIn - data.last30DaysOut)}
+
+## ACTIVE DEAL PIPELINE (FUB)
+Active deals: ${data.activeDeals.count}
+Capital deployed in pipeline: ${fmt(data.activeDeals.totalPipeline)}
+Total expected profit from active deals: ${fmt(data.activeDeals.totalExpectedProfit)}
+${stageLines ? `Stage breakdown:\n${stageLines}` : ''}
+
+Per-deal breakdown:
+${dealLines || '  No active deals.'}
+
+## HISTORICAL PERFORMANCE (Closed Deals)
+Deals closed: ${data.closedDeals.count}
+Total realized profit: ${fmt(data.closedDeals.totalProfit)}
+Average profit per deal: ${fmt(data.closedDeals.avgProfit)}
+Average margin: ${data.closedDeals.avgMargin.toFixed(1)}%
+
+## MONTHLY CASHFLOW (Mercury)
 ${monthLines}
-Trailing 6-Month Average (My Share): ${formatCurrency(trailingAverage)}/month
 
-## OPERATIONAL HEALTH
-Overdue Deadlines: ${overdueDeadlineCount}
-Stale Deals (no activity >14 days): ${staleDealsCount}
-Pending Tasks: ${pendingTaskCount}
+## YOUR ANALYSIS
+Give me 3-5 actionable CFO insights. Think like a finance executive who owns the P&L for a land flipping operation. Focus on:
 
-## INSTRUCTIONS
-Give me 3-5 actionable financial insights as my CFO. Focus on:
-- Cash flow trajectory: is monthly realized profit trending up, down, or flat?
-- Capital efficiency: how much capital is tied up in pipeline vs returned from sales?
-- Profit margins: is my projected share realistic based on what we've actually realized?
-- Red flags: stale deals eating holding costs, overdue items blocking closings, bottlenecks
-- Growth: what should we do to increase monthly profit?
+1. **Cash vs Pipeline**: Is too much capital locked up in slow-moving deals? What's the ratio of cash on hand to capital deployed?
+2. **Deal velocity**: Are deals closing fast enough? Any deals past their projected close date that are tying up capital?
+3. **Profit margins**: Are actual margins matching expectations? How does avg realized profit compare to what's projected in the pipeline?
+4. **Burn rate warning**: At current burn rate, how long until you need a deal to close? Is the pipeline covering your overhead?
+5. **Growth levers**: Based on historical performance, what's the highest-ROI move — more deals, bigger deals, faster closes, or cutting costs?
 
 Rules:
-- Reference specific numbers from above — no vague advice
-- Be direct and talk like a CFO who owns the P&L, not a consultant
+- Reference specific dollar amounts from the data above
+- Be direct — talk like a CFO who owns the P&L, not a consultant
+- Flag any deal that looks like it's stuck or underperforming
 - The summary should assess overall financial health in 2-3 sentences
-- monthlyTrend should describe what the month-over-month numbers tell you
-- Each insight needs a short title and 1-2 sentences with specific recommendations`;
+- monthlyTrend should describe the trajectory and what it means for the next 90 days`;
 }

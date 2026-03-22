@@ -419,8 +419,12 @@ export async function syncMercuryNow(): Promise<{ accounts: number; transactions
   return api.mercury.syncNow();
 }
 
-export async function fetchActiveDealPipeline(): Promise<any[]> {
+export async function fetchActiveDealPipeline(): Promise<{ active: any[]; closed: any[] }> {
   return api.mercury.getActiveDealPipeline();
+}
+
+export async function fetchMonthlyCashflow(): Promise<any[]> {
+  return api.mercury.getMonthlyCashflow();
 }
 
 // ---- AI Dialer ----
