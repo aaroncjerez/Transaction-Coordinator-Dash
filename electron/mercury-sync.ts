@@ -75,6 +75,9 @@ export async function syncNow(): Promise<{
     // 3. Auto-classify unclassified transactions
     classifyTransactions(db);
 
+    // 3b. Reclassify misclassified internal transfers
+    reclassifyTransfers(db);
+
     // 4. Update sync timestamp
     db.prepare(
       `INSERT OR REPLACE INTO mercury_sync_state (key, value, updated_at) VALUES ('last_sync', datetime('now'), datetime('now'))`
@@ -152,9 +155,17 @@ const REVENUE_KEYWORDS = [
 
 function classifyTransactions(db: Database.Database): void {
   const unclassified = db.prepare(
-    `SELECT id, counterparty_name, kind, amount, note, bank_description
+    `SELECT id, counterparty_name, kind, amount, note, bank_description, mercury_category
      FROM mercury_transactions WHERE category = 'other' OR category IS NULL`
   ).all() as any[];
+
+  // Build set of Mercury account names for internal transfer detection
+  const accountNames = new Set<string>();
+  const accounts = db.prepare('SELECT name, nickname FROM mercury_accounts').all() as any[];
+  for (const a of accounts) {
+    if (a.name) accountNames.add(a.name.toLowerCase());
+    if (a.nickname) accountNames.add(a.nickname.toLowerCase());
+  }
 
   const update = db.prepare(
     `UPDATE mercury_transactions SET category = ? WHERE id = ?`
@@ -166,21 +177,45 @@ function classifyTransactions(db: Database.Database): void {
       const note = (t.note || '').toLowerCase();
       const desc = (t.bank_description || '').toLowerCase();
       const combined = `${name} ${note} ${desc}`;
+      const kind = (t.kind || '').toLowerCase();
 
       let category = 'operating';
 
-      if (TITLE_COMPANY_KEYWORDS.some(kw => name.includes(kw))) {
-        category = t.amount < 0 ? 'closing_cost' : 'revenue';
-      } else if (FUNDER_KEYWORDS.some(kw => name.includes(kw))) {
-        category = t.amount > 0 ? 'funding_in' : 'funding_out';
-      } else if (combined.includes('earnest') || combined.includes('emd')) {
-        category = 'emd';
-      } else if (t.amount > 0 && REVENUE_KEYWORDS.some(kw => combined.includes(kw))) {
-        category = 'revenue';
-      } else if (t.amount > 0) {
-        category = 'revenue';
-      } else if (name.includes('payroll') || (t as any).mercury_category === 'Payroll') {
+      // 1. Internal transfers between Mercury accounts — exclude from P&L
+      if (
+        kind === 'internaltransfer' ||
+        kind === 'internal_transfer' ||
+        combined.includes('transfer in') ||
+        combined.includes('transfer out') ||
+        name.startsWith('from ') ||
+        name.startsWith('to ') ||
+        accountNames.has(name)
+      ) {
+        category = 'transfer';
+      }
+      // 2. Payroll (check before catch-all since payroll is always negative)
+      else if (name.includes('payroll') || t.mercury_category === 'Payroll' || combined.includes('payroll')) {
         category = 'payroll';
+      }
+      // 3. Title companies
+      else if (TITLE_COMPANY_KEYWORDS.some(kw => name.includes(kw))) {
+        category = t.amount < 0 ? 'closing_cost' : 'revenue';
+      }
+      // 4. Funders
+      else if (FUNDER_KEYWORDS.some(kw => name.includes(kw))) {
+        category = t.amount > 0 ? 'funding_in' : 'funding_out';
+      }
+      // 5. Earnest money
+      else if (combined.includes('earnest') || combined.includes('emd')) {
+        category = 'emd';
+      }
+      // 6. Explicit revenue signals
+      else if (t.amount > 0 && REVENUE_KEYWORDS.some(kw => combined.includes(kw))) {
+        category = 'revenue';
+      }
+      // 7. Positive amounts default to revenue (but NOT transfers — handled above)
+      else if (t.amount > 0) {
+        category = 'revenue';
       }
 
       update.run(category, t.id);
@@ -188,6 +223,53 @@ function classifyTransactions(db: Database.Database): void {
   });
 
   classify();
+}
+
+/** Reclassify already-classified transactions that are actually internal transfers */
+function reclassifyTransfers(db: Database.Database): void {
+  // Get Mercury account names to detect internal transfers
+  const accounts = db.prepare('SELECT name, nickname FROM mercury_accounts').all() as any[];
+  const accountNames = new Set<string>();
+  for (const a of accounts) {
+    if (a.name) accountNames.add(a.name.toLowerCase());
+    if (a.nickname) accountNames.add(a.nickname.toLowerCase());
+  }
+  if (accountNames.size === 0) return;
+
+  // Find transactions not yet tagged as 'transfer' that look like internal transfers
+  const candidates = db.prepare(
+    `SELECT id, counterparty_name, kind, bank_description, note
+     FROM mercury_transactions WHERE COALESCE(category, '') != 'transfer'`
+  ).all() as any[];
+
+  const update = db.prepare('UPDATE mercury_transactions SET category = ? WHERE id = ?');
+  let count = 0;
+
+  const reclassify = db.transaction(() => {
+    for (const t of candidates) {
+      const name = (t.counterparty_name || '').toLowerCase();
+      const kind = (t.kind || '').toLowerCase();
+      const combined = `${name} ${(t.note || '').toLowerCase()} ${(t.bank_description || '').toLowerCase()}`;
+
+      if (
+        kind === 'internaltransfer' ||
+        kind === 'internal_transfer' ||
+        combined.includes('transfer in') ||
+        combined.includes('transfer out') ||
+        name.startsWith('from ') ||
+        name.startsWith('to ') ||
+        accountNames.has(name)
+      ) {
+        update.run('transfer', t.id);
+        count++;
+      }
+    }
+  });
+
+  reclassify();
+  if (count > 0) {
+    console.log(`[MercurySync] Reclassified ${count} internal transfers`);
+  }
 }
 
 // ---- Accounting Category Mapping ----
@@ -201,6 +283,7 @@ export const ACCOUNTING_CATEGORIES: Record<string, { section: string; subcategor
   payroll:       { section: 'OPERATING_EXPENSES', subcategory: 'Payroll & Contractors',    glCode: '62000' },
   operating:     { section: 'OPERATING_EXPENSES', subcategory: 'General & Admin',          glCode: '65000' },
   other:         { section: 'OPERATING_EXPENSES', subcategory: 'Uncategorized',            glCode: '69000' },
+  transfer:      { section: 'TRANSFER',           subcategory: 'Internal Transfers',       glCode: '00000' },
 };
 
 const SECTION_ORDER = ['REVENUE', 'COST_OF_REVENUE', 'OPERATING_EXPENSES'];
@@ -257,7 +340,7 @@ export function getSummary(db: Database.Database): {
   const accounts = getAccounts(db);
   const totalBalance = accounts.reduce((sum: number, a: any) => sum + (a.current_balance || 0), 0);
 
-  // Last 30 days income/expense
+  // Last 30 days income/expense (exclude internal transfers)
   const inOut = db.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_in,
@@ -266,15 +349,17 @@ export function getSummary(db: Database.Database): {
     FROM mercury_transactions
     WHERE posted_at >= datetime('now', '-30 days')
       AND status NOT IN ('failed', 'cancelled')
+      AND COALESCE(category, '') != 'transfer'
   `).get() as any;
 
-  // Monthly burn = average monthly outflow over last 90 days
+  // Monthly burn = average monthly outflow over last 90 days (exclude transfers)
   const burn90 = db.prepare(`
     SELECT COALESCE(SUM(ABS(amount)), 0) as total_out
     FROM mercury_transactions
     WHERE amount < 0
       AND posted_at >= datetime('now', '-90 days')
       AND status NOT IN ('failed', 'cancelled')
+      AND COALESCE(category, '') != 'transfer'
   `).get() as any;
 
   const monthlyBurn = (burn90?.total_out || 0) / 3;
@@ -306,6 +391,7 @@ export function getMonthlySpend(db: Database.Database, months = 6): any[] {
     FROM mercury_transactions
     WHERE posted_at >= datetime('now', '-' || ? || ' months')
       AND status NOT IN ('failed', 'cancelled')
+      AND COALESCE(category, '') != 'transfer'
     GROUP BY strftime('%Y-%m', posted_at)
     ORDER BY month
   `).all(months);
@@ -338,6 +424,7 @@ export function getMonthlyPL(db: Database.Database, months = 6): any {
     FROM mercury_transactions
     WHERE posted_at >= datetime('now', '-' || ? || ' months')
       AND status NOT IN ('failed', 'cancelled')
+      AND COALESCE(category, '') != 'transfer'
     GROUP BY month, category
     ORDER BY month
   `).all(months) as any[];
