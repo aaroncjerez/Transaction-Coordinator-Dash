@@ -71,7 +71,7 @@ export const CfoCli: React.FC<Props> = ({ context }) => {
       <div className="px-4 py-2.5 border-b border-[#30363d] flex items-center gap-2">
         <Terminal size={13} className="text-emerald-400" />
         <span className="text-xs font-semibold text-white">Ask your CFO</span>
-        <span className="text-[10px] text-slate-600 ml-auto">Claude · Financial context attached</span>
+        <span className="text-[10px] text-slate-600 ml-auto">Claude · Mercury · FUB · Airtable</span>
       </div>
 
       {/* Messages */}
@@ -100,7 +100,7 @@ export const CfoCli: React.FC<Props> = ({ context }) => {
               <div className="w-5 h-5 rounded bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
                 <Loader2 size={10} className="text-emerald-400 animate-spin" />
               </div>
-              <p className="text-xs text-slate-500">Thinking...</p>
+              <p className="text-xs text-slate-500">Querying systems...</p>
             </div>
           )}
         </div>

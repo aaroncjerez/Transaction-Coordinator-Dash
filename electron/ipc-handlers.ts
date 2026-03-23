@@ -1822,34 +1822,201 @@ Provide your analysis in JSON format:
       const apiKey = setting?.value || process.env.ANTHROPIC_API_KEY;
       if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured. Set it in Settings.');
 
+      const fubKey = process.env.FUB_API_KEY?.trim();
+      const fubAuth = fubKey ? 'Basic ' + Buffer.from(fubKey + ':').toString('base64') : '';
+      const airtableKey = process.env.AIRTABLE_API_KEY?.trim();
+
       const client = new Anthropic({ apiKey });
+
+      const tools: any[] = [
+        {
+          name: 'query_mercury_transactions',
+          description: 'Search Mercury bank transactions. Returns recent transactions optionally filtered by category or date range.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              days: { type: 'number', description: 'Number of days back to search (default 30)' },
+              category: { type: 'string', description: 'Filter by category: revenue, closing_cost, emd, funding_in, funding_out, payroll, operating, transfer' },
+              limit: { type: 'number', description: 'Max results (default 50)' },
+            },
+          },
+        },
+        {
+          name: 'query_mercury_summary',
+          description: 'Get current Mercury bank summary: total balance, burn rate, runway, 30-day income/expenses, account list.',
+          input_schema: { type: 'object' as const, properties: {} },
+        },
+        {
+          name: 'query_fub_deals',
+          description: 'Get all deals from Follow Up Boss CRM pipeline. Returns active and closed deals with buy price, profit, stage, close date.',
+          input_schema: { type: 'object' as const, properties: {} },
+        },
+        {
+          name: 'query_fub_people',
+          description: 'Search for people/contacts in Follow Up Boss CRM by name, email, phone, or stage.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              search: { type: 'string', description: 'Search term (name, email, phone)' },
+              stage: { type: 'string', description: 'Filter by pipeline stage' },
+              limit: { type: 'number', description: 'Max results (default 20)' },
+            },
+          },
+        },
+        {
+          name: 'query_airtable_records',
+          description: 'Query Airtable Land Pricing table. Use for parcel data, pricing, deal pipeline tracking.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              filterFormula: { type: 'string', description: 'Airtable filter formula (e.g. "{Status}=\'Active\'")' },
+              maxRecords: { type: 'number', description: 'Max records (default 20)' },
+            },
+          },
+        },
+        {
+          name: 'query_monthly_pl',
+          description: 'Get monthly Profit & Loss statement from Mercury data. Shows revenue, COGS, operating expenses, and net income by month.',
+          input_schema: {
+            type: 'object' as const,
+            properties: {
+              months: { type: 'number', description: 'Number of months (default 6)' },
+            },
+          },
+        },
+      ];
+
+      // Tool execution function
+      async function executeTool(name: string, input: any): Promise<string> {
+        try {
+          switch (name) {
+            case 'query_mercury_transactions': {
+              const { getTransactions } = require('./mercury-sync.js');
+              const txns = getTransactions(db, {
+                days: input.days || 30,
+                category: input.category,
+                limit: input.limit || 50,
+              });
+              return JSON.stringify(txns.map((t: any) => ({
+                date: t.posted_at?.slice(0, 10),
+                counterparty: t.counterparty_name,
+                amount: t.amount,
+                category: t.category,
+                kind: t.kind,
+              })));
+            }
+            case 'query_mercury_summary': {
+              const { getSummary } = require('./mercury-sync.js');
+              const s = getSummary(db);
+              return JSON.stringify({
+                totalBalance: s.totalBalance,
+                monthlyBurn: s.monthlyBurn,
+                runway: s.runway,
+                last30DaysIn: s.last30DaysIn,
+                last30DaysOut: s.last30DaysOut,
+                accounts: s.accounts.map((a: any) => ({ name: a.name, balance: a.current_balance, kind: a.kind })),
+              });
+            }
+            case 'query_fub_deals': {
+              if (!fubAuth) return JSON.stringify({ error: 'FUB_API_KEY not configured' });
+              const res = await fetch('https://api.followupboss.com/v1/deals?limit=100', {
+                headers: { Authorization: fubAuth },
+              });
+              if (!res.ok) return JSON.stringify({ error: `FUB API ${res.status}` });
+              const data = await res.json();
+              return JSON.stringify((data.deals || []).map((d: any) => ({
+                name: d.name, stage: d.stageName, status: d.status,
+                buyPrice: d.price, profit: d.commissionValue,
+                closeDate: d.projectedCloseDate, strategy: d.customExitStrategy,
+              })));
+            }
+            case 'query_fub_people': {
+              if (!fubAuth) return JSON.stringify({ error: 'FUB_API_KEY not configured' });
+              let url = `https://api.followupboss.com/v1/people?limit=${input.limit || 20}`;
+              if (input.search) url += `&search=${encodeURIComponent(input.search)}`;
+              if (input.stage) url += `&stage=${encodeURIComponent(input.stage)}`;
+              const res = await fetch(url, { headers: { Authorization: fubAuth } });
+              if (!res.ok) return JSON.stringify({ error: `FUB API ${res.status}` });
+              const data = await res.json();
+              return JSON.stringify((data.people || []).map((p: any) => ({
+                name: `${p.firstName || ''} ${p.lastName || ''}`.trim(),
+                stage: p.stage, email: p.emails?.[0]?.value,
+                phone: p.phones?.[0]?.value, created: p.created,
+              })));
+            }
+            case 'query_airtable_records': {
+              if (!airtableKey) return JSON.stringify({ error: 'AIRTABLE_API_KEY not configured' });
+              let url = `https://api.airtable.com/v0/appASpAOe1qaXiH84/tbl3fAQ8fb5wI9eP6?maxRecords=${input.maxRecords || 20}`;
+              if (input.filterFormula) url += `&filterByFormula=${encodeURIComponent(input.filterFormula)}`;
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${airtableKey}` } });
+              if (!res.ok) return JSON.stringify({ error: `Airtable API ${res.status}` });
+              const data = await res.json();
+              return JSON.stringify((data.records || []).map((r: any) => ({ id: r.id, ...r.fields })));
+            }
+            case 'query_monthly_pl': {
+              const { getMonthlyPL } = require('./mercury-sync.js');
+              const pl = getMonthlyPL(db, input.months || 6);
+              return JSON.stringify(pl);
+            }
+            default:
+              return JSON.stringify({ error: `Unknown tool: ${name}` });
+          }
+        } catch (err: any) {
+          return JSON.stringify({ error: err.message });
+        }
+      }
 
       const systemPrompt = `You are the CFO of Jerez Land LLC, a real estate company that buys vacant land at a discount and flips it for profit.
 
-Here is the current financial snapshot:
-- Cash on hand: $${(context.totalBalance || 0).toLocaleString()}
-- Monthly burn: $${(context.monthlyBurn || 0).toLocaleString()}
-- Runway: ${context.runway >= 99 ? 'Infinite' : `${(context.runway || 0).toFixed(1)} months`}
-- Last 30 days in: $${(context.last30DaysIn || 0).toLocaleString()}
-- Last 30 days out: $${(context.last30DaysOut || 0).toLocaleString()}
-- Active deals: ${context.activeDealsCount || 0} (pipeline profit: $${(context.pipelineProfit || 0).toLocaleString()})
-- Closed deals: ${context.closedDealsCount || 0} (realized profit: $${(context.closedProfit || 0).toLocaleString()})
+You have access to live data from:
+- **Mercury** (bank accounts, transactions, P&L)
+- **Follow Up Boss** (CRM deals, contacts, pipeline)
+- **Airtable** (land pricing, parcel data)
 
-Active deal details:
-${context.dealsList || 'None'}
+Use tools to look up data before answering. Be specific with numbers. Be direct and concise.
 
-Answer concisely as a CFO. Use specific numbers. Be direct.`;
+Current snapshot for quick reference:
+- Cash: $${(context.totalBalance || 0).toLocaleString()}
+- Burn: $${(context.monthlyBurn || 0).toLocaleString()}/mo
+- Active deals: ${context.activeDealsCount || 0}
+- Pipeline profit: $${(context.pipelineProfit || 0).toLocaleString()}`;
 
-      const msg = await client.messages.create({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 600,
-        temperature: 0.3,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: question }],
-      });
+      // Agentic tool-use loop (max 5 iterations)
+      let messages: any[] = [{ role: 'user', content: question }];
 
-      const textBlock = msg.content.find((b) => b.type === 'text') as { type: 'text'; text: string } | undefined;
-      return { answer: textBlock?.text || 'No response generated.' };
+      for (let i = 0; i < 5; i++) {
+        const response = await client.messages.create({
+          model: 'claude-sonnet-4-5-20250929',
+          max_tokens: 1024,
+          temperature: 0.3,
+          system: systemPrompt,
+          tools,
+          messages,
+        });
+
+        // If no tool use, extract final text
+        if (response.stop_reason === 'end_turn' || !response.content.some(b => b.type === 'tool_use')) {
+          const textBlock = response.content.find(b => b.type === 'text') as { type: 'text'; text: string } | undefined;
+          return { answer: textBlock?.text || 'No response generated.' };
+        }
+
+        // Process tool calls
+        messages.push({ role: 'assistant', content: response.content });
+        const toolResults: any[] = [];
+        for (const block of response.content) {
+          if (block.type === 'tool_use') {
+            const result = await executeTool(block.name, block.input);
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result,
+            });
+          }
+        }
+        messages.push({ role: 'user', content: toolResults });
+      }
+
+      return { answer: 'Reached maximum tool iterations. Please try a simpler question.' };
     } catch (error: any) {
       console.error('[CFO] Error answering question:', error);
       return { answer: `Error: ${error?.message || 'Failed to get answer'}` };
