@@ -41,8 +41,8 @@ export const TransactionsTable: React.FC<Props> = ({ transactions }) => {
   };
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+      <div className="px-5 py-4 border-b border-[#30363d] flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">Recent Transactions</h3>
         <div className="flex items-center gap-2">
           <Filter size={14} className="text-slate-500" />
@@ -59,7 +59,7 @@ export const TransactionsTable: React.FC<Props> = ({ transactions }) => {
       </div>
       <div className="max-h-[400px] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#1a1a2e]">
+          <thead className="sticky top-0 bg-[#161b22]">
             <tr className="text-xs text-slate-500 uppercase tracking-wider">
               <th className="text-left px-5 py-2.5">Date</th>
               <th className="text-left px-3 py-2.5">Counterparty</th>

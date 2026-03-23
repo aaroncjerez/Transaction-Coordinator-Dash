@@ -164,6 +164,8 @@ export interface ElectronAPI {
     syncNow: () => Promise<{ accounts: number; transactions: number; error?: string }>;
     getActiveDealPipeline: () => Promise<{ active: any[]; closed: any[] }>;
     getMonthlyCashflow: () => Promise<any[]>;
+    getMonthlyPL: (months?: number) => Promise<any>;
+    getSparklineData: () => Promise<any>;
   };
 
   reminders: {

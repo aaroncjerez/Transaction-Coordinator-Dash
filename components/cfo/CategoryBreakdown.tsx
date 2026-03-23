@@ -40,7 +40,7 @@ export const CategoryBreakdown: React.FC<Props> = ({ data }) => {
   }
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-5">
       <h3 className="text-sm font-semibold text-white mb-4">Spending by Category (30d)</h3>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={chartData} layout="vertical">

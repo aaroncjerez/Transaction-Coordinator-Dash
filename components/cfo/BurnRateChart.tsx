@@ -28,7 +28,7 @@ export const BurnRateChart: React.FC<Props> = ({ data }) => {
 
   if (chartData.length === 0) {
     return (
-      <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+      <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-5">
         <h3 className="text-sm font-semibold text-white mb-4">Monthly Cash Flow</h3>
         <p className="text-slate-500 text-sm text-center py-8">No data yet — sync transactions first</p>
       </div>
@@ -36,7 +36,7 @@ export const BurnRateChart: React.FC<Props> = ({ data }) => {
   }
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-5">
       <h3 className="text-sm font-semibold text-white mb-4">Monthly Cash Flow</h3>
       <ResponsiveContainer width="100%" height={220}>
         <AreaChart data={chartData}>

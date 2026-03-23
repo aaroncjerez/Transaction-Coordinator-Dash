@@ -16,7 +16,7 @@ interface Props {
 
 export const AccountsList: React.FC<Props> = ({ accounts }) => {
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-5">
       <h3 className="text-sm font-semibold text-white mb-4">Mercury Accounts</h3>
       <div className="space-y-2">
         {accounts.map((a) => (

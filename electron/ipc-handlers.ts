@@ -1854,6 +1854,16 @@ Provide your analysis in JSON format:
     });
   });
 
+  ipcMain.handle('mercury:getMonthlyPL', (_e: any, months?: number) => {
+    const { getMonthlyPL } = require('./mercury-sync.js');
+    return getMonthlyPL(db, months || 6);
+  });
+
+  ipcMain.handle('mercury:getSparklineData', () => {
+    const { getSparklineData } = require('./mercury-sync.js');
+    return getSparklineData(db);
+  });
+
   ipcMain.handle('mercury:syncNow', async () => {
     const { syncNow } = await import('./mercury-sync.js');
     return syncNow();

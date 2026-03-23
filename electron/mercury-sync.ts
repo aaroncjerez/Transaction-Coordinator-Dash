@@ -190,6 +190,26 @@ function classifyTransactions(db: Database.Database): void {
   classify();
 }
 
+// ---- Accounting Category Mapping ----
+
+export const ACCOUNTING_CATEGORIES: Record<string, { section: string; subcategory: string; glCode: string }> = {
+  revenue:       { section: 'REVENUE',            subcategory: 'Transaction Revenue',      glCode: '42000' },
+  funding_in:    { section: 'REVENUE',            subcategory: 'Funding Proceeds',         glCode: '42100' },
+  closing_cost:  { section: 'COST_OF_REVENUE',    subcategory: 'Closing Costs',            glCode: '51000' },
+  emd:           { section: 'COST_OF_REVENUE',    subcategory: 'Earnest Money Deposits',   glCode: '51100' },
+  funding_out:   { section: 'COST_OF_REVENUE',    subcategory: 'Funding Repayments',       glCode: '51200' },
+  payroll:       { section: 'OPERATING_EXPENSES', subcategory: 'Payroll & Contractors',    glCode: '62000' },
+  operating:     { section: 'OPERATING_EXPENSES', subcategory: 'General & Admin',          glCode: '65000' },
+  other:         { section: 'OPERATING_EXPENSES', subcategory: 'Uncategorized',            glCode: '69000' },
+};
+
+const SECTION_ORDER = ['REVENUE', 'COST_OF_REVENUE', 'OPERATING_EXPENSES'];
+const SECTION_LABELS: Record<string, string> = {
+  REVENUE: 'REVENUE',
+  COST_OF_REVENUE: 'COST OF REVENUE',
+  OPERATING_EXPENSES: 'OPERATING EXPENSES',
+};
+
 // ---- Query Functions (called from IPC handlers) ----
 
 export function getAccounts(db: Database.Database): any[] {
@@ -305,4 +325,100 @@ export function getCategoryBreakdown(db: Database.Database, days = 30): any[] {
     GROUP BY category
     ORDER BY total_out DESC
   `).all(days);
+}
+
+export function getMonthlyPL(db: Database.Database, months = 6): any {
+  const rows = db.prepare(`
+    SELECT
+      strftime('%Y-%m', posted_at) as month,
+      category,
+      COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_in,
+      COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_out,
+      COUNT(*) as count
+    FROM mercury_transactions
+    WHERE posted_at >= datetime('now', '-' || ? || ' months')
+      AND status NOT IN ('failed', 'cancelled')
+    GROUP BY month, category
+    ORDER BY month
+  `).all(months) as any[];
+
+  // Build unique sorted month list
+  const monthSet = new Set<string>();
+  rows.forEach(r => monthSet.add(r.month));
+  const monthList = [...monthSet].sort();
+  const monthIdx = Object.fromEntries(monthList.map((m, i) => [m, i]));
+  const n = monthList.length;
+
+  // Build sections
+  const sectionData: Record<string, Record<string, number[]>> = {};
+  for (const sec of SECTION_ORDER) sectionData[sec] = {};
+
+  for (const row of rows) {
+    const cat = ACCOUNTING_CATEGORIES[row.category] || ACCOUNTING_CATEGORIES.other;
+    if (!sectionData[cat.section][cat.subcategory]) {
+      sectionData[cat.section][cat.subcategory] = new Array(n).fill(0);
+    }
+    const idx = monthIdx[row.month];
+    // Revenue sections use total_in, expense sections use total_out (as positive numbers)
+    if (cat.section === 'REVENUE') {
+      sectionData[cat.section][cat.subcategory][idx] += row.total_in;
+    } else {
+      sectionData[cat.section][cat.subcategory][idx] += row.total_out;
+    }
+  }
+
+  const sections = SECTION_ORDER.map(sec => {
+    const subcats = Object.entries(sectionData[sec]).map(([name, amounts]) => ({
+      name,
+      glCode: Object.values(ACCOUNTING_CATEGORIES).find(c => c.subcategory === name)?.glCode || '',
+      amounts,
+    }));
+    const totals = new Array(n).fill(0);
+    subcats.forEach(sc => sc.amounts.forEach((a, i) => { totals[i] += a; }));
+    return { name: SECTION_LABELS[sec] || sec, key: sec, subcategories: subcats, totals };
+  });
+
+  // Computed rows
+  const rev = sections.find(s => s.key === 'REVENUE')?.totals || new Array(n).fill(0);
+  const cogs = sections.find(s => s.key === 'COST_OF_REVENUE')?.totals || new Array(n).fill(0);
+  const opex = sections.find(s => s.key === 'OPERATING_EXPENSES')?.totals || new Array(n).fill(0);
+  const grossProfit = rev.map((r: number, i: number) => r - cogs[i]);
+  const operatingIncome = grossProfit.map((gp: number, i: number) => gp - opex[i]);
+
+  return {
+    months: monthList,
+    sections,
+    computed: { grossProfit, operatingIncome },
+  };
+}
+
+export function getSparklineData(db: Database.Database): any {
+  const rows = db.prepare(`
+    SELECT
+      date(posted_at) as day,
+      COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as income,
+      COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as spend
+    FROM mercury_transactions
+    WHERE posted_at >= datetime('now', '-90 days')
+      AND status NOT IN ('failed', 'cancelled')
+    GROUP BY date(posted_at)
+    ORDER BY day
+  `).all() as any[];
+
+  // Running balance approximation (current balance - cumulative reverse)
+  const accounts = db.prepare('SELECT COALESCE(SUM(current_balance), 0) as total FROM mercury_accounts').get() as any;
+  const currentBalance = accounts?.total || 0;
+
+  // Build cumulative cash from the end
+  let cumulative = 0;
+  const cashPoints = rows.map((r: any) => {
+    cumulative += (r.income - r.spend);
+    return { date: r.day, value: currentBalance - (cumulative) + (r.income - r.spend) };
+  });
+
+  return {
+    cash: cashPoints,
+    spend: rows.map((r: any) => ({ date: r.day, value: r.spend })),
+    revenue: rows.map((r: any) => ({ date: r.day, value: r.income })),
+  };
 }

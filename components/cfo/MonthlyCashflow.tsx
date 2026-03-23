@@ -31,7 +31,7 @@ export const MonthlyCashflow: React.FC<Props> = ({ data }) => {
 
   if (data.length === 0) {
     return (
-      <div className="bg-white/5 border border-white/10 rounded-xl p-5">
+      <div className="bg-[#161b22] border border-[#30363d] rounded-lg p-5">
         <h3 className="text-sm font-semibold text-white mb-2">Monthly Cashflow</h3>
         <p className="text-slate-500 text-sm text-center py-6">No data — sync Mercury first</p>
       </div>
@@ -43,9 +43,9 @@ export const MonthlyCashflow: React.FC<Props> = ({ data }) => {
   const canNext = selectedIdx < data.length - 1;
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
       {/* Month selector */}
-      <div className="px-5 py-3 border-b border-white/10 flex items-center justify-between">
+      <div className="px-5 py-3 border-b border-[#30363d] flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Calendar size={14} className="text-blue-400" />
           <h3 className="text-sm font-semibold text-white">Monthly Cashflow</h3>
@@ -91,7 +91,7 @@ export const MonthlyCashflow: React.FC<Props> = ({ data }) => {
         </div>
 
         {/* Mini month timeline */}
-        <div className="pt-2 border-t border-white/10">
+        <div className="pt-2 border-t border-[#30363d]">
           <div className="flex gap-1">
             {data.map((m, i) => {
               const isSelected = i === selectedIdx;

@@ -43,8 +43,8 @@ export const PipelineProfits: React.FC<Props> = ({ active, closed }) => {
   const avgClosedProfit = closed.length > 0 ? closedProfit / closed.length : 0;
 
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/10">
+    <div className="bg-[#161b22] border border-[#30363d] rounded-lg overflow-hidden">
+      <div className="px-5 py-4 border-b border-[#30363d]">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <TrendingUp size={16} className="text-emerald-400" />
@@ -74,7 +74,7 @@ export const PipelineProfits: React.FC<Props> = ({ active, closed }) => {
 
       <div className="max-h-[400px] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-[#1a1a2e]">
+          <thead className="sticky top-0 bg-[#161b22]">
             <tr className="text-[10px] text-slate-500 uppercase tracking-wider">
               <th className="text-left px-5 py-2">Deal</th>
               <th className="text-left px-3 py-2">Stage</th>

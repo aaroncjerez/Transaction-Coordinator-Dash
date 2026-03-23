@@ -427,6 +427,14 @@ export async function fetchMonthlyCashflow(): Promise<any[]> {
   return api.mercury.getMonthlyCashflow();
 }
 
+export async function fetchMonthlyPL(months?: number): Promise<any> {
+  return api.mercury.getMonthlyPL(months);
+}
+
+export async function fetchSparklineData(): Promise<any> {
+  return api.mercury.getSparklineData();
+}
+
 // ---- AI Dialer ----
 
 export async function fetchDialerCallQueue(limit?: number): Promise<any[]> {
