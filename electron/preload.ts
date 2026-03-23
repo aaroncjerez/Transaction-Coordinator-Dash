@@ -226,6 +226,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cfo: {
     getInsights: (data: any) =>
       ipcRenderer.invoke('cfo:getInsights', data),
+    askQuestion: (params: { question: string; context: any }) =>
+      ipcRenderer.invoke('cfo:askQuestion', params),
   },
 
   mercury: {

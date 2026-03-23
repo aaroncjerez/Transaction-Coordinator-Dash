@@ -391,6 +391,10 @@ export async function getCfoInsights(data: any): Promise<any> {
   return api.cfo.getInsights(data);
 }
 
+export async function askCfoQuestion(question: string, context: any): Promise<{ answer: string }> {
+  return api.cfo.askQuestion({ question, context });
+}
+
 // ---- Mercury Bank ----
 
 export async function fetchMercuryAccounts(): Promise<any[]> {

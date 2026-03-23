@@ -144,6 +144,7 @@ export interface ElectronAPI {
       monthlyTrend: string;
       generatedAt: string;
     }>;
+    askQuestion: (params: { question: string; context: any }) => Promise<{ answer: string }>;
   };
 
   mercury: {

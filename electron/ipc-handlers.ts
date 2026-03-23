@@ -1815,6 +1815,47 @@ Provide your analysis in JSON format:
     }
   });
 
+  ipcMain.handle('cfo:askQuestion', async (_event, { question, context }: { question: string; context: any }) => {
+    try {
+      const Anthropic = (await import('@anthropic-ai/sdk')).default;
+      const setting = db.prepare("SELECT value FROM settings WHERE key = 'anthropic_api_key'").get() as any;
+      const apiKey = setting?.value || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured. Set it in Settings.');
+
+      const client = new Anthropic({ apiKey });
+
+      const systemPrompt = `You are the CFO of Jerez Land LLC, a real estate company that buys vacant land at a discount and flips it for profit.
+
+Here is the current financial snapshot:
+- Cash on hand: $${(context.totalBalance || 0).toLocaleString()}
+- Monthly burn: $${(context.monthlyBurn || 0).toLocaleString()}
+- Runway: ${context.runway >= 99 ? 'Infinite' : `${(context.runway || 0).toFixed(1)} months`}
+- Last 30 days in: $${(context.last30DaysIn || 0).toLocaleString()}
+- Last 30 days out: $${(context.last30DaysOut || 0).toLocaleString()}
+- Active deals: ${context.activeDealsCount || 0} (pipeline profit: $${(context.pipelineProfit || 0).toLocaleString()})
+- Closed deals: ${context.closedDealsCount || 0} (realized profit: $${(context.closedProfit || 0).toLocaleString()})
+
+Active deal details:
+${context.dealsList || 'None'}
+
+Answer concisely as a CFO. Use specific numbers. Be direct.`;
+
+      const msg = await client.messages.create({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 600,
+        temperature: 0.3,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: question }],
+      });
+
+      const textBlock = msg.content.find((b) => b.type === 'text') as { type: 'text'; text: string } | undefined;
+      return { answer: textBlock?.text || 'No response generated.' };
+    } catch (error: any) {
+      console.error('[CFO] Error answering question:', error);
+      return { answer: `Error: ${error?.message || 'Failed to get answer'}` };
+    }
+  });
+
   // ===== MERCURY BANK =====
 
   ipcMain.handle('mercury:getAccounts', () => {

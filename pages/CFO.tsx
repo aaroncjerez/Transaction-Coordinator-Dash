@@ -22,6 +22,7 @@ import { CategoryBreakdown } from '../components/cfo/CategoryBreakdown';
 import { PipelineProfits } from '../components/cfo/PipelineProfits';
 import { MonthlyCashflow } from '../components/cfo/MonthlyCashflow';
 import { ProfitLossStatement } from '../components/cfo/ProfitLossStatement';
+import { CfoCli } from '../components/cfo/CfoCli';
 
 type Tab = 'insights' | 'statements';
 
@@ -327,6 +328,24 @@ export const CFO: React.FC = () => {
                   <CategoryBreakdown data={categories} />
                 </div>
               </div>
+
+              {/* CFO CLI */}
+              {summary && (
+                <CfoCli context={{
+                  totalBalance: summary.totalBalance,
+                  monthlyBurn: summary.monthlyBurn,
+                  runway: summary.runway,
+                  last30DaysIn: summary.last30DaysIn,
+                  last30DaysOut: summary.last30DaysOut,
+                  activeDealsCount: pipeline.active.length,
+                  closedDealsCount: pipeline.closed.length,
+                  pipelineProfit,
+                  closedProfit: pipeline.closed.reduce((s: number, d: any) => s + (d.profit || 0), 0),
+                  dealsList: pipeline.active.map((d: any) =>
+                    `- ${d.name} (${d.stage}): Buy $${(d.buy_price || 0).toLocaleString()}, Profit $${(d.profit || 0).toLocaleString()}${d.close_date ? `, Close ${d.close_date.slice(0, 10)}` : ''}`
+                  ).join('\n'),
+                }} />
+              )}
             </>
           )}
 
